@@ -1,0 +1,16 @@
+[decision]
+preset = "balanced"
+minimum_confidence = 0.70
+use_matchup_context = true
+protect_elite_upside = true
+
+[notifications]
+daily_summary = true
+injury_alerts = true
+quiet_hours_start = "23:00"
+quiet_hours_end = "07:00"
+urgent_actions_override_quiet_hours = true
+
+[players]
+protected_sleeper_ids = []
+mapping_overrides = {}

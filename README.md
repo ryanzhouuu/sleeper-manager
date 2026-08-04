@@ -26,8 +26,14 @@ Requirements:
 cp .env.example .env
 uv sync --all-groups
 uv run sleeper-manager check-config
+uv run sleeper-manager bootstrap
 uv run pytest
 ```
+
+`bootstrap` performs a read-only Sleeper synchronization, validates the discovered NBA
+Lock-In configuration, stores the local league fingerprint, and prints a sanitized summary.
+Manager decision settings are loaded from `.local/policy.toml`; copy
+`manager-policy.example.toml` there to customize the documented defaults.
 
 ## Repository layout
 
