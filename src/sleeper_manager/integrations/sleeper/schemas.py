@@ -35,7 +35,7 @@ class SleeperRosterPayload(BaseModel):
     owner_id: str | None = None
     players: list[str] = Field(default_factory=list)
     starters: list[str] = Field(default_factory=list)
-    reserve: list[str] = Field(default_factory=list)
+    reserve: list[str] | None = None
 
 
 class SleeperStatePayload(BaseModel):

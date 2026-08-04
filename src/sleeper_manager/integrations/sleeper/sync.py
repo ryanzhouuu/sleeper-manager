@@ -66,7 +66,7 @@ class LeagueSyncResult:
     previous_fingerprint: str | None
 
 
-_SUPPORTED_ROSTER_SLOTS = frozenset({"G", "F", "C", "UTIL", "BN", "IR"})
+_SUPPORTED_ROSTER_SLOTS = frozenset({"PG", "SG", "G", "SF", "PF", "F", "C", "UTIL", "BN", "IR"})
 _RESERVE_SLOTS = frozenset({"BN", "IR"})
 _MODE_PATHS = (
     ("mode",),
@@ -77,6 +77,7 @@ _MODE_PATHS = (
     ("settings", "league_mode"),
     ("settings", "type"),
 )
+_NUMERIC_MODE_PATHS = frozenset({("game_mode",), ("settings", "game_mode")})
 
 
 def _parse_payload[ModelT: BaseModel](
@@ -106,6 +107,13 @@ def _parse_mode(payload: Mapping[str, Any]) -> LeagueMode:
         found_paths.append(".".join(path))
         if isinstance(value, bool) and value:
             return LeagueMode.LOCK_IN
+        if (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and path in _NUMERIC_MODE_PATHS
+            and value == 1
+        ):
+            return LeagueMode.LOCK_IN
         if isinstance(value, str):
             normalized = value.casefold().replace("-", "_").replace(" ", "_")
             if normalized in {"lock_in", "lockin"}:
@@ -133,13 +141,13 @@ def _parse_slots(values: list[str]) -> tuple[RosterSlot, ...]:
 
 
 def _ids(values: list[str]) -> tuple[str, ...]:
-    return tuple(value.strip() for value in values if value.strip())
+    return tuple(value.strip() for value in values if value.strip() and value.strip() != "0")
 
 
 def _parse_roster(payload: SleeperRosterPayload) -> Roster:
     players = _ids(payload.players)
     starters = _ids(payload.starters)
-    reserve = _ids(payload.reserve)
+    reserve = _ids(payload.reserve or [])
     if not set(starters).issubset(players):
         missing = sorted(set(starters) - set(players))
         raise LeagueCompatibilityError(
@@ -200,13 +208,22 @@ def _parse_week(
     season: str,
     season_type: str,
 ) -> FantasyWeek:
-    week = state.week or state.leg or state.display_week
-    if week is None or week < 1:
+    week = next(
+        (value for value in (state.week, state.leg, state.display_week) if value is not None),
+        None,
+    )
+    if week is None or week < 0:
         raise LeagueCompatibilityError("Sleeper NBA state does not contain a valid fantasy week")
+    resolved_season_type = state.season_type or season_type
+    if week == 0 and resolved_season_type not in {"off", "pre"}:
+        raise LeagueCompatibilityError(
+            "Sleeper NBA state reported week 0 with unsupported season type "
+            f"{resolved_season_type!r}"
+        )
     return FantasyWeek(
         week=week,
         season=state.season or season,
-        season_type=state.season_type or season_type,
+        season_type=resolved_season_type,
     )
 
 
@@ -289,7 +306,11 @@ class LeagueSynchronizationService:
 
         state = _parse_payload(SleeperStatePayload, raw_state, "NBA state")
         fantasy_week = _parse_week(state, season=league.season, season_type=league.season_type)
-        raw_transactions = await self._sleeper.transactions(league_id, fantasy_week.week)
+        raw_transactions = (
+            await self._sleeper.transactions(league_id, fantasy_week.week)
+            if fantasy_week.week > 0
+            else []
+        )
         transactions = tuple(
             _parse_transaction(_parse_payload(SleeperTransactionPayload, payload, "transaction"))
             for payload in raw_transactions

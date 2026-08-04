@@ -98,6 +98,80 @@ def test_sync_replays_previous_league_fixture() -> None:
 
 
 @respx.mock
+def test_sync_treats_null_reserve_as_empty() -> None:
+    rosters = fixture("rosters.json")
+    rosters[0]["reserve"] = None
+    route_league(fixture("current_league.json"), rosters=rosters)
+
+    async def run() -> Any:
+        async with SleeperClient() as sleeper:
+            return await LeagueSynchronizationService(sleeper).sync(
+                league_id="league-current", user_id="user-manager"
+            )
+
+    result = asyncio.run(run())
+
+    assert result.profile.rosters[0].reserve_ids == ()
+
+
+@respx.mock
+def test_sync_treats_zero_starter_as_empty() -> None:
+    rosters = fixture("rosters.json")
+    rosters[0]["starters"].append("0")
+    route_league(fixture("current_league.json"), rosters=rosters)
+
+    async def run() -> Any:
+        async with SleeperClient() as sleeper:
+            return await LeagueSynchronizationService(sleeper).sync(
+                league_id="league-current", user_id="user-manager"
+            )
+
+    result = asyncio.run(run())
+
+    assert result.profile.rosters[0].starter_ids == ("player-1", "player-2")
+
+
+@respx.mock
+def test_sync_allows_offseason_without_week_transactions() -> None:
+    route_league(fixture("current_league.json"))
+    respx.get("https://api.sleeper.app/v1/state/nba").mock(
+        return_value=httpx.Response(
+            200,
+            json={"week": 0, "leg": 0, "display_week": 0, "season_type": "off"},
+        )
+    )
+
+    async def run() -> Any:
+        async with SleeperClient() as sleeper:
+            return await LeagueSynchronizationService(sleeper).sync(
+                league_id="league-current", user_id="user-manager"
+            )
+
+    result = asyncio.run(run())
+
+    assert result.profile.fantasy_week.week == 0
+    assert result.profile.fantasy_week.season_type == "off"
+    assert result.profile.transactions == ()
+
+
+@respx.mock
+def test_sync_does_not_treat_numeric_type_as_mode() -> None:
+    league = fixture("current_league.json")
+    league["settings"]["game_mode"] = 0
+    league["settings"]["type"] = 1
+    route_league(league)
+
+    async def run() -> Any:
+        async with SleeperClient() as sleeper:
+            return await LeagueSynchronizationService(sleeper).sync(
+                league_id="league-current", user_id="user-manager"
+            )
+
+    with pytest.raises(LeagueCompatibilityError, match="verified Lock-In"):
+        asyncio.run(run())
+
+
+@respx.mock
 def test_sync_detects_changed_configuration(tmp_path) -> None:  # type: ignore[no-untyped-def]
     current = fixture("current_league.json")
     changed = fixture("current_league.json")
