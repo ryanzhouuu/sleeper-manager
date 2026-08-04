@@ -1,6 +1,11 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
+from math import isfinite
 from typing import Any
+
+
+class ScoringCompatibilityError(ValueError):
+    """Raised when a league scoring rule cannot be evaluated safely."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,22 +41,70 @@ class ScoringSettings:
 
     @classmethod
     def from_sleeper(cls, values: Mapping[str, Any]) -> "ScoringSettings":
+        supported_fields = {
+            "pts",
+            "reb",
+            "ast",
+            "stl",
+            "blk",
+            "to",
+            "tpm",
+            "dd",
+            "td",
+            "tf",
+            "ff",
+            "bonus_pt_40p",
+            "bonus_pt_50p",
+            "bonus_ast_15p",
+            "bonus_reb_20p",
+        }
+        unknown_nonzero: list[str] = []
+        for key, value in values.items():
+            if key in supported_fields:
+                continue
+            try:
+                numeric_value = float(value)
+            except (TypeError, ValueError) as error:
+                raise ScoringCompatibilityError(
+                    f"Scoring field {key!r} has a non-numeric value"
+                ) from error
+            if not isfinite(numeric_value):
+                raise ScoringCompatibilityError(f"Scoring field {key!r} is not finite")
+            if numeric_value != 0:
+                unknown_nonzero.append(key)
+
+        if unknown_nonzero:
+            fields = ", ".join(sorted(unknown_nonzero))
+            raise ScoringCompatibilityError(f"Unsupported nonzero Sleeper scoring fields: {fields}")
+
+        def number(key: str) -> float:
+            value = values.get(key, 0)
+            try:
+                result = float(value)
+            except (TypeError, ValueError) as error:
+                raise ScoringCompatibilityError(
+                    f"Scoring field {key!r} has a non-numeric value"
+                ) from error
+            if not isfinite(result):
+                raise ScoringCompatibilityError(f"Scoring field {key!r} is not finite")
+            return result
+
         return cls(
-            points=float(values.get("pts", 0)),
-            rebounds=float(values.get("reb", 0)),
-            assists=float(values.get("ast", 0)),
-            steals=float(values.get("stl", 0)),
-            blocks=float(values.get("blk", 0)),
-            turnovers=float(values.get("to", 0)),
-            three_pointers_made=float(values.get("tpm", 0)),
-            double_double=float(values.get("dd", 0)),
-            triple_double=float(values.get("td", 0)),
-            technical_foul=float(values.get("tf", 0)),
-            flagrant_foul=float(values.get("ff", 0)),
-            bonus_40_points=float(values.get("bonus_pt_40p", 0)),
-            bonus_50_points=float(values.get("bonus_pt_50p", 0)),
-            bonus_15_assists=float(values.get("bonus_ast_15p", 0)),
-            bonus_20_rebounds=float(values.get("bonus_reb_20p", 0)),
+            points=number("pts"),
+            rebounds=number("reb"),
+            assists=number("ast"),
+            steals=number("stl"),
+            blocks=number("blk"),
+            turnovers=number("to"),
+            three_pointers_made=number("tpm"),
+            double_double=number("dd"),
+            triple_double=number("td"),
+            technical_foul=number("tf"),
+            flagrant_foul=number("ff"),
+            bonus_40_points=number("bonus_pt_40p"),
+            bonus_50_points=number("bonus_pt_50p"),
+            bonus_15_assists=number("bonus_ast_15p"),
+            bonus_20_rebounds=number("bonus_reb_20p"),
         )
 
 

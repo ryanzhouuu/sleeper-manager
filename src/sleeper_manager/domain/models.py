@@ -14,7 +14,7 @@ class Player:
 @dataclass(frozen=True, slots=True)
 class Roster:
     roster_id: int
-    owner_id: str
+    owner_id: str | None
     player_ids: tuple[str, ...]
     starter_ids: tuple[str, ...]
     reserve_ids: tuple[str, ...] = ()

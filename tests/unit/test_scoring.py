@@ -1,5 +1,6 @@
 from sleeper_manager.domain.scoring import (
     BoxScoreLine,
+    ScoringCompatibilityError,
     ScoringSettings,
     calculate_fantasy_points,
 )
@@ -51,3 +52,12 @@ def test_applies_assist_bonus_and_technical_foul() -> None:
     )
 
     assert calculate_fantasy_points(line, LEAGUE_SCORING) == 50.2
+
+
+def test_rejects_unknown_nonzero_scoring_field() -> None:
+    try:
+        ScoringSettings.from_sleeper({"pts": 1, "personal_foul": 1})
+    except ScoringCompatibilityError as error:
+        assert "personal_foul" in str(error)
+    else:
+        raise AssertionError("unsupported scoring field should block bootstrap")
