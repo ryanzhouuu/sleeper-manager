@@ -1,0 +1,11 @@
+[
+  {
+    "transaction_id": "transaction-1",
+    "type": "free_agent",
+    "status": "complete",
+    "leg": 1,
+    "roster_ids": [1],
+    "adds": {"player-3": 1},
+    "drops": {"player-6": 1}
+  }
+]

@@ -32,12 +32,17 @@ class SleeperClient:
             await self._client.aclose()
 
     async def _get(self, path: str) -> Any:
-        response = await self._client.get(path)
         try:
+            response = await self._client.get(path)
             response.raise_for_status()
         except httpx.HTTPStatusError as error:
             raise SleeperAPIError(f"Sleeper returned {response.status_code} for {path}") from error
-        return response.json()
+        except httpx.HTTPError as error:
+            raise SleeperAPIError(f"Sleeper request failed for {path}") from error
+        try:
+            return response.json()
+        except ValueError as error:
+            raise SleeperAPIError(f"Sleeper returned invalid JSON for {path}") from error
 
     async def _get_object(self, path: str) -> dict[str, Any]:
         payload = await self._get(path)

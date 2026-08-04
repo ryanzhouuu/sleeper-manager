@@ -1,0 +1,16 @@
+[
+  {
+    "roster_id": 1,
+    "owner_id": "user-manager",
+    "players": ["player-1", "player-2", "player-3"],
+    "starters": ["player-1", "player-2"],
+    "reserve": ["player-3"]
+  },
+  {
+    "roster_id": 2,
+    "owner_id": "user-opponent",
+    "players": ["player-4", "player-5"],
+    "starters": ["player-4"],
+    "reserve": ["player-5"]
+  }
+]

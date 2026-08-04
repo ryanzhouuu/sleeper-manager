@@ -1,0 +1,14 @@
+[
+  {
+    "user_id": "user-manager",
+    "username": "manager",
+    "display_name": "League Manager",
+    "metadata": {"team_name": "Waikiki Waves"}
+  },
+  {
+    "user_id": "user-opponent",
+    "username": "opponent",
+    "display_name": "League Opponent",
+    "metadata": {"team_name": "Maui Suns"}
+  }
+]

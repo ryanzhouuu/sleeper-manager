@@ -2,6 +2,8 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
+from sleeper_manager.persistence.base import StoredLeagueProfile
+
 
 class SQLiteStateRepository:
     def __init__(self, path: Path) -> None:
@@ -21,6 +23,46 @@ class SQLiteStateRepository:
                     acknowledged_at TEXT NOT NULL
                 )
                 """
+            )
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS league_profiles (
+                    league_id TEXT PRIMARY KEY,
+                    fingerprint TEXT NOT NULL,
+                    retrieved_at TEXT NOT NULL
+                )
+                """
+            )
+
+    def load_profile(self, league_id: str) -> StoredLeagueProfile | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT league_id, fingerprint, retrieved_at
+                FROM league_profiles
+                WHERE league_id = ?
+                """,
+                (league_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return StoredLeagueProfile(
+            league_id=row[0],
+            fingerprint=row[1],
+            retrieved_at=datetime.fromisoformat(row[2]),
+        )
+
+    def save_profile(self, profile: StoredLeagueProfile) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO league_profiles (league_id, fingerprint, retrieved_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(league_id) DO UPDATE SET
+                    fingerprint = excluded.fingerprint,
+                    retrieved_at = excluded.retrieved_at
+                """,
+                (profile.league_id, profile.fingerprint, profile.retrieved_at.isoformat()),
             )
 
     def record_lock_acknowledgement(

@@ -1,0 +1,32 @@
+{
+  "league_id": "league-current",
+  "name": "Honolulu Hoops",
+  "sport": "nba",
+  "season": "2026",
+  "season_type": "regular",
+  "status": "in_season",
+  "total_rosters": 2,
+  "previous_league_id": "league-previous",
+  "roster_positions": ["G", "G", "F", "F", "C", "UTIL", "BN", "BN", "IR"],
+  "scoring_settings": {
+    "pts": 1,
+    "reb": 1.2,
+    "ast": 1.5,
+    "stl": 2,
+    "blk": 2,
+    "to": -1,
+    "tpm": 0.5,
+    "dd": 1,
+    "td": 2,
+    "tf": -2,
+    "ff": -2,
+    "bonus_pt_40p": 2,
+    "bonus_pt_50p": 2,
+    "bonus_ast_15p": 2,
+    "bonus_reb_20p": 2
+  },
+  "settings": {
+    "game_mode": "lock_in",
+    "type": "points"
+  }
+}
