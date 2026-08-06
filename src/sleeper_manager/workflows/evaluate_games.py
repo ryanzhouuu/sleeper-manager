@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Any
 
+from sleeper_manager.domain.nba import ProviderResult, ScheduledGame
 from sleeper_manager.integrations.nba.base import NBAProvider
 from sleeper_manager.integrations.sleeper.client import SleeperClient
 
@@ -11,7 +12,7 @@ class EvaluationSnapshot:
     league: dict[str, Any]
     rosters: list[dict[str, Any]]
     matchups: list[dict[str, Any]]
-    scoreboard: dict[str, Any]
+    scoreboard: ProviderResult[tuple[ScheduledGame, ...]]
 
 
 class EvaluateGamesWorkflow:
