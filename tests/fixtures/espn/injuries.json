@@ -1,0 +1,15 @@
+{
+  "injuries": [
+    {
+      "athlete": {"id": "espn-1", "displayName": "Nikola Jokic"},
+      "status": "Questionable",
+      "shortComment": "Knee soreness",
+      "date": "2026-08-03T18:00:00Z"
+    },
+    {
+      "athlete": {"id": "espn-2", "displayName": "Bench Player"},
+      "status": "Out",
+      "details": {"type": "Ankle", "detail": "Sprain"}
+    }
+  ]
+}

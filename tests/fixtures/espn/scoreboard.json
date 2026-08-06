@@ -1,0 +1,43 @@
+{
+  "events": [
+    {
+      "id": "game-scheduled",
+      "date": "2026-08-04T02:00:00Z",
+      "competitions": [
+        {
+          "competitors": [
+            {"id": "team-home", "homeAway": "home", "team": {"id": "team-home"}},
+            {"id": "team-away", "homeAway": "away", "team": {"id": "team-away"}}
+          ],
+          "status": {"type": {"name": "STATUS_SCHEDULED", "state": "pre", "detail": "7:00 PM"}}
+        }
+      ]
+    },
+    {
+      "id": "game-live",
+      "date": "2026-08-04T03:00:00Z",
+      "competitions": [
+        {
+          "competitors": [
+            {"id": "team-home", "homeAway": "home", "team": {"id": "team-home"}},
+            {"id": "team-away", "homeAway": "away", "team": {"id": "team-away"}}
+          ],
+          "status": {"type": {"name": "STATUS_IN_PROGRESS", "state": "in", "detail": "Q2"}}
+        }
+      ]
+    },
+    {
+      "id": "game-final",
+      "date": "2026-08-04T00:00:00Z",
+      "competitions": [
+        {
+          "competitors": [
+            {"id": "team-away", "homeAway": "away", "team": {"id": "team-away"}},
+            {"id": "team-home", "homeAway": "home", "team": {"id": "team-home"}}
+          ],
+          "status": {"type": {"name": "STATUS_FINAL", "state": "post", "completed": true}}
+        }
+      ]
+    }
+  ]
+}

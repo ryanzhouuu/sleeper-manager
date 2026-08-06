@@ -1,0 +1,41 @@
+{
+  "header": {
+    "id": "game-final",
+    "date": "2026-08-04T00:00:00Z",
+    "competitions": [
+      {
+        "competitors": [
+          {"id": "team-home", "homeAway": "home", "team": {"id": "team-home"}},
+          {"id": "team-away", "homeAway": "away", "team": {"id": "team-away"}}
+        ],
+        "status": {"type": {"name": "STATUS_FINAL", "state": "post", "completed": true}}
+      }
+    ]
+  },
+  "boxscore": {
+    "players": [
+      {
+        "team": {"id": "team-home"},
+        "statistics": [
+          {
+            "labels": ["MIN", "REB", "AST", "STL", "BLK", "TO", "3PT", "PTS"],
+            "athletes": [
+              {
+                "athlete": {"id": "espn-1", "displayName": "Nikola Jokic"},
+                "starter": true,
+                "didNotPlay": false,
+                "stats": ["34:30", "12", "10", "2", "1", "3", "2-5", "28"]
+              },
+              {
+                "athlete": {"id": "espn-2", "displayName": "Bench Player"},
+                "starter": false,
+                "didNotPlay": true,
+                "stats": ["--", "--", "--", "--", "--", "--", "--", "--"]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

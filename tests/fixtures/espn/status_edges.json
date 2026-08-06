@@ -1,0 +1,30 @@
+{
+  "events": [
+    {
+      "id": "game-postponed",
+      "date": "2026-08-04T02:00:00Z",
+      "competitions": [
+        {
+          "competitors": [
+            {"homeAway": "home", "team": {"id": "team-home"}},
+            {"homeAway": "away", "team": {"id": "team-away"}}
+          ],
+          "status": {"type": {"name": "STATUS_POSTPONED", "detail": "Postponed"}}
+        }
+      ]
+    },
+    {
+      "id": "game-canceled",
+      "date": "2026-08-04T03:00:00Z",
+      "competitions": [
+        {
+          "competitors": [
+            {"homeAway": "home", "team": {"id": "team-home"}},
+            {"homeAway": "away", "team": {"id": "team-away"}}
+          ],
+          "status": {"type": {"name": "STATUS_CANCELED", "detail": "Canceled"}}
+        }
+      ]
+    }
+  ]
+}

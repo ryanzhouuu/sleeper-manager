@@ -1,0 +1,11 @@
+{
+  "team": {"id": "team-home", "abbreviation": "DEN"},
+  "athletes": [
+    {
+      "id": "espn-1",
+      "fullName": "Nikola Jokic",
+      "active": true,
+      "team": {"id": "team-home", "abbreviation": "DEN"}
+    }
+  ]
+}
