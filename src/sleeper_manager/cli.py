@@ -3,16 +3,20 @@ import asyncio
 import sys
 from collections import Counter
 from dataclasses import fields
+from datetime import UTC, date, datetime
 
 from sleeper_manager import __version__
 from sleeper_manager.config import Settings
 from sleeper_manager.domain.league import LeagueProfile
+from sleeper_manager.integrations.nba.espn import ESPNAPIError, ESPNClient
 from sleeper_manager.integrations.sleeper.client import SleeperAPIError, SleeperClient
 from sleeper_manager.integrations.sleeper.sync import (
     LeagueBootstrapError,
     LeagueSynchronizationService,
 )
+from sleeper_manager.persistence.nba_cache import SQLiteNBADataCache
 from sleeper_manager.persistence.sqlite import SQLiteStateRepository
+from sleeper_manager.workflows.nba_diagnostics import collect_nba_diagnostics
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,6 +25,10 @@ def build_parser() -> argparse.ArgumentParser:
     subcommands = parser.add_subparsers(dest="command", required=True)
     subcommands.add_parser("check-config", help="Report whether required configuration is present")
     subcommands.add_parser("bootstrap", help="Validate and summarize the configured Sleeper league")
+    nba_data = subcommands.add_parser(
+        "check-nba-data", help="Report NBA provider health and current-roster mapping coverage"
+    )
+    nba_data.add_argument("--date", dest="game_date", help="Scoreboard date in YYYY-MM-DD format")
     return parser
 
 
@@ -83,6 +91,62 @@ async def _bootstrap(settings: Settings) -> int:
     return 0
 
 
+def _diagnostic_date(value: str | None) -> date:
+    if value is None:
+        return datetime.now(UTC).date()
+    try:
+        return date.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError("--date must use YYYY-MM-DD format") from error
+
+
+async def _check_nba_data(settings: Settings, game_date: date) -> int:
+    if not settings.sleeper_configured:
+        print(
+            "Sleeper configuration is incomplete: set SLEEPER_LEAGUE_ID and SLEEPER_USER_ID",
+            file=sys.stderr,
+        )
+        return 2
+    if settings.state_backend != "sqlite":
+        print("Phase 2 NBA diagnostics require STATE_BACKEND=sqlite", file=sys.stderr)
+        return 2
+
+    try:
+        policy = settings.load_manager_policy()
+        repository = SQLiteStateRepository(settings.sqlite_path)
+        repository.initialize()
+        SQLiteNBADataCache(settings.sqlite_path).initialize()
+        async with SleeperClient() as sleeper, ESPNClient() as nba:
+            report = await collect_nba_diagnostics(
+                sleeper,
+                nba,
+                league_id=settings.sleeper_league_id,
+                user_id=settings.sleeper_user_id,
+                game_date=game_date,
+                mapping_overrides=policy.players.mapping_overrides,
+            )
+    except (LeagueBootstrapError, SleeperAPIError, ESPNAPIError, OSError, ValueError) as error:
+        print(f"NBA diagnostics failed: {error}", file=sys.stderr)
+        return 2
+
+    print(f"NBA provider: {report.provider}")
+    for quality in report.quality_reports:
+        print(
+            f"{quality.resource}: {quality.state.value} "
+            f"({quality.record_count} records, retrieved {quality.retrieved_at.isoformat()})"
+        )
+    print(
+        f"Roster mappings: {len(report.mapping.resolved)}/{len(report.mapping.mappings)} resolved"
+    )
+    for mapping in report.mapping.unresolved:
+        print(f"Unresolved {mapping.sleeper_id}: {mapping.reason}")
+    for warning in report.mapping.warnings:
+        print(f"Warning: {warning}")
+    for failure in report.errors:
+        print(f"Error: {failure}")
+    return 0 if report.healthy else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "check-config":
@@ -95,6 +159,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "bootstrap":
         settings = Settings()
         return asyncio.run(_bootstrap(settings))
+    if args.command == "check-nba-data":
+        settings = Settings()
+        try:
+            game_date = _diagnostic_date(args.game_date)
+        except ValueError as error:
+            print(str(error), file=sys.stderr)
+            return 2
+        return asyncio.run(_check_nba_data(settings, game_date))
     return 2
 
 
