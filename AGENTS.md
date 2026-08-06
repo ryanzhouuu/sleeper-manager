@@ -15,6 +15,7 @@
 ## Git practices
 
 - Commit frequently during implementation so each commit contains one small, coherent, reviewable unit of work and the history remains easy to follow.
+- As a soft sizing target, aim for roughly 200 lines of source code and 200 lines of test code per commit when practical; coherence and a passing change take precedence over the count.
 - Prefer several focused commits over one large commit that mixes unrelated behavior, refactoring, tests, or infrastructure changes.
 - Do not create noisy checkpoint or broken WIP commits merely for frequency. Each commit should represent a meaningful completed step and pass the relevant formatting, linting, and tests.
 - Use short, one-line commit messages with no body unless the user explicitly requests otherwise.
