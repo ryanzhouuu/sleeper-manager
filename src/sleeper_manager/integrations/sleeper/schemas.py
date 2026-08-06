@@ -58,3 +58,13 @@ class SleeperTransactionPayload(BaseModel):
     roster_ids: list[int | str] = Field(default_factory=list)
     adds: dict[str, int | str] | None = None
     drops: dict[str, int | str] | None = None
+
+
+class SleeperPlayerPayload(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    full_name: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    team: str | None = None
+    espn_id: int | str | None = None
