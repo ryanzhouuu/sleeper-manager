@@ -12,8 +12,10 @@ dependencies = [
   "httpx>=0.28,<1",
   "pydantic>=2.10,<3",
   "pydantic-settings>=2.7,<3",
-  "pyreadr>=0.4.7,<1",
 ]
+
+[project.optional-dependencies]
+historical = ["pyreadr>=0.4.7,<1"]
 
 [dependency-groups]
 dev = [

@@ -2,6 +2,10 @@
 .env
 .local/
 .venv/
+.venv-workers/
+.wrangler/
+python_modules/
+pylock.toml
 .aws-sam/
 .coverage
 coverage.xml

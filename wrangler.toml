@@ -1,0 +1,18 @@
+name = "sleeper-manager"
+main = "src/sleeper_manager/cloudflare/worker.py"
+compatibility_date = "2026-08-08"
+compatibility_flags = ["python_workers"]
+
+[vars]
+NTFY_BASE_URL = "https://ntfy.sh"
+OPEN_SLEEPER_URL = "https://sleeper.com"
+ACKNOWLEDGEMENT_BASE_URL = "https://REPLACE_WITH_WORKER_HOST/ack"
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sleeper-manager-state"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "infra/cloudflare/migrations"

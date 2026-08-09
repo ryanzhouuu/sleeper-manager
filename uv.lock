@@ -659,6 +659,10 @@ dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+]
+
+[package.optional-dependencies]
+historical = [
     { name = "pyreadr" },
 ]
 
@@ -676,8 +680,9 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28,<1" },
     { name = "pydantic", specifier = ">=2.10,<3" },
     { name = "pydantic-settings", specifier = ">=2.7,<3" },
-    { name = "pyreadr", specifier = ">=0.4.7,<1" },
+    { name = "pyreadr", marker = "extra == 'historical'", specifier = ">=0.4.7,<1" },
 ]
+provides-extras = ["historical"]
 
 [package.metadata.requires-dev]
 dev = [
