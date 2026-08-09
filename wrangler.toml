@@ -6,7 +6,7 @@ compatibility_flags = ["python_workers"]
 [vars]
 NTFY_BASE_URL = "https://ntfy.sh"
 OPEN_SLEEPER_URL = "https://sleeper.com"
-ACKNOWLEDGEMENT_BASE_URL = ""
+ACKNOWLEDGEMENT_BASE_URL = "https://sleeper-manager.ryanzhouuu.workers.dev/ack"
 
 [triggers]
 crons = ["*/5 * * * *"]
