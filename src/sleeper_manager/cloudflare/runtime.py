@@ -51,7 +51,7 @@ async def run_scheduled(env: Any, fetcher: Any) -> dict[str, Any]:
         return {"status": "skipped", "reason": "notifications_not_configured"}
 
     now = datetime.now(UTC)
-    repository = D1StateRepository(env.DB)
+    repository = D1StateRepository(env.sleeper_manager_state)
     await repository.initialize()
     result = await NotificationLoop(
         repository,

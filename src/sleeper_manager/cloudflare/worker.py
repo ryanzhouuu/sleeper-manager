@@ -32,7 +32,7 @@ class Default(_WorkerEntrypoint):  # type: ignore[misc]
         if parsed.path != "/ack":
             return Response("Not found", status=404)
 
-        repository = D1StateRepository(self.env.DB)
+        repository = D1StateRepository(self.env.sleeper_manager_state)
         await repository.initialize()
         result = await acknowledge(repository, _query_values(request.url))
         return Response.json(result.payload, status=result.status_code)
