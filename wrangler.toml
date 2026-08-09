@@ -1,18 +1,38 @@
 name = "sleeper-manager"
-main = "src/sleeper_manager/cloudflare/worker.py"
-compatibility_date = "2026-08-08"
+main = "src/worker.py"
+compatibility_date = "2026-07-28"
 compatibility_flags = ["python_workers"]
 
 [vars]
 NTFY_BASE_URL = "https://ntfy.sh"
 OPEN_SLEEPER_URL = "https://sleeper.com"
-ACKNOWLEDGEMENT_BASE_URL = "https://REPLACE_WITH_WORKER_HOST/ack"
+ACKNOWLEDGEMENT_BASE_URL = ""
 
 [triggers]
 crons = ["*/5 * * * *"]
 
 [[d1_databases]]
-binding = "DB"
+binding = "sleeper_manager_state"
 database_name = "sleeper-manager-state"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "ceabcb2a-68f6-4781-8c50-98f37a0e6044"
 migrations_dir = "infra/cloudflare/migrations"
+
+[python_modules]
+exclude = [
+    "**/*.pyc",
+    "**/__pycache__",
+    "**/httpx/**",
+    "**/httpx-*.dist-info/**",
+    "**/pydantic/**",
+    "**/pydantic-*.dist-info/**",
+    "**/pydantic_core/**",
+    "**/pydantic_core-*.dist-info/**",
+    "**/pydantic_settings/**",
+    "**/pydantic_settings-*.dist-info/**",
+    "**/dotenv/**",
+    "**/python_dotenv-*.dist-info/**",
+    "**/annotated_types/**",
+    "**/annotated_types-*.dist-info/**",
+    "**/typing_inspection/**",
+    "**/typing_inspection-*.dist-info/**",
+]
