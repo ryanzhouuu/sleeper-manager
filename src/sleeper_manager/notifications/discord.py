@@ -22,5 +22,9 @@ class DiscordSender:
         content = f"**{notification.title}**\n{notification.message}"
         if notification.click_url:
             content += f"\n{notification.click_url}"
+        if notification.actions:
+            content += "\n" + " | ".join(
+                f"[{action.label}]({action.url})" for action in notification.actions
+            )
         response = await self._client.post(self._webhook_url, json={"content": content})
         response.raise_for_status()
