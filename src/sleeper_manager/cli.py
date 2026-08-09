@@ -14,9 +14,15 @@ from sleeper_manager.integrations.sleeper.sync import (
     LeagueBootstrapError,
     LeagueSynchronizationService,
 )
+from sleeper_manager.notifications.factory import build_notification_dispatcher
+from sleeper_manager.persistence.async_sqlite import AsyncSQLiteStateRepository
 from sleeper_manager.persistence.nba_cache import SQLiteNBADataCache
 from sleeper_manager.persistence.sqlite import SQLiteStateRepository
 from sleeper_manager.workflows.nba_diagnostics import collect_nba_diagnostics
+from sleeper_manager.workflows.notification_loop import (
+    NotificationLoop,
+    default_placeholder_request,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -29,6 +35,10 @@ def build_parser() -> argparse.ArgumentParser:
         "check-nba-data", help="Report NBA provider health and current-roster mapping coverage"
     )
     nba_data.add_argument("--date", dest="game_date", help="Scoreboard date in YYYY-MM-DD format")
+    subcommands.add_parser(
+        "phase3-test-notification",
+        help="Send one idempotent placeholder notification for the Phase 3 operational test",
+    )
     return parser
 
 
@@ -147,6 +157,40 @@ async def _check_nba_data(settings: Settings, game_date: date) -> int:
     return 0 if report.healthy else 1
 
 
+async def _phase3_test_notification(settings: Settings) -> int:
+    if not settings.notifications_configured:
+        print("Notification configuration is incomplete", file=sys.stderr)
+        return 2
+    if not settings.acknowledgement_base_url:
+        print("Set ACKNOWLEDGEMENT_BASE_URL before sending a Phase 3 notification", file=sys.stderr)
+        return 2
+    try:
+        repository = AsyncSQLiteStateRepository(settings.sqlite_path)
+        await repository.initialize()
+        dispatcher = build_notification_dispatcher(settings)
+        now = datetime.now(UTC)
+        result = await NotificationLoop(
+            repository,
+            dispatcher,
+            acknowledgement_base_url=settings.acknowledgement_base_url,
+        ).run(
+            default_placeholder_request(
+                league_id=settings.sleeper_league_id or "phase3-local",
+                now=now,
+            )
+        )
+    except (OSError, RuntimeError, ValueError) as error:
+        print(f"Phase 3 notification failed: {error}", file=sys.stderr)
+        return 2
+    print(f"Phase 3 notification: {result.status}")
+    print(f"Recommendation: {result.recommendation.recommendation_id}")
+    if result.delivery is not None:
+        for attempt in result.delivery.attempts:
+            state = "succeeded" if attempt.succeeded else "failed"
+            print(f"Delivery {attempt.provider}: {state}")
+    return 0 if result.status != "delivery_failed" else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "check-config":
@@ -167,6 +211,9 @@ def main(argv: list[str] | None = None) -> int:
             print(str(error), file=sys.stderr)
             return 2
         return asyncio.run(_check_nba_data(settings, game_date))
+    if args.command == "phase3-test-notification":
+        settings = Settings()
+        return asyncio.run(_phase3_test_notification(settings))
     return 2
 
 

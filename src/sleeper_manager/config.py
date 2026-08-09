@@ -110,8 +110,9 @@ class Settings(BaseSettings):
 
     discord_webhook_url: SecretStr | None = None
 
-    state_backend: Literal["sqlite", "dynamodb"] = "sqlite"
+    state_backend: Literal["sqlite"] = "sqlite"
     sqlite_path: Path = Path(".local/state.db")
+    acknowledgement_base_url: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
