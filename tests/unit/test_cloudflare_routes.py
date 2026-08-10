@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
 from sleeper_manager.cloudflare.routes import acknowledge
+from sleeper_manager.cloudflare.worker import Default
 from sleeper_manager.notifications.base import Notification
 from sleeper_manager.notifications.dispatcher import NotificationDispatcher
 from sleeper_manager.persistence.async_sqlite import AsyncSQLiteStateRepository
@@ -68,3 +69,20 @@ def test_acknowledge_route_rejects_invalid_request(tmp_path) -> None:  # type: i
 
     assert response.status_code == 400
     assert response.payload == {"status": "invalid_request"}
+
+
+def test_scheduled_uses_entrypoint_environment(monkeypatch) -> None:
+    seen: list[object] = []
+
+    async def fake_run_scheduled(env, fetcher):  # type: ignore[no-untyped-def]
+        del fetcher
+        seen.append(env)
+        return {"status": "created"}
+
+    monkeypatch.setattr("sleeper_manager.cloudflare.worker.run_scheduled", fake_run_scheduled)
+    entrypoint = Default()
+    entrypoint.env = object()
+
+    asyncio.run(entrypoint.scheduled(object(), object(), object()))
+
+    assert seen == [entrypoint.env]

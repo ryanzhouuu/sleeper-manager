@@ -38,6 +38,6 @@ class Default(_WorkerEntrypoint):  # type: ignore[misc]
         return Response.json(result.payload, status=result.status_code)
 
     async def scheduled(self, controller, env, ctx):  # type: ignore[no-untyped-def]
-        del controller, ctx
-        result = await run_scheduled(env, fetch)
+        del controller, env, ctx
+        result = await run_scheduled(self.env, fetch)
         print(json.dumps(result, sort_keys=True))
