@@ -1,11 +1,14 @@
+import pytest
+
 from sleeper_manager.domain.scoring import (
     BoxScoreLine,
     ScoringCompatibilityError,
-    ScoringSettings,
+    ScoringPolicy,
     calculate_fantasy_points,
+    calculate_score_breakdown,
 )
 
-LEAGUE_SCORING = ScoringSettings.from_sleeper(
+LEAGUE_SCORING = ScoringPolicy.from_sleeper(
     {
         "ast": 1.5,
         "blk": 2,
@@ -55,9 +58,61 @@ def test_applies_assist_bonus_and_technical_foul() -> None:
 
 
 def test_rejects_unknown_nonzero_scoring_field() -> None:
-    try:
-        ScoringSettings.from_sleeper({"pts": 1, "personal_foul": 1})
-    except ScoringCompatibilityError as error:
-        assert "personal_foul" in str(error)
-    else:
-        raise AssertionError("unsupported scoring field should block bootstrap")
+    with pytest.raises(ScoringCompatibilityError, match="personal_foul"):
+        ScoringPolicy.from_sleeper({"pts": 1, "personal_foul": 1})
+
+
+def test_allows_unknown_zero_scoring_field() -> None:
+    policy = ScoringPolicy.from_sleeper({"pts": 1, "future_field": 0})
+
+    assert policy.points == 1
+
+
+def test_rejects_nonfinite_policy_weights() -> None:
+    with pytest.raises(ScoringCompatibilityError, match="pts.*finite"):
+        ScoringPolicy(points=float("nan"))
+
+
+def test_policy_is_versioned_and_breakdown_lists_contributors() -> None:
+    line = BoxScoreLine(
+        points=22,
+        rebounds=1,
+        assists=15,
+        steals=2,
+        turnovers=1,
+        three_pointers_made=1,
+        technical_fouls=1,
+    )
+
+    breakdown = calculate_score_breakdown(line, LEAGUE_SCORING)
+
+    assert LEAGUE_SCORING.version.startswith("scoring-policy-v1-")
+    assert len(LEAGUE_SCORING.fingerprint) == 64
+    assert breakdown.total == 50.2
+    assert breakdown.consumed_fields == (
+        "pts",
+        "reb",
+        "ast",
+        "stl",
+        "to",
+        "tpm",
+        "tf",
+        "dd",
+        "bonus_ast_15p",
+    )
+    assert breakdown.contributions[-1].contribution == 2
+
+
+def test_threshold_bonuses_stack_at_upper_boundaries() -> None:
+    line = BoxScoreLine(points=50, rebounds=20, assists=15)
+
+    breakdown = calculate_score_breakdown(line, LEAGUE_SCORING)
+
+    assert breakdown.total == 107.5
+    assert breakdown.consumed_fields[-5:] == (
+        "td",
+        "bonus_pt_40p",
+        "bonus_pt_50p",
+        "bonus_ast_15p",
+        "bonus_reb_20p",
+    )

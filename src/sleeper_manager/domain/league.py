@@ -3,7 +3,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from sleeper_manager.domain.models import Roster
-from sleeper_manager.domain.scoring import ScoringSettings
+from sleeper_manager.domain.scoring import ScoringPolicy
 
 
 class LeagueMode(StrEnum):
@@ -55,7 +55,7 @@ class LeagueProfile:
     previous_league_id: str | None
     mode: LeagueMode
     roster_slots: tuple[RosterSlot, ...]
-    scoring: ScoringSettings
+    scoring: ScoringPolicy
     users: tuple[LeagueUser, ...]
     rosters: tuple[Roster, ...]
     manager_user_id: str

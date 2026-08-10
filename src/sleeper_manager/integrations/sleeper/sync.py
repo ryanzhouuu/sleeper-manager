@@ -16,7 +16,7 @@ from sleeper_manager.domain.league import (
     RosterSlot,
 )
 from sleeper_manager.domain.models import Roster
-from sleeper_manager.domain.scoring import ScoringCompatibilityError, ScoringSettings
+from sleeper_manager.domain.scoring import ScoringCompatibilityError, ScoringPolicy
 from sleeper_manager.integrations.sleeper.schemas import (
     SleeperLeaguePayload,
     SleeperRosterPayload,
@@ -277,7 +277,7 @@ class LeagueSynchronizationService:
 
         mode = _parse_mode(raw_league)
         try:
-            scoring = ScoringSettings.from_sleeper(league.scoring_settings)
+            scoring = ScoringPolicy.from_sleeper(league.scoring_settings)
         except ScoringCompatibilityError as error:
             raise LeagueCompatibilityError(str(error)) from error
         roster_slots = _parse_slots(league.roster_positions)
