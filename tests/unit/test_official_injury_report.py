@@ -13,6 +13,9 @@ from sleeper_manager.integrations.nba.official_injury_report import (
 )
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "nba" / "official_injury_report.txt"
+TOKEN_FIXTURE = (
+    Path(__file__).parents[1] / "fixtures" / "nba" / "official_injury_report_pypdf_tokens.txt"
+)
 PUBLISHED_AT = datetime(2025, 1, 1, 13, 30, tzinfo=UTC)
 RETRIEVED_AT = datetime(2026, 8, 9, 4, tzinfo=UTC)
 
@@ -45,6 +48,17 @@ def test_official_report_url_uses_pdf_filename_publication_slot() -> None:
         "https://ak-static.cms.nba.com/referee/injury/"
         "Injury-Report_2025-01-01_08AM.pdf"
     )
+
+
+def test_official_report_parser_restores_pypdf_tokenized_rows() -> None:
+    snapshot = parse_official_injury_report_text(TOKEN_FIXTURE.read_text(), source=source())
+
+    assert [entry.player_name for entry in snapshot.entries] == [
+        "Craig, Torrey",
+        "Banchero, Paolo",
+    ]
+    assert snapshot.entries[1].game_time.isoformat() == "07:00:00"
+    assert snapshot.not_yet_submitted_teams == ("was", "det")
 
 
 def test_official_report_coverage_surfaces_missing_snapshots() -> None:

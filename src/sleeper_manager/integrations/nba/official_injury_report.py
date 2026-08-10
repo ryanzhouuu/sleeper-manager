@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import io
 import re
 from collections.abc import Callable, Iterable
@@ -23,7 +24,7 @@ _REPORT_HEADER = re.compile(
 )
 _GAME_HEADER = re.compile(
     r"^(?:(?P<date>\d{2}/\d{2}/\d{4})\s+)?"
-    r"(?P<time>\d{1,2}:\d{2})\s+\(ET\)\s+"
+    r"(?:(?P<time>\d{1,2}:\d{2})\s+\(ET\)\s+)?"
     r"(?P<away>[A-Z]{3})@(?P<home>[A-Z]{3})\s+(?P<rest>.+)$"
 )
 _PLAYER_ROW = re.compile(
@@ -31,6 +32,9 @@ _PLAYER_ROW = re.compile(
     r"(?P<status>Out|Doubtful|Questionable|Probable|Available)"
     r"(?:\s+(?P<reason>.*))?$"
 )
+_DATE_TOKEN = re.compile(r"^\d{2}/\d{2}/\d{4}$")
+_TIME_TOKEN = re.compile(r"^\d{1,2}:\d{2}$")
+_MATCHUP_TOKEN = re.compile(r"^[A-Z]{3}@[A-Z]{3}$")
 _SUPPORTED_STATUSES = {
     "available": AvailabilityStatus.AVAILABLE,
     "probable": AvailabilityStatus.PROBABLE,
@@ -167,6 +171,8 @@ def parse_official_injury_report_text(
     text: str, *, source: SourceMetadata
 ) -> OfficialInjuryReportSnapshot:
     """Parse text extracted from one official NBA injury-report PDF."""
+    if "Injury\nReport:" in text:
+        text = _normalize_tokenized_report_text(text)
     normalized_text = text.replace("Injury Report:", "\nInjury Report:")
     lines = [line.strip() for line in normalized_text.splitlines() if line.strip()]
     published_at: datetime | None = None
@@ -192,7 +198,15 @@ def parse_official_injury_report_text(
         game_match = _GAME_HEADER.match(line)
         if game_match:
             game_date = _parse_game_date(game_match.group("date"), report_date or date.min)
-            game_time = _parse_game_time(game_match.group("time"))
+            game_time_text = game_match.group("time")
+            if game_time_text is None:
+                if current_game is None:
+                    raise OfficialInjuryReportError(
+                        f"Game line has no time and no prior game context: {line!r}"
+                    )
+                game_time = current_game[1]
+            else:
+                game_time = _parse_game_time(game_time_text)
             matchup = f"{game_match.group('away')}@{game_match.group('home')}"
             team_data = _team_prefix(game_match.group("rest"), matchup)
             if team_data is None:
@@ -329,15 +343,221 @@ def _deduplicate_team_statuses(
     return tuple(result)
 
 
+def _tokenized_report_header(tokens: list[str], index: int) -> tuple[str, int] | None:
+    if index + 4 >= len(tokens) or tokens[index : index + 2] != ["Injury", "Report:"]:
+        return None
+    if not re.fullmatch(r"\d{2}/\d{2}/\d{2}", tokens[index + 2]):
+        return None
+    if not _TIME_TOKEN.match(tokens[index + 3]) or tokens[index + 4] not in {"AM", "PM"}:
+        return None
+    return (
+        f"Injury Report: {tokens[index + 2]} {tokens[index + 3]} {tokens[index + 4]}",
+        index + 5,
+    )
+
+
+def _tokenized_game_header(
+    tokens: list[str], index: int
+) -> tuple[str | None, str, str, int] | None:
+    start = index
+    game_date: str | None = None
+    if index < len(tokens) and _DATE_TOKEN.match(tokens[index]):
+        game_date = tokens[index]
+        index += 1
+    if index + 2 >= len(tokens):
+        return None
+    if not _TIME_TOKEN.match(tokens[index]) or tokens[index + 1] != "(ET)":
+        return None
+    matchup = tokens[index + 2]
+    if not _MATCHUP_TOKEN.match(matchup):
+        return None
+    return game_date, tokens[start + (1 if game_date else 0)], matchup, index + 3
+
+
+def _tokenized_team(
+    tokens: list[str], index: int, matchup: str
+) -> tuple[str, str, int] | None:
+    for abbreviation in matchup.split("@"):
+        team_name = NBA_TEAM_NAMES.get(abbreviation.casefold())
+        if team_name is None:
+            continue
+        words = team_name.split()
+        if tokens[index : index + len(words)] == words:
+            return abbreviation.casefold(), team_name, index + len(words)
+    return None
+
+
+def _tokenized_page(tokens: list[str], index: int) -> int | None:
+    if (
+        index + 3 < len(tokens)
+        and tokens[index] == "Page"
+        and tokens[index + 2] == "of"
+        and tokens[index + 1].isdigit()
+        and tokens[index + 3].isdigit()
+    ):
+        return index + 4
+    return None
+
+
+def _tokenized_column_header(tokens: list[str], index: int) -> int | None:
+    expected = [
+        "Game",
+        "Date",
+        "Game",
+        "Time",
+        "Matchup",
+        "Team",
+        "Player",
+        "Name",
+        "Current",
+        "Status",
+        "Reason",
+    ]
+    if tokens[index : index + len(expected)] == expected:
+        return index + len(expected)
+    return None
+
+
+def _tokenized_boundary(tokens: list[str], index: int, matchup: str | None) -> bool:
+    if _tokenized_report_header(tokens, index) is not None:
+        return True
+    if _tokenized_page(tokens, index) is not None:
+        return True
+    if _tokenized_game_header(tokens, index) is not None:
+        return True
+    if _MATCHUP_TOKEN.match(tokens[index]) and _tokenized_team(
+        tokens, index + 1, tokens[index]
+    ) is not None:
+        return True
+    if matchup is not None and _tokenized_team(tokens, index, matchup) is not None:
+        return True
+    if tokens[index].endswith(","):
+        return any(
+            token.casefold() in _SUPPORTED_STATUSES
+            for token in tokens[index + 1 : min(index + 5, len(tokens))]
+        )
+    return False
+
+
+def _tokenized_player_line(
+    tokens: list[str], index: int, matchup: str | None
+) -> tuple[str, int] | None:
+    status_index: int | None = None
+    for candidate in range(index, len(tokens)):
+        if candidate != index and (
+            _tokenized_report_header(tokens, candidate) is not None
+            or _tokenized_page(tokens, candidate) is not None
+            or _tokenized_game_header(tokens, candidate) is not None
+            or (
+                _MATCHUP_TOKEN.match(tokens[candidate])
+                and _tokenized_team(tokens, candidate + 1, tokens[candidate]) is not None
+            )
+            or (matchup is not None and _tokenized_team(tokens, candidate, matchup) is not None)
+        ):
+            break
+        if tokens[candidate].casefold() in _SUPPORTED_STATUSES:
+            status_index = candidate
+            break
+    if status_index is None:
+        return None
+    end = status_index + 1
+    while end < len(tokens) and not _tokenized_boundary(tokens, end, matchup):
+        end += 1
+    name = " ".join(tokens[index:status_index])
+    status = tokens[status_index]
+    reason = " ".join(tokens[status_index + 1 : end])
+    line = f"{name} {status}" + (f" {reason}" if reason else "")
+    return line, end
+
+
+def _normalize_tokenized_report_text(text: str) -> str:
+    """Restore logical rows from pypdf's one-word-per-line extraction mode."""
+    tokens = [token.strip() for token in text.splitlines() if token.strip()]
+    lines: list[str] = []
+    index = 0
+    current_matchup: str | None = None
+    current_game_time: str | None = None
+    while index < len(tokens):
+        report_header = _tokenized_report_header(tokens, index)
+        if report_header is not None:
+            lines.append(report_header[0])
+            index = report_header[1]
+            continue
+        page_end = _tokenized_page(tokens, index)
+        if page_end is not None:
+            lines.append(" ".join(tokens[index:page_end]))
+            index = page_end
+            continue
+        column_end = _tokenized_column_header(tokens, index)
+        if column_end is not None:
+            lines.append(" ".join(tokens[index:column_end]))
+            index = column_end
+            continue
+        game_header = _tokenized_game_header(tokens, index)
+        if game_header is not None:
+            game_date, game_time, current_matchup, next_index = game_header
+            team = _tokenized_team(tokens, next_index, current_matchup)
+            if team is None:
+                raise OfficialInjuryReportError(
+                    f"Unknown team prefix in tokenized game line near {tokens[index:index + 8]!r}"
+                )
+            prefix = f"{game_date + ' ' if game_date else ''}{game_time} (ET) "
+            game_line = f"{prefix}{current_matchup} {team[1]}"
+            if tokens[team[2] : team[2] + 3] == ["NOT", "YET", "SUBMITTED"]:
+                game_line += " NOT YET SUBMITTED"
+                index = team[2] + 3
+            else:
+                index = team[2]
+            lines.append(game_line)
+            current_game_time = game_time
+            continue
+        if current_game_time is not None and _MATCHUP_TOKEN.match(tokens[index]):
+            matchup = tokens[index]
+            team = _tokenized_team(tokens, index + 1, matchup)
+            if team is not None:
+                current_matchup = matchup
+                matchup_line = f"{current_game_time} (ET) {matchup} {team[1]}"
+                if tokens[team[2] : team[2] + 3] == ["NOT", "YET", "SUBMITTED"]:
+                    matchup_line += " NOT YET SUBMITTED"
+                    index = team[2] + 3
+                else:
+                    index = team[2]
+                lines.append(matchup_line)
+                continue
+        if current_matchup is not None:
+            team = _tokenized_team(tokens, index, current_matchup)
+            if team is not None:
+                team_end = team[2]
+                if tokens[team_end : team_end + 3] == ["NOT", "YET", "SUBMITTED"]:
+                    lines.append(f"{team[1]} NOT YET SUBMITTED")
+                    index = team_end + 3
+                    continue
+                player_line = _tokenized_player_line(tokens, team_end, current_matchup)
+                if player_line is not None:
+                    lines.append(f"{team[1]} {player_line[0]}")
+                    index = player_line[1]
+                    continue
+        player_line = _tokenized_player_line(tokens, index, current_matchup)
+        if player_line is not None:
+            lines.append(player_line[0])
+            index = player_line[1]
+            continue
+        index += 1
+    return "\n".join(lines)
+
+
 def extract_official_injury_report_text(pdf_bytes: bytes) -> str:
     try:
-        from pypdf import PdfReader  # type: ignore[import-not-found]
+        pypdf = importlib.import_module("pypdf")
     except ImportError as error:
         raise OfficialInjuryReportError(
             "Official injury-report ingestion requires the pypdf dependency"
         ) from error
-    reader = PdfReader(io.BytesIO(pdf_bytes))
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
+    reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+    text = "\n".join(str(page.extract_text() or "") for page in reader.pages)
+    if "Injury\nReport:" in text:
+        return _normalize_tokenized_report_text(text)
+    return text
 
 
 def assess_official_report_coverage(
