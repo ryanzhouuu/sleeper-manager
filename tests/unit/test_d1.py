@@ -90,7 +90,7 @@ def make_repository() -> tuple[FakeD1, D1StateRepository]:
 
 
 def test_d1_repository_persists_records_and_consumes_token_once() -> None:
-    _, repository = make_repository()
+    database, repository = make_repository()
     record = recommendation()
     asyncio.run(repository.create_recommendation(record))
     raw_token = "test-token"
@@ -124,6 +124,18 @@ def test_d1_repository_persists_records_and_consumes_token_once() -> None:
     assert result.outcome is AcknowledgementOutcome.APPLIED
     assert replay.outcome is AcknowledgementOutcome.ALREADY_USED
     assert asyncio.run(repository.is_locked(record.recommendation_id))
+
+    token_used_at = database.connection.execute(
+        "SELECT used_at FROM action_tokens WHERE token_hash = ?",
+        (hash_action_token(raw_token),),
+    ).fetchone()[0]
+    lock_acknowledged_at = database.connection.execute(
+        "SELECT acknowledged_at FROM lock_acknowledgements WHERE recommendation_id = ?",
+        (record.recommendation_id,),
+    ).fetchone()[0]
+
+    assert token_used_at == (NOW + timedelta(minutes=1)).isoformat()
+    assert lock_acknowledged_at == (NOW + timedelta(minutes=1)).isoformat()
 
 
 def test_d1_repository_round_trips_snapshot_and_freshness() -> None:

@@ -430,7 +430,7 @@ class SQLiteStateRepository:
                 return AcknowledgementResult(AcknowledgementOutcome.CONFLICT, recommendation)
 
             connection.execute(
-                "UPDATE action_tokens SET used_at = ? WHERE token_hash = ?",
+                "UPDATE action_tokens SET used_at = ? WHERE token_hash = ? AND used_at IS NULL",
                 (acknowledged_at.isoformat(), token_hash),
             )
             connection.execute(
@@ -466,7 +466,7 @@ class SQLiteStateRepository:
             if action is AcknowledgementAction.LOCKED:
                 connection.execute(
                     """
-                    INSERT OR REPLACE INTO lock_acknowledgements
+                    INSERT OR IGNORE INTO lock_acknowledgements
                         (recommendation_id, player_id, acknowledged_at)
                     VALUES (?, ?, ?)
                     """,

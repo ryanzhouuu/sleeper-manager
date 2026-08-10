@@ -400,7 +400,7 @@ class D1StateRepository(AsyncStateRepository):
             self._statement(
                 """
                 UPDATE action_tokens SET used_at = ?
-                WHERE token_hash = ? AND EXISTS (
+                WHERE token_hash = ? AND used_at IS NULL AND EXISTS (
                     SELECT 1 FROM acknowledgements WHERE acknowledgement_id = ?
                 )
                 """,
@@ -425,7 +425,7 @@ class D1StateRepository(AsyncStateRepository):
             ),
             self._statement(
                 """
-                INSERT OR REPLACE INTO lock_acknowledgements
+                INSERT OR IGNORE INTO lock_acknowledgements
                     (recommendation_id, player_id, acknowledged_at)
                 SELECT r.recommendation_id, r.player_id, ?
                 FROM recommendations r

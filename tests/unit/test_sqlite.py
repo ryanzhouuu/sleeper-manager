@@ -87,6 +87,19 @@ def test_action_token_is_consumed_once_and_locks_record(tmp_path) -> None:  # ty
     assert result.recommendation is not None
     assert result.recommendation.acknowledged_action is AcknowledgementAction.LOCKED
 
+    with repository._connect() as connection:
+        token_used_at = connection.execute(
+            "SELECT used_at FROM action_tokens WHERE token_hash = ?",
+            (hash_action_token(raw_token),),
+        ).fetchone()[0]
+        lock_acknowledged_at = connection.execute(
+            "SELECT acknowledged_at FROM lock_acknowledgements WHERE recommendation_id = ?",
+            (record.recommendation_id,),
+        ).fetchone()[0]
+
+    assert token_used_at == (NOW + timedelta(minutes=1)).isoformat()
+    assert lock_acknowledged_at == (NOW + timedelta(minutes=1)).isoformat()
+
 
 def test_action_token_rejects_wrong_action_and_expiration(tmp_path) -> None:  # type: ignore[no-untyped-def]
     repository = SQLiteStateRepository(tmp_path / "state.db")
