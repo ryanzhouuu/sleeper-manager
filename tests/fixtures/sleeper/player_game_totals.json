@@ -1,0 +1,82 @@
+[
+  {
+    "game_id": "2025-01-01-game-1",
+    "player_id": "player-1",
+    "box_score": {
+      "points": 22,
+      "rebounds": 6,
+      "assists": 5,
+      "steals": 1,
+      "blocks": 0,
+      "turnovers": 2,
+      "three_pointers_made": 3,
+      "technical_fouls": 0,
+      "flagrant_fouls": 0
+    },
+    "sleeper_fantasy_points": 38.2
+  },
+  {
+    "game_id": "2025-01-02-game-2",
+    "player_id": "player-2",
+    "box_score": {
+      "points": 12,
+      "rebounds": 10,
+      "assists": 4,
+      "steals": 0,
+      "blocks": 0,
+      "turnovers": 1,
+      "three_pointers_made": 2,
+      "technical_fouls": 1,
+      "flagrant_fouls": 1
+    },
+    "sleeper_fantasy_points": 27.0
+  },
+  {
+    "game_id": "2025-01-03-game-3",
+    "player_id": "player-3",
+    "box_score": {
+      "points": 40,
+      "rebounds": 10,
+      "assists": 10,
+      "steals": 10,
+      "blocks": 0,
+      "turnovers": 0,
+      "three_pointers_made": 0,
+      "technical_fouls": 0,
+      "flagrant_fouls": 0
+    },
+    "sleeper_fantasy_points": 92.0
+  },
+  {
+    "game_id": "2025-01-04-game-4",
+    "player_id": "player-4",
+    "box_score": {
+      "points": 50,
+      "rebounds": 20,
+      "assists": 15,
+      "steals": 0,
+      "blocks": 0,
+      "turnovers": 0,
+      "three_pointers_made": 0,
+      "technical_fouls": 0,
+      "flagrant_fouls": 0
+    },
+    "sleeper_fantasy_points": 107.5
+  },
+  {
+    "game_id": "2025-01-05-game-5",
+    "player_id": "player-5",
+    "box_score": {
+      "points": 0,
+      "rebounds": 0,
+      "assists": 0,
+      "steals": 0,
+      "blocks": 0,
+      "turnovers": 3,
+      "three_pointers_made": 0,
+      "technical_fouls": 2,
+      "flagrant_fouls": 1
+    },
+    "sleeper_fantasy_points": -9.0
+  }
+]
