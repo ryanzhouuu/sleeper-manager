@@ -6,7 +6,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from sleeper_manager.domain.nba import ProviderPlayer
-from sleeper_manager.integrations.nba.mapping import normalize_player_name
+from sleeper_manager.integrations.nba.mapping import normalize_player_name, normalize_team
 from sleeper_manager.integrations.sleeper.schemas import SleeperPlayerPayload
 
 
@@ -77,78 +77,6 @@ def parse_sleeper_player_identity(
     )
 
 
-def _normalize_team(value: str | None) -> str | None:
-    if not value:
-        return None
-    normalized = "".join(character for character in value.casefold() if character.isalnum())
-    aliases = {
-        "atlanta": "atl",
-        "atl": "atl",
-        "boston": "bos",
-        "bos": "bos",
-        "brooklyn": "bkn",
-        "bkn": "bkn",
-        "charlotte": "cha",
-        "cha": "cha",
-        "chicago": "chi",
-        "chi": "chi",
-        "cleveland": "cle",
-        "cle": "cle",
-        "dallas": "dal",
-        "dal": "dal",
-        "denver": "den",
-        "den": "den",
-        "detroit": "det",
-        "det": "det",
-        "goldenstate": "gsw",
-        "gsw": "gsw",
-        "houston": "hou",
-        "hou": "hou",
-        "indiana": "ind",
-        "ind": "ind",
-        "lac": "lac",
-        "laclippers": "lac",
-        "losangelesclippers": "lac",
-        "lal": "lal",
-        "lalakers": "lal",
-        "losangeleslakers": "lal",
-        "memphis": "mem",
-        "mem": "mem",
-        "miami": "mia",
-        "mia": "mia",
-        "milwaukee": "mil",
-        "mil": "mil",
-        "minnesota": "min",
-        "min": "min",
-        "neworleans": "nop",
-        "nop": "nop",
-        "newyork": "ny",
-        "ny": "ny",
-        "nyk": "ny",
-        "oklahomacity": "okc",
-        "okc": "okc",
-        "orlando": "orl",
-        "orl": "orl",
-        "philadelphia": "phi",
-        "phi": "phi",
-        "phoenix": "phx",
-        "phx": "phx",
-        "portland": "por",
-        "por": "por",
-        "sacramento": "sac",
-        "sac": "sac",
-        "sanantonio": "sas",
-        "sas": "sas",
-        "toronto": "tor",
-        "tor": "tor",
-        "utah": "uta",
-        "uta": "uta",
-        "washington": "was",
-        "was": "was",
-    }
-    return aliases.get(normalized, normalized)
-
-
 class PlayerIdentityMapper:
     """Resolve Sleeper player identities without fuzzy or ambiguous matches."""
 
@@ -166,7 +94,7 @@ class PlayerIdentityMapper:
         for player in candidates:
             name_key = normalize_player_name(player.full_name)
             by_name.setdefault(name_key, []).append(player)
-            team_key = _normalize_team(player.team_abbreviation)
+            team_key = normalize_team(player.team_abbreviation)
             if team_key is not None:
                 by_name_team.setdefault((name_key, team_key), []).append(player)
 
@@ -215,7 +143,7 @@ class PlayerIdentityMapper:
                 continue
 
             name_key = normalize_player_name(sleeper_player.full_name)
-            team_key = _normalize_team(sleeper_player.team)
+            team_key = normalize_team(sleeper_player.team)
             team_matches = (
                 by_name_team.get((name_key, team_key), []) if team_key is not None else []
             )

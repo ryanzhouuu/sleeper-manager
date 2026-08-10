@@ -40,6 +40,7 @@ class SourceMetadata:
     retrieved_at: datetime
     source_updated_at: datetime | None = None
     schema_version: str = "1"
+    content_hash: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

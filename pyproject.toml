@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-historical = ["pyreadr>=0.4.7,<1"]
+historical = ["pyreadr>=0.4.7,<1", "pypdf>=5,<7"]
 
 [dependency-groups]
 dev = [
