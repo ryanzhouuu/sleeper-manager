@@ -62,7 +62,12 @@ def box(
         started,
         True,
         minutes,
-        BoxScoreLine(points=10),
+        BoxScoreLine(
+            points=10,
+            three_pointers_made=3,
+            technical_fouls=1,
+            flagrant_fouls=1,
+        ),
         SOURCE,
     )
 
@@ -106,6 +111,9 @@ def test_historical_feature_dataset_uses_only_prior_player_history_and_schedule_
     assert row.prior_minutes_mean == 30
     assert row.prior_start_rate == 1
     assert row.target_minutes == 22
+    assert row.target_box_score.three_pointers_made == 3
+    assert row.target_box_score.technical_fouls == 1
+    assert row.target_box_score.flagrant_fouls == 1
     assert row.dataset_version == "nba-features-2025-v1"
     assert dataset.source_versions[0].provider == "fixture"
 

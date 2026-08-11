@@ -14,6 +14,7 @@ from sleeper_manager.domain.nba import (
     SourceMetadata,
     Team,
 )
+from sleeper_manager.domain.scoring import BoxScoreLine
 from sleeper_manager.integrations.nba.identity import PlayerMapping
 from sleeper_manager.integrations.nba.mapping import normalize_team
 from sleeper_manager.integrations.nba.official_injury_mapping import HistoricalPlayerAvailability
@@ -62,6 +63,7 @@ class HistoricalFeatureRow:
     target_minutes: float | None
     target_started: bool
     target_did_play: bool
+    target_box_score: BoxScoreLine
     target_line_points: int
     target_line_rebounds: int
     target_line_assists: int
@@ -180,6 +182,7 @@ def build_historical_feature_dataset(
                 target_minutes=box_score.minutes,
                 target_started=box_score.started,
                 target_did_play=box_score.did_play,
+                target_box_score=box_score.line,
                 target_line_points=box_score.line.points,
                 target_line_rebounds=box_score.line.rebounds,
                 target_line_assists=box_score.line.assists,
