@@ -359,9 +359,7 @@ def _rest_features(
     if not previous:
         return None, None, None
     previous_game = previous[-1]
-    date_difference = (
-        _local_game_date(game) - _local_game_date(previous_game)
-    ).days
+    date_difference = (_local_game_date(game) - _local_game_date(previous_game)).days
     return max(date_difference - 1, 0), date_difference <= 1, previous_game.source
 
 
@@ -470,8 +468,7 @@ def _matchup(
     matchups = {
         key[1]
         for key in reports
-        if key[0] == _local_game_date(game)
-        and key[2] == team_abbreviation
+        if key[0] == _local_game_date(game) and key[2] == team_abbreviation
     }
     if not matchups:
         return None

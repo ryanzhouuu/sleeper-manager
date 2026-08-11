@@ -108,9 +108,7 @@ class DirectFantasyPointBaseline:
             player_mean = _weighted_mean(player_observations)
             season_mean = _weighted_mean(season_observations)
             effective_games = sum(weight for _, weight in player_observations)
-            shrinkage = effective_games / (
-                effective_games + self.config.season_shrinkage_games
-            )
+            shrinkage = effective_games / (effective_games + self.config.season_shrinkage_games)
             expected = season_mean + shrinkage * (player_mean - season_mean)
             source_observations = player_observations
             source_mean = player_mean
@@ -153,9 +151,7 @@ class DirectFantasyPointBaseline:
             game_id=game_id,
             available_as_of=target.available_as_of,
             model_version=self.config.model_version,
-            input_version=_input_version(
-                dataset, target, prior_rows, season_rows, scoring_policy
-            ),
+            input_version=_input_version(dataset, target, prior_rows, season_rows, scoring_policy),
             scoring_policy_version=scoring_policy.version,
             distribution=distribution,
             reasons=reasons,

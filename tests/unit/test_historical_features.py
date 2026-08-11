@@ -118,8 +118,9 @@ def test_historical_feature_dataset_uses_only_prior_player_history_and_schedule_
     assert dataset.source_versions[0].provider == "fixture"
 
 
-def test_historical_feature_dataset_uses_latest_report_at_cutoff_and_distinguishes_missing(
-) -> None:
+def test_historical_feature_dataset_uses_latest_report_at_cutoff_and_distinguishes_missing() -> (
+    None
+):
     target = game("game-2", "2025-01-02T23:00:00")
     report_source = SourceMetadata(
         "nba_official_injury_report",

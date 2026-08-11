@@ -45,8 +45,7 @@ def test_official_report_parser_preserves_report_time_status_reason_and_submissi
 
 def test_official_report_url_uses_pdf_filename_publication_slot() -> None:
     assert official_injury_report_url(PUBLISHED_AT) == (
-        "https://ak-static.cms.nba.com/referee/injury/"
-        "Injury-Report_2025-01-01_08AM.pdf"
+        "https://ak-static.cms.nba.com/referee/injury/Injury-Report_2025-01-01_08AM.pdf"
     )
 
 

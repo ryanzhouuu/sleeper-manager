@@ -109,8 +109,7 @@ def official_injury_report_url(published_at: datetime) -> str:
         raise ValueError("Official NBA injury reports use half-hour publication timestamps")
     filename_time = local_time.strftime("%I%p")
     return (
-        f"{OFFICIAL_INJURY_REPORT_BASE_URL}/Injury-Report_"
-        f"{local_time:%Y-%m-%d}_{filename_time}.pdf"
+        f"{OFFICIAL_INJURY_REPORT_BASE_URL}/Injury-Report_{local_time:%Y-%m-%d}_{filename_time}.pdf"
     )
 
 
@@ -148,9 +147,7 @@ def _team_prefix(line: str, matchup: str) -> tuple[str, str, str] | None:
     return None
 
 
-def _append_reason(
-    entries: list[OfficialInjuryReportEntry], continuation: str
-) -> None:
+def _append_reason(entries: list[OfficialInjuryReportEntry], continuation: str) -> None:
     if not entries:
         return
     previous = entries[-1]
@@ -374,9 +371,7 @@ def _tokenized_game_header(
     return game_date, tokens[start + (1 if game_date else 0)], matchup, index + 3
 
 
-def _tokenized_team(
-    tokens: list[str], index: int, matchup: str
-) -> tuple[str, str, int] | None:
+def _tokenized_team(tokens: list[str], index: int, matchup: str) -> tuple[str, str, int] | None:
     for abbreviation in matchup.split("@"):
         team_name = NBA_TEAM_NAMES.get(abbreviation.casefold())
         if team_name is None:
@@ -425,9 +420,10 @@ def _tokenized_boundary(tokens: list[str], index: int, matchup: str | None) -> b
         return True
     if _tokenized_game_header(tokens, index) is not None:
         return True
-    if _MATCHUP_TOKEN.match(tokens[index]) and _tokenized_team(
-        tokens, index + 1, tokens[index]
-    ) is not None:
+    if (
+        _MATCHUP_TOKEN.match(tokens[index])
+        and _tokenized_team(tokens, index + 1, tokens[index]) is not None
+    ):
         return True
     if matchup is not None and _tokenized_team(tokens, index, matchup) is not None:
         return True
@@ -499,7 +495,7 @@ def _normalize_tokenized_report_text(text: str) -> str:
             team = _tokenized_team(tokens, next_index, current_matchup)
             if team is None:
                 raise OfficialInjuryReportError(
-                    f"Unknown team prefix in tokenized game line near {tokens[index:index + 8]!r}"
+                    f"Unknown team prefix in tokenized game line near {tokens[index : index + 8]!r}"
                 )
             prefix = f"{game_date + ' ' if game_date else ''}{game_time} (ET) "
             game_line = f"{prefix}{current_matchup} {team[1]}"

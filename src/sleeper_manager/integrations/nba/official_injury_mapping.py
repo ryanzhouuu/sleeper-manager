@@ -125,8 +125,7 @@ def map_official_injury_report(
             )
         )
         warnings.append(
-            f"Unresolved official injury identity: {entry.player_name} "
-            f"({entry.team_abbreviation})"
+            f"Unresolved official injury identity: {entry.player_name} ({entry.team_abbreviation})"
         )
 
     return OfficialInjuryMappingReport(

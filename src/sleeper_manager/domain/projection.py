@@ -59,9 +59,7 @@ class ProjectionDistribution:
             if not isfinite(value) or not self.lower_bound <= value <= self.upper_bound:
                 raise ProjectionCompatibilityError("Projection percentile is outside its range")
             previous_percentile = percentile
-        if (self.exceedance_score is None) != (
-            self.probability_exceeding_score is None
-        ):
+        if (self.exceedance_score is None) != (self.probability_exceeding_score is None):
             raise ProjectionCompatibilityError(
                 "Exceedance score and probability must be supplied together"
             )
@@ -135,9 +133,10 @@ class ProjectionDistribution:
             raise ValueError("Exceedance score must be finite")
         if self.weighted_observations:
             total_weight = sum(weight for _, weight in self.weighted_observations)
-            probability = sum(
-                weight for value, weight in self.weighted_observations if value > score
-            ) / total_weight
+            probability = (
+                sum(weight for value, weight in self.weighted_observations if value > score)
+                / total_weight
+            )
             return round(probability, 6)
         if self.variance == 0:
             return 1.0 if self.expected_value > score else 0.0
