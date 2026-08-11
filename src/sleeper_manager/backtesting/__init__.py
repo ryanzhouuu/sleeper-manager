@@ -13,6 +13,7 @@ from sleeper_manager.backtesting.models import (
     ProjectionModel,
     TargetSkip,
 )
+from sleeper_manager.backtesting.runner import run_backtest
 
 __all__ = (
     "BacktestComparison",
@@ -29,4 +30,5 @@ __all__ = (
     "NaiveProjectionKind",
     "ProjectionModel",
     "TargetSkip",
+    "run_backtest",
 )

@@ -1,0 +1,201 @@
+from datetime import UTC, datetime, timedelta
+
+import pytest
+
+from sleeper_manager.backtesting import (
+    BacktestConfig,
+    BacktestError,
+    BacktestModel,
+    NaiveProjectionBaseline,
+    run_backtest,
+)
+from sleeper_manager.domain.nba import AvailabilityStatus, SourceMetadata
+from sleeper_manager.domain.projection import ProjectionSnapshot
+from sleeper_manager.domain.scoring import BoxScoreLine, ScoringPolicy
+from sleeper_manager.integrations.nba.historical_features import (
+    AvailabilityObservation,
+    HistoricalFeatureDataset,
+    HistoricalFeatureRow,
+)
+from sleeper_manager.projections.direct_baseline import DirectFantasyPointBaseline
+
+SOURCE = SourceMetadata("fixture", "fixture", datetime(2026, 8, 10, tzinfo=UTC))
+POLICY = ScoringPolicy(points=1)
+
+
+def row(
+    game_id: str,
+    player_id: str,
+    start: datetime,
+    points: int,
+) -> HistoricalFeatureRow:
+    line = BoxScoreLine(points=points)
+    return HistoricalFeatureRow(
+        dataset_version="features-v1",
+        available_as_of=start - timedelta(minutes=30),
+        player_id=player_id,
+        sleeper_id=None,
+        game_id=game_id,
+        game_start=start,
+        team_id="CHI",
+        opponent_team_id="WAS",
+        opponent_abbreviation="was",
+        is_home=True,
+        days_rest=1,
+        is_back_to_back=False,
+        availability_status=AvailabilityStatus.UNKNOWN,
+        availability_observation=AvailabilityObservation.MISSING_REPORT,
+        availability_detail=None,
+        availability_observed_at=None,
+        prior_games=0,
+        prior_minutes_mean=None,
+        prior_minutes_last=None,
+        prior_start_rate=None,
+        target_minutes=30,
+        target_started=False,
+        target_did_play=True,
+        target_box_score=line,
+        target_line_points=points,
+        target_line_rebounds=0,
+        target_line_assists=0,
+        target_line_steals=0,
+        target_line_blocks=0,
+        target_line_turnovers=0,
+        source_lineage=(SOURCE,),
+    )
+
+
+def fixture_dataset() -> HistoricalFeatureDataset:
+    rows = (
+        row("p1-g1", "p1", datetime(2025, 1, 1, tzinfo=UTC), 10),
+        row("p2-g1", "p2", datetime(2025, 1, 1, tzinfo=UTC), 5),
+        row("p1-g2", "p1", datetime(2025, 1, 2, tzinfo=UTC), 20),
+        row("p1-g3", "p1", datetime(2025, 1, 3, tzinfo=UTC), 30),
+        row("p2-g2", "p2", datetime(2025, 1, 3, tzinfo=UTC), 15),
+    )
+    return HistoricalFeatureDataset(
+        dataset_version="features-v1",
+        feature_schema_version="1",
+        generated_at=datetime(2026, 8, 10, tzinfo=UTC),
+        source_versions=(),
+        rows=rows,
+    )
+
+
+def test_backtest_reports_walk_forward_metrics_and_warmup_skips() -> None:
+    report = run_backtest(
+        fixture_dataset(),
+        scoring_policy=POLICY,
+        models=(
+            BacktestModel("direct", DirectFantasyPointBaseline()),
+            BacktestModel("last_game", NaiveProjectionBaseline("last_game")),
+            BacktestModel("season_average", NaiveProjectionBaseline("season_average")),
+        ),
+    )
+
+    assert report.target_count == 3
+    assert len(report.target_skips) == 2
+    direct = report.result_for("direct")
+    assert direct.metrics.sample_count == 3
+    assert direct.metrics.coverage == 1
+    assert direct.metrics.mae is not None
+    assert direct.metrics.rmse is not None
+    assert direct.metrics.median_absolute_error is not None
+    assert direct.metrics.intervals[0].observed_coverage is not None
+    assert direct.metrics.intervals[0].mean_width is not None
+    assert tuple(threshold for threshold, _ in direct.metrics.brier_scores) == (
+        10.0,
+        20.0,
+        30.0,
+        40.0,
+    )
+    assert len(report.comparisons) == 2
+    assert all(comparison.common_sample_count == 3 for comparison in report.comparisons)
+
+
+class InspectingProjector:
+    def __init__(self) -> None:
+        self.target_rows: list[HistoricalFeatureRow] = []
+
+    def project(
+        self,
+        dataset: HistoricalFeatureDataset,
+        *,
+        player_id: str,
+        game_id: str,
+        scoring_policy: ScoringPolicy,
+        exceed_score: float | None = None,
+    ) -> ProjectionSnapshot:
+        assert all(row.game_start <= datetime(2025, 1, 3, tzinfo=UTC) for row in dataset.rows)
+        target = next(row for row in dataset.rows if row.game_id == game_id)
+        self.target_rows.append(target)
+        assert target.target_box_score == BoxScoreLine()
+        assert target.target_minutes is None
+        return NaiveProjectionBaseline("season_average").project(
+            dataset,
+            player_id=player_id,
+            game_id=game_id,
+            scoring_policy=scoring_policy,
+            exceed_score=exceed_score,
+        )
+
+
+def test_backtest_model_view_contains_only_prior_games_and_sanitized_target() -> None:
+    projector = InspectingProjector()
+
+    report = run_backtest(
+        fixture_dataset(),
+        scoring_policy=POLICY,
+        models=(BacktestModel("inspector", projector),),
+        config=BacktestConfig(start_at=datetime(2025, 1, 3, tzinfo=UTC)),
+    )
+
+    assert report.target_count == 2
+    assert [target.game_id for target in projector.target_rows] == ["p1-g3", "p2-g2"]
+
+
+class FailingProjector:
+    def project(
+        self,
+        dataset: HistoricalFeatureDataset,
+        *,
+        player_id: str,
+        game_id: str,
+        scoring_policy: ScoringPolicy,
+        exceed_score: float | None = None,
+    ) -> ProjectionSnapshot:
+        if game_id == "p1-g3":
+            raise BacktestError("candidate intentionally unavailable")
+        return NaiveProjectionBaseline("last_game").project(
+            dataset,
+            player_id=player_id,
+            game_id=game_id,
+            scoring_policy=scoring_policy,
+            exceed_score=exceed_score,
+        )
+
+
+def test_comparisons_use_common_successful_targets_and_preserve_skip_reason() -> None:
+    report = run_backtest(
+        fixture_dataset(),
+        scoring_policy=POLICY,
+        models=(
+            BacktestModel("reference", NaiveProjectionBaseline("last_game")),
+            BacktestModel("candidate", FailingProjector()),
+        ),
+        reference_model="reference",
+    )
+
+    candidate = report.result_for("candidate")
+    assert len(candidate.observations) == 2
+    assert len(candidate.skips) == 1
+    assert candidate.skips[0].game_id == "p1-g3"
+    assert "candidate intentionally unavailable" in candidate.skips[0].reason
+    assert report.comparisons[0].common_sample_count == 2
+
+
+def test_backtest_config_rejects_unordered_or_naive_inputs() -> None:
+    with pytest.raises(BacktestError):
+        BacktestConfig(thresholds=(20, 10))
+    with pytest.raises(BacktestError):
+        NaiveProjectionBaseline("unknown")  # type: ignore[arg-type]
