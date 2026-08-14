@@ -5,6 +5,7 @@ from sleeper_manager.backtesting import (
     ChronologicalFold,
     PromotionGateConfig,
     block_bootstrap_mae_delta,
+    evaluate_development_candidate,
     evaluate_promotion,
     regular_season_folds,
     run_validation_folds,
@@ -162,6 +163,16 @@ def test_validation_bootstrap_and_segments_use_paired_game_blocks() -> None:
     )
     assert starter.conclusive
     assert starter.mae_delta == -10
+
+    development = evaluate_development_candidate(
+        results,
+        reference_model="reference",
+        candidate_model="candidate",
+        bootstrap_samples=100,
+        bootstrap_seed=7,
+    )
+    assert development.selected
+    assert development.improved_folds == 1
 
     decision = evaluate_promotion(
         development_results=results,

@@ -4,8 +4,10 @@ import sys
 from collections import Counter
 from dataclasses import fields
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 from sleeper_manager import __version__
+from sleeper_manager.backtesting.experiment import run_model_feature_validation
 from sleeper_manager.config import Settings
 from sleeper_manager.domain.league import LeagueProfile
 from sleeper_manager.integrations.nba.espn import ESPNAPIError, ESPNClient
@@ -38,6 +40,22 @@ def build_parser() -> argparse.ArgumentParser:
     subcommands.add_parser(
         "phase3-test-notification",
         help="Send one idempotent placeholder notification for the Phase 3 operational test",
+    )
+    validation = subcommands.add_parser(
+        "validate-model-features",
+        help="Run the frozen four-season model feature validation experiment",
+    )
+    validation.add_argument(
+        "--workspace",
+        type=Path,
+        default=Path(".local/model-validation"),
+        help="Ignored local directory containing raw sources, injury cache, and reports",
+    )
+    validation.add_argument(
+        "--league-fixture",
+        type=Path,
+        default=Path("tests/fixtures/sleeper/current_league.json"),
+        help="Sleeper league payload providing the scoring_settings object",
     )
     return parser
 
@@ -214,6 +232,26 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "phase3-test-notification":
         settings = Settings()
         return asyncio.run(_phase3_test_notification(settings))
+    if args.command == "validate-model-features":
+        try:
+            output = run_model_feature_validation(
+                args.workspace,
+                league_fixture=args.league_fixture,
+            )
+        except (OSError, RuntimeError, ValueError) as error:
+            print(f"Model feature validation failed: {error}", file=sys.stderr)
+            return 2
+        print(f"Dataset: {output.dataset_version}")
+        print(
+            "Selected cumulative features: "
+            + (", ".join(output.selected_features) if output.selected_features else "none")
+        )
+        for candidate, recommendation in output.recommendations:
+            print(f"{candidate}: {recommendation}")
+        print(f"Frozen manifest: {output.frozen_manifest_path}")
+        print(f"JSON report: {output.report_json_path}")
+        print(f"Markdown report: {output.report_markdown_path}")
+        return 0
     return 2
 
 

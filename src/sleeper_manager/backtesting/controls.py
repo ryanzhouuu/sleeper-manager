@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable, Sequence
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
 
@@ -36,6 +37,7 @@ class NaiveProjectionBaseline:
             raise BacktestError("Naive projection percentiles must be between zero and 100")
         self.kind = kind
         self.percentiles = percentiles
+        self._indexes: dict[str, _NaiveHistoryIndex] = {}
 
     @property
     def model_version(self) -> str:
@@ -51,12 +53,19 @@ class NaiveProjectionBaseline:
         exceed_score: float | None = None,
     ) -> ProjectionSnapshot:
         target = _find_target(dataset.rows, player_id=player_id, game_id=game_id)
-        prior_rows = tuple(
-            row
-            for row in dataset.rows
-            if row.player_id == player_id
-            and row.game_start < target.game_start
-            and _season_key(row.game_start) == _season_key(target.game_start)
+        index = self._indexes.setdefault(dataset.dataset_version, _NaiveHistoryIndex())
+        point_in_time_count = getattr(dataset.rows, "prior_count", None)
+        target_is_last = bool(dataset.rows) and dataset.rows[-1] == target
+        prior_count = (
+            point_in_time_count
+            if isinstance(point_in_time_count, int)
+            else len(dataset.rows) - int(target_is_last)
+        )
+        index.extend(dataset.rows, prior_count)
+        prior_rows = index.rows_before(
+            player_id,
+            _season_key(target.game_start),
+            target.game_start,
         )
         if not prior_rows:
             raise BacktestError(
@@ -91,6 +100,29 @@ class NaiveProjectionBaseline:
             scoring_policy_version=scoring_policy.version,
             distribution=distribution,
             reasons=(ProjectionReason("naive_control", message),),
+        )
+
+
+@dataclass(slots=True)
+class _NaiveHistoryIndex:
+    processed_count: int = 0
+    players: dict[tuple[str, int], list[HistoricalFeatureRow]] = field(default_factory=dict)
+
+    def extend(self, rows: Sequence[HistoricalFeatureRow], prior_count: int) -> None:
+        if prior_count <= self.processed_count:
+            return
+        for row in rows[self.processed_count : prior_count]:
+            self.players.setdefault((row.player_id, _season_key(row.game_start)), []).append(row)
+        self.processed_count = prior_count
+
+    def rows_before(
+        self,
+        player_id: str,
+        season: int,
+        game_start: datetime,
+    ) -> tuple[HistoricalFeatureRow, ...]:
+        return tuple(
+            row for row in self.players.get((player_id, season), ()) if row.game_start < game_start
         )
 
 

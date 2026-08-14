@@ -94,6 +94,17 @@ class PromotionDecision:
 
 
 @dataclass(frozen=True, slots=True)
+class DevelopmentDecision:
+    candidate_model: str
+    selected: bool
+    promotion_eligible: bool
+    improved_folds: int
+    fold_count: int
+    bootstrap: BootstrapInterval
+    evidence: str
+
+
+@dataclass(frozen=True, slots=True)
 class _AggregateMetrics:
     sample_count: int
     mae: float | None
@@ -409,6 +420,51 @@ def evaluate_promotion(
     else:
         recommendation = "reject"
     return PromotionDecision(candidate_model, recommendation, promotable, gates)
+
+
+def evaluate_development_candidate(
+    fold_results: Iterable[FoldResult],
+    *,
+    reference_model: str,
+    candidate_model: str,
+    promotion_eligible: bool = True,
+    bootstrap_samples: int = 2000,
+    bootstrap_seed: int = 20260813,
+) -> DevelopmentDecision:
+    records = tuple(fold_results)
+    deltas = tuple(
+        comparison.mae_delta
+        for result in records
+        for comparison in result.report.comparisons
+        if comparison.reference_model == reference_model
+        and comparison.candidate_model == candidate_model
+        and comparison.mae_delta is not None
+    )
+    improved = sum(delta < 0 for delta in deltas)
+    bootstrap = block_bootstrap_mae_delta(
+        records,
+        reference_model=reference_model,
+        candidate_model=candidate_model,
+        samples=bootstrap_samples,
+        seed=bootstrap_seed,
+    )
+    majority = bool(deltas) and improved > len(deltas) / 2
+    uncertainty = bootstrap.upper is not None and bootstrap.upper < 0
+    selected = promotion_eligible and majority and uncertainty
+    evidence = (
+        f"improved_folds={improved}/{len(deltas)}; "
+        f"bootstrap_95=({bootstrap.lower}, {bootstrap.upper}); "
+        f"promotion_eligible={promotion_eligible}"
+    )
+    return DevelopmentDecision(
+        candidate_model,
+        selected,
+        promotion_eligible,
+        improved,
+        len(deltas),
+        bootstrap,
+        evidence,
+    )
 
 
 def _paired_error_blocks(

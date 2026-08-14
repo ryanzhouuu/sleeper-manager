@@ -216,3 +216,22 @@ def test_projection_cache_reuses_point_in_time_reference_prediction() -> None:
 
     assert first is second
     assert reference.calls == 1
+
+
+def test_projection_cache_can_bound_retained_snapshots() -> None:
+    records = (
+        row("first", datetime(2025, 1, 1, tzinfo=UTC), 20),
+        row("second", datetime(2025, 1, 2, tzinfo=UTC), 10),
+    )
+    reference = FixedReference()
+    cached = CachingProjectionModel(reference, max_entries=1)
+
+    for game_id in ("first", "second", "first"):
+        cached.project(
+            dataset(records),
+            player_id=f"player-{game_id}",
+            game_id=game_id,
+            scoring_policy=POLICY,
+        )
+
+    assert reference.calls == 3

@@ -85,6 +85,8 @@ class BacktestObservation:
     game_start: datetime
     available_as_of: datetime
     actual_score: float
+    model_version: str
+    input_version: str
     expected_value: float
     percentiles: tuple[tuple[int, float], ...]
     exceedance_probabilities: tuple[tuple[float, float], ...]

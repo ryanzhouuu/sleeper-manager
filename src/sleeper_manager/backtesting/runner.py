@@ -93,6 +93,8 @@ def run_backtest(
                     game_start=target.game_start,
                     available_as_of=target.available_as_of,
                     actual_score=actual_score,
+                    model_version=snapshot.model_version,
+                    input_version=snapshot.input_version,
                     expected_value=snapshot.distribution.expected_value,
                     percentiles=snapshot.distribution.percentiles,
                     exceedance_probabilities=tuple(

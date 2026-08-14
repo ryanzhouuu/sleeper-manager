@@ -36,8 +36,11 @@ class ResidualFeature(StrEnum):
 
 
 class CachingProjectionModel:
-    def __init__(self, projector: ProjectionModel) -> None:
+    def __init__(self, projector: ProjectionModel, *, max_entries: int | None = None) -> None:
+        if max_entries is not None and max_entries <= 0:
+            raise ResidualCandidateError("Projection cache size must be positive")
         self.projector = projector
+        self.max_entries = max_entries
         self._snapshots: dict[
             tuple[str, str, str, str, float | None],
             ProjectionSnapshot,
@@ -60,6 +63,8 @@ class CachingProjectionModel:
             exceed_score,
         )
         if key not in self._snapshots:
+            if self.max_entries is not None and len(self._snapshots) >= self.max_entries:
+                del self._snapshots[next(iter(self._snapshots))]
             self._snapshots[key] = self.projector.project(
                 dataset,
                 player_id=player_id,
