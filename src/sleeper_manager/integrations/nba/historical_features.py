@@ -13,6 +13,7 @@ from sleeper_manager.domain.nba import (
     ScheduledGame,
     SourceMetadata,
     Team,
+    TeamBoxScore,
 )
 from sleeper_manager.domain.scoring import BoxScoreLine
 from sleeper_manager.integrations.nba.identity import PlayerMapping
@@ -23,8 +24,9 @@ from sleeper_manager.integrations.nba.official_injury_report import (
     OfficialInjuryReportSnapshot,
     ReportSubmissionStatus,
 )
+from sleeper_manager.integrations.nba.travel import travel_context
 
-FEATURE_SCHEMA_VERSION = "1"
+FEATURE_SCHEMA_VERSION = "2"
 
 
 class HistoricalFeatureDatasetError(ValueError):
@@ -36,6 +38,13 @@ class AvailabilityObservation(StrEnum):
     NOT_LISTED = "not_listed"
     TEAM_NOT_YET_SUBMITTED = "team_not_yet_submitted"
     MISSING_REPORT = "missing_report"
+
+
+class OpponentStatsFallback(StrEnum):
+    OBSERVED = "observed"
+    SHRUNK = "shrunk"
+    LEAGUE_AVERAGE = "league_average"
+    MISSING = "missing"
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +80,17 @@ class HistoricalFeatureRow:
     target_line_blocks: int
     target_line_turnovers: int
     source_lineage: tuple[SourceMetadata, ...]
+    opponent_offensive_rating: float | None = None
+    opponent_defensive_rating: float | None = None
+    opponent_pace: float | None = None
+    opponent_sample_size: int = 0
+    opponent_stats_fallback: OpponentStatsFallback = OpponentStatsFallback.MISSING
+    prior_venue_id: str | None = None
+    destination_venue_id: str | None = None
+    travel_distance_miles: float | None = None
+    time_zone_change_hours: float | None = None
+    travel_direction: str = "unknown"
+    travel_fallback: str = "unknown_venue"
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +120,7 @@ def build_historical_feature_dataset(
     decision_cutoffs: Mapping[str, datetime] | Callable[[ScheduledGame], datetime],
     dataset_version: str,
     generated_at: datetime,
+    team_box_scores: Iterable[TeamBoxScore] = (),
 ) -> HistoricalFeatureDataset:
     _validate_timestamp(generated_at, "generated_at")
     if not dataset_version.strip():
@@ -110,6 +131,7 @@ def build_historical_feature_dataset(
     team_records = tuple(teams)
     report_records = tuple(injury_reports)
     availability_records = tuple(availability)
+    team_box_score_records = tuple(team_box_scores)
     game_by_id = _index_games(game_records)
     team_abbreviations = _index_teams(team_records)
     sleeper_by_provider_id = _index_player_mappings(player_mappings)
@@ -138,6 +160,15 @@ def build_historical_feature_dataset(
         days_rest, is_back_to_back, schedule_source = _rest_features(
             game, box_score.team_id, team_schedule
         )
+        opponent_stats = _opponent_stats(
+            game,
+            opponent_team_id=opponent_team_id,
+            team_box_scores=team_box_score_records,
+        )
+        travel = travel_context(
+            game,
+            prior_games=team_schedule.get(box_score.team_id, ()),
+        )
         prior = tuple(
             record
             for record in prior_by_player.get(box_score.player_id, ())
@@ -153,6 +184,7 @@ def build_historical_feature_dataset(
         )
         source_lineage = _lineage(
             box_score.source,
+            *box_score.additional_sources,
             game.source,
             schedule_source,
             latest_availability[4],
@@ -190,6 +222,17 @@ def build_historical_feature_dataset(
                 target_line_blocks=box_score.line.blocks,
                 target_line_turnovers=box_score.line.turnovers,
                 source_lineage=source_lineage,
+                opponent_offensive_rating=opponent_stats[0],
+                opponent_defensive_rating=opponent_stats[1],
+                opponent_pace=opponent_stats[2],
+                opponent_sample_size=opponent_stats[3],
+                opponent_stats_fallback=opponent_stats[4],
+                prior_venue_id=travel.prior_venue_id,
+                destination_venue_id=travel.destination_venue_id,
+                travel_distance_miles=travel.distance_miles,
+                time_zone_change_hours=travel.time_zone_change_hours,
+                travel_direction=travel.direction,
+                travel_fallback=travel.fallback,
             )
         )
 
@@ -198,7 +241,9 @@ def build_historical_feature_dataset(
         dataset_version=dataset_version,
         feature_schema_version=FEATURE_SCHEMA_VERSION,
         generated_at=generated_at,
-        source_versions=_source_versions(sorted_rows),
+        source_versions=_source_versions(
+            sorted_rows, extra_sources=(record.source for record in team_box_score_records)
+        ),
         rows=sorted_rows,
     )
 
@@ -363,6 +408,71 @@ def _rest_features(
     return max(date_difference - 1, 0), date_difference <= 1, previous_game.source
 
 
+def _opponent_stats(
+    game: ScheduledGame,
+    *,
+    opponent_team_id: str,
+    team_box_scores: tuple[TeamBoxScore, ...],
+    lookback_games: int = 10,
+    shrinkage_games: float = 5.0,
+) -> tuple[float | None, float | None, float | None, int, OpponentStatsFallback]:
+    prior = tuple(
+        record
+        for record in team_box_scores
+        if record.played_at < game.start_time
+        and _season_key(record.played_at) == _season_key(game.start_time)
+        and record.estimated_possessions > 0
+    )
+    if not prior:
+        return None, None, None, 0, OpponentStatsFallback.MISSING
+    opponent_prior = tuple(record for record in prior if record.team_id == opponent_team_id)[
+        -lookback_games:
+    ]
+    league_offense = _mean(record.points / record.estimated_possessions * 100 for record in prior)
+    league_defense = _mean(
+        record.opponent_points / record.estimated_possessions * 100 for record in prior
+    )
+    league_pace = _mean(record.estimated_possessions for record in prior)
+    if not opponent_prior:
+        return (
+            round(league_offense, 6),
+            round(league_defense, 6),
+            round(league_pace, 6),
+            0,
+            OpponentStatsFallback.LEAGUE_AVERAGE,
+        )
+    sample_size = len(opponent_prior)
+    weight = sample_size / (sample_size + shrinkage_games)
+    offense = _mean(record.points / record.estimated_possessions * 100 for record in opponent_prior)
+    defense = _mean(
+        record.opponent_points / record.estimated_possessions * 100 for record in opponent_prior
+    )
+    pace = _mean(record.estimated_possessions for record in opponent_prior)
+    fallback = (
+        OpponentStatsFallback.OBSERVED
+        if sample_size >= lookback_games
+        else OpponentStatsFallback.SHRUNK
+    )
+    return (
+        round(league_offense + weight * (offense - league_offense), 6),
+        round(league_defense + weight * (defense - league_defense), 6),
+        round(league_pace + weight * (pace - league_pace), 6),
+        sample_size,
+        fallback,
+    )
+
+
+def _mean(values: Iterable[float]) -> float:
+    records = tuple(values)
+    if not records:
+        raise HistoricalFeatureDatasetError("Cannot average an empty feature group")
+    return sum(records) / len(records)
+
+
+def _season_key(value: datetime) -> int:
+    return value.year if value.month >= 10 else value.year - 1
+
+
 def _mean_minutes(records: tuple[PlayerBoxScore, ...]) -> float | None:
     minutes = tuple(record.minutes for record in records if record.minutes is not None)
     return sum(minutes) / len(minutes) if minutes else None
@@ -498,13 +608,20 @@ def _lineage(
     return tuple(result)
 
 
-def _source_versions(rows: Iterable[HistoricalFeatureRow]) -> tuple[DatasetSourceVersion, ...]:
+def _source_versions(
+    rows: Iterable[HistoricalFeatureRow],
+    *,
+    extra_sources: Iterable[SourceMetadata] = (),
+) -> tuple[DatasetSourceVersion, ...]:
     by_provider: dict[str, set[str]] = defaultdict(set)
     source_ids: dict[str, set[str]] = defaultdict(set)
     for row in rows:
         for source in row.source_lineage:
             by_provider[source.provider].add(source.schema_version)
             source_ids[source.provider].add(source.provider_id)
+    for source in extra_sources:
+        by_provider[source.provider].add(source.schema_version)
+        source_ids[source.provider].add(source.provider_id)
     return tuple(
         DatasetSourceVersion(
             provider=provider,

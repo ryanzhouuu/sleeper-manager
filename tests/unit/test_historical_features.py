@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 
 import pytest
@@ -10,10 +11,12 @@ from sleeper_manager.domain.nba import (
     ScheduledGame,
     SourceMetadata,
     Team,
+    TeamBoxScore,
 )
 from sleeper_manager.integrations.nba.historical_features import (
     AvailabilityObservation,
     HistoricalFeatureDatasetError,
+    OpponentStatsFallback,
     build_historical_feature_dataset,
 )
 from sleeper_manager.integrations.nba.identity import (
@@ -195,3 +198,99 @@ def test_historical_feature_dataset_rejects_future_decision_cutoff() -> None:
             dataset_version="v1",
             generated_at=NOW,
         )
+
+
+def test_historical_features_use_prior_only_opponent_stats_and_travel() -> None:
+    previous = replace(
+        game("game-1", "2025-01-01T01:00:00"),
+        venue_id="1847",
+        venue_name="United Center",
+        venue_city="Chicago",
+        venue_state="IL",
+    )
+    target = ScheduledGame(
+        "game-2",
+        datetime(2025, 1, 3, 1, tzinfo=UTC),
+        GameStatus.FINAL,
+        "WAS",
+        "CHI",
+        None,
+        SOURCE,
+        venue_id="1823",
+        venue_name="Capital One Arena",
+        venue_city="Washington",
+        venue_state="DC",
+    )
+    prior_opponent = TeamBoxScore(
+        "game-1",
+        "WAS",
+        "CHI",
+        previous.start_time,
+        110,
+        100,
+        90,
+        20,
+        10,
+        12,
+        SOURCE,
+    )
+    prior_league = TeamBoxScore(
+        "league-game",
+        "OTHER",
+        "OTHER-2",
+        previous.start_time,
+        90,
+        95,
+        90,
+        10,
+        10,
+        10,
+        SOURCE,
+    )
+    future_opponent = replace(
+        prior_opponent,
+        game_id="future",
+        played_at=datetime(2025, 1, 4, tzinfo=UTC),
+        points=300,
+    )
+    inputs = dict(
+        box_scores=[
+            box("game-1", "espn-1", "2025-01-01T01:00:00", 30, True),
+            box("game-2", "espn-1", "2025-01-03T01:00:00", 30, True),
+        ],
+        games=[previous, target],
+        teams=[team("CHI", "CHI"), team("WAS", "WAS")],
+        player_mappings=[],
+        injury_reports=[],
+        availability=[],
+        decision_cutoffs={
+            "game-1": datetime(2025, 1, 1, tzinfo=UTC),
+            "game-2": datetime(2025, 1, 3, tzinfo=UTC),
+        },
+        dataset_version="v2",
+        generated_at=NOW,
+    )
+
+    dataset = build_historical_feature_dataset(
+        **inputs,
+        team_box_scores=[prior_opponent, prior_league, future_opponent],
+    )
+    without_future = build_historical_feature_dataset(
+        **inputs,
+        team_box_scores=[prior_opponent, prior_league],
+    )
+
+    row = dataset.rows[-1]
+    comparison = without_future.rows[-1]
+    assert dataset.feature_schema_version == "2"
+    assert row.opponent_sample_size == 1
+    assert row.opponent_stats_fallback is OpponentStatsFallback.SHRUNK
+    assert row.opponent_offensive_rating == comparison.opponent_offensive_rating
+    assert row.opponent_defensive_rating == comparison.opponent_defensive_rating
+    assert row.opponent_pace == comparison.opponent_pace
+    assert row.prior_venue_id == "1847"
+    assert row.destination_venue_id == "1823"
+    assert row.travel_distance_miles is not None and row.travel_distance_miles > 500
+    assert row.time_zone_change_hours == 1
+    assert row.travel_direction == "east"
+    assert row.travel_fallback == "observed"
