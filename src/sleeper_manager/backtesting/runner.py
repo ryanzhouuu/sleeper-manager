@@ -226,6 +226,10 @@ class _PointInTimeRows(Sequence[HistoricalFeatureRow]):
     def __len__(self) -> int:
         return self._prior_count + 1
 
+    @property
+    def prior_count(self) -> int:
+        return self._prior_count
+
     def __iter__(self) -> Iterator[HistoricalFeatureRow]:
         yield from islice(self._rows, self._prior_count)
         yield self._target

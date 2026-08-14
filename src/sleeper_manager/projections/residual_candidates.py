@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable
+from bisect import bisect_left
+from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from math import exp, isfinite, log
 
@@ -141,11 +143,61 @@ class ResidualHistory:
         scoring_policy: ScoringPolicy,
         lookback_days: int,
     ) -> tuple[tuple[HistoricalFeatureRow, float], ...]:
+        state = self._prepare(
+            dataset,
+            target=target,
+            feature=feature,
+            scoring_policy=scoring_policy,
+        )
+        target_key = _feature_key(target, feature)
+        return tuple(
+            (row, residual)
+            for row, residual in state.rows.get(target_key, ())
+            if (target.game_start - row.game_start).days <= lookback_days
+        )
+
+    def summarize(
+        self,
+        dataset: HistoricalFeatureDataset,
+        *,
+        target: HistoricalFeatureRow,
+        feature: ResidualFeature,
+        scoring_policy: ScoringPolicy,
+        lookback_days: int,
+        half_life_days: float,
+    ) -> _ResidualSummary:
+        state = self._prepare(
+            dataset,
+            target=target,
+            feature=feature,
+            scoring_policy=scoring_policy,
+        )
+        weighted = state.weighted.get(half_life_days)
+        if weighted is None:
+            weighted = {
+                key: _WeightedResidualSeries.from_rows(rows, half_life_days=half_life_days)
+                for key, rows in state.rows.items()
+            }
+            state.weighted[half_life_days] = weighted
+        series = weighted.get(_feature_key(target, feature))
+        if series is None:
+            return _ResidualSummary(0.0, 0.0, 0)
+        return series.summary(target.game_start, lookback_days=lookback_days)
+
+    def _prepare(
+        self,
+        dataset: HistoricalFeatureDataset,
+        *,
+        target: HistoricalFeatureRow,
+        feature: ResidualFeature,
+        scoring_policy: ScoringPolicy,
+    ) -> _GroupedResiduals:
         state_key = (dataset.dataset_version, scoring_policy.version, feature)
         state = self._groups.setdefault(state_key, _GroupedResiduals())
+        point_in_time_count = getattr(dataset.rows, "prior_count", None)
         prior_count = (
-            len(dataset.rows) - 1
-            if dataset.rows and dataset.rows[-1] == target
+            point_in_time_count
+            if isinstance(point_in_time_count, int)
             else sum(row.game_start < target.game_start for row in dataset.rows)
         )
         if prior_count < state.processed_count:
@@ -153,14 +205,16 @@ class ResidualHistory:
         for row in dataset.rows[state.processed_count : prior_count]:
             residual = self.residual(dataset, row, scoring_policy)
             if residual is not None:
-                state.rows.setdefault(_feature_key(row, feature), []).append((row, residual))
+                key = _feature_key(row, feature)
+                state.rows.setdefault(key, []).append((row, residual))
+                for half_life_days, groups in state.weighted.items():
+                    series = groups.setdefault(
+                        key,
+                        _WeightedResidualSeries(half_life_days=half_life_days),
+                    )
+                    series.append(row, residual)
         state.processed_count = prior_count
-        target_key = _feature_key(target, feature)
-        return tuple(
-            (row, residual)
-            for row, residual in state.rows.get(target_key, ())
-            if (target.game_start - row.game_start).days <= lookback_days
-        )
+        return state
 
 
 @dataclass(slots=True)
@@ -169,6 +223,69 @@ class _GroupedResiduals:
     rows: dict[tuple[str, ...], list[tuple[HistoricalFeatureRow, float]]] = field(
         default_factory=dict
     )
+    weighted: dict[float, dict[tuple[str, ...], _WeightedResidualSeries]] = field(
+        default_factory=dict
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _ResidualSummary:
+    weighted_residual: float
+    effective_sample: float
+    count: int
+
+
+@dataclass(slots=True)
+class _WeightedResidualSeries:
+    half_life_days: float
+    origin: datetime = datetime(2020, 1, 1, tzinfo=UTC)
+    starts: list[datetime] = field(default_factory=list)
+    cumulative_weights: list[float] = field(default_factory=list)
+    cumulative_weighted_residuals: list[float] = field(default_factory=list)
+
+    @classmethod
+    def from_rows(
+        cls,
+        rows: Sequence[tuple[HistoricalFeatureRow, float]],
+        *,
+        half_life_days: float,
+    ) -> _WeightedResidualSeries:
+        result = cls(half_life_days=half_life_days)
+        for row, residual in rows:
+            result.append(row, residual)
+        return result
+
+    def append(self, row: HistoricalFeatureRow, residual: float) -> None:
+        age_from_origin = (row.game_start - self.origin).total_seconds() / 86400
+        weight = exp(log(2) * age_from_origin / self.half_life_days)
+        self.starts.append(row.game_start)
+        self.cumulative_weights.append(
+            weight + (self.cumulative_weights[-1] if self.cumulative_weights else 0)
+        )
+        self.cumulative_weighted_residuals.append(
+            residual * weight
+            + (self.cumulative_weighted_residuals[-1] if self.cumulative_weighted_residuals else 0)
+        )
+
+    def summary(self, target_at: datetime, *, lookback_days: int) -> _ResidualSummary:
+        upper = bisect_left(self.starts, target_at)
+        lower = bisect_left(self.starts, target_at - timedelta(days=lookback_days))
+        count = upper - lower
+        if count <= 0:
+            return _ResidualSummary(0.0, 0.0, 0)
+        transformed_weight = self.cumulative_weights[upper - 1] - (
+            self.cumulative_weights[lower - 1] if lower else 0
+        )
+        transformed_residual = self.cumulative_weighted_residuals[upper - 1] - (
+            self.cumulative_weighted_residuals[lower - 1] if lower else 0
+        )
+        target_age = (target_at - self.origin).total_seconds() / 86400
+        effective_sample = transformed_weight * exp(-log(2) * target_age / self.half_life_days)
+        return _ResidualSummary(
+            transformed_residual / transformed_weight,
+            effective_sample,
+            count,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,7 +294,8 @@ class _Adjustment:
     key: tuple[str, ...]
     value: float
     effective_sample: float
-    matching_rows: tuple[tuple[str, str], ...]
+    matching_count: int
+    matching_fingerprint: str
 
 
 class ShrunkenResidualCandidate:
@@ -267,42 +385,51 @@ class ShrunkenResidualCandidate:
         scoring_policy: ScoringPolicy,
     ) -> _Adjustment:
         target_key = _feature_key(target, feature)
-        observations: list[tuple[float, float, HistoricalFeatureRow]] = []
-        matching = self.residual_history.matching(
+        summary = self.residual_history.summarize(
             dataset,
             target=target,
             feature=feature,
             scoring_policy=scoring_policy,
             lookback_days=self.config.lookback_days,
+            half_life_days=self.config.recency_half_life_days,
         )
-        for row, residual in matching:
-            age_days = max((target.game_start - row.game_start).total_seconds() / 86400, 0)
-            weight = exp(-log(2) * age_days / self.config.recency_half_life_days)
-            observations.append((residual, weight, row))
-        effective_sample = sum(weight for _, weight, _ in observations)
+        effective_sample = summary.effective_sample
         if effective_sample <= 0:
-            return _Adjustment(feature, target_key, 0.0, 0.0, ())
-        weighted_residual = (
-            sum(residual * weight for residual, weight, _ in observations) / effective_sample
-        )
+            return _Adjustment(feature, target_key, 0.0, 0.0, 0, "empty")
         shrinkage = effective_sample / (effective_sample + self.config.shrinkage_games)
         value = _clamp(
-            weighted_residual * shrinkage,
+            summary.weighted_residual * shrinkage,
             -self.config.max_adjustment,
             self.config.max_adjustment,
         )
+        fingerprint = hashlib.sha256(
+            repr(
+                (
+                    feature.value,
+                    target_key,
+                    summary.count,
+                    round(summary.weighted_residual, 12),
+                    round(summary.effective_sample, 12),
+                )
+            ).encode()
+        ).hexdigest()
         return _Adjustment(
             feature,
             target_key,
             round(value, 6),
             round(effective_sample, 6),
-            tuple((row.player_id, row.game_id) for _, _, row in observations),
+            summary.count,
+            fingerprint,
         )
 
 
 def _find_target(
-    rows: Iterable[HistoricalFeatureRow], *, player_id: str, game_id: str
+    rows: Sequence[HistoricalFeatureRow], *, player_id: str, game_id: str
 ) -> HistoricalFeatureRow:
+    if rows:
+        latest = rows[-1]
+        if latest.player_id == player_id and latest.game_id == game_id:
+            return latest
     matches = tuple(row for row in rows if row.player_id == player_id and row.game_id == game_id)
     if len(matches) != 1:
         raise ResidualCandidateError(
@@ -385,13 +512,14 @@ def _input_version(
                 "key": adjustment.key,
                 "value": adjustment.value,
                 "effective_sample": adjustment.effective_sample,
-                "matching_rows": adjustment.matching_rows,
+                "matching_count": adjustment.matching_count,
+                "matching_fingerprint": adjustment.matching_fingerprint,
             }
             for adjustment in adjustments
         ],
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    return f"residual-input-v1-{hashlib.sha256(encoded).hexdigest()[:12]}"
+    return f"residual-input-v2-{hashlib.sha256(encoded).hexdigest()[:12]}"
 
 
 def _clamp(value: float, lower: float, upper: float) -> float:

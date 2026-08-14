@@ -101,7 +101,7 @@ def test_direct_baseline_projects_sleeper_points_with_versions_reasons_and_excee
         snapshot.distribution.probability_of_exceeding(12)
     )
     assert snapshot.model_version.startswith("projection-baseline-v1-")
-    assert snapshot.input_version.startswith("projection-input-v1-")
+    assert snapshot.input_version.startswith("projection-input-v2-")
     assert snapshot.scoring_policy_version == POLICY.version
     assert any(reason.code == "minutes_role" for reason in snapshot.reasons)
     assert any(reason.code == "season_shrinkage" for reason in snapshot.reasons)
@@ -138,6 +138,24 @@ def test_direct_baseline_requires_prior_same_season_observations() -> None:
             game_id="target",
             scoring_policy=POLICY,
         )
+
+
+def test_direct_baseline_preserves_recency_weighted_season_fallback() -> None:
+    target = row("target", "new-player", datetime(2025, 1, 3, tzinfo=UTC), 0, 0)
+    history = (
+        row("older", "player-1", datetime(2025, 1, 1, tzinfo=UTC), 19, 20),
+        row("recent", "player-2", datetime(2025, 1, 2, tzinfo=UTC), 9, 20),
+    )
+    snapshot = DirectFantasyPointBaseline(
+        ProjectionBaselineConfig(recency_half_life_days=1)
+    ).project(
+        dataset(history + (target,)),
+        player_id="new-player",
+        game_id="target",
+        scoring_policy=POLICY,
+    )
+
+    assert snapshot.distribution.expected_value == pytest.approx(40 / 3)
 
 
 def test_baseline_config_rejects_invalid_or_unknown_adjustments() -> None:

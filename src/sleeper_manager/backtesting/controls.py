@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from datetime import datetime
 from typing import Literal
 
@@ -95,8 +95,12 @@ class NaiveProjectionBaseline:
 
 
 def _find_target(
-    rows: Iterable[HistoricalFeatureRow], *, player_id: str, game_id: str
+    rows: Sequence[HistoricalFeatureRow], *, player_id: str, game_id: str
 ) -> HistoricalFeatureRow:
+    if rows:
+        latest = rows[-1]
+        if latest.player_id == player_id and latest.game_id == game_id:
+            return latest
     matches = tuple(row for row in rows if row.player_id == player_id and row.game_id == game_id)
     if len(matches) != 1:
         raise BacktestError(f"Expected one feature row for player/game, found {len(matches)}")

@@ -132,7 +132,7 @@ def test_residual_candidate_uses_matching_prior_group_and_excludes_future() -> N
 
     assert snapshot.distribution.expected_value == 20
     assert snapshot.distribution.probability_exceeding_score == pytest.approx(2 / 3)
-    assert snapshot.input_version.startswith("residual-input-v1-")
+    assert snapshot.input_version.startswith("residual-input-v2-")
     assert snapshot.model_version.startswith("residual-candidate-v1-")
     assert snapshot.reasons[-1].adjustment == 10
     assert snapshot.reasons[-1].applied
@@ -158,6 +158,30 @@ def test_residual_candidate_sparse_group_falls_back_to_zero() -> None:
     assert snapshot.distribution.expected_value == 10
     assert snapshot.reasons[-1].adjustment == 0
     assert not snapshot.reasons[-1].applied
+
+
+def test_residual_candidate_excludes_rows_outside_lookback() -> None:
+    records = (
+        row("old", datetime(2025, 1, 1, tzinfo=UTC), 20),
+        row("target", datetime(2025, 1, 3, tzinfo=UTC), 0),
+    )
+    candidate = ShrunkenResidualCandidate(
+        ResidualCandidateConfig(
+            (ResidualFeature.OPPONENT_IDENTITY,),
+            shrinkage_games=0,
+            lookback_days=1,
+        ),
+        reference=FixedReference(),
+    )
+
+    snapshot = candidate.project(
+        dataset(records),
+        player_id="player-target",
+        game_id="target",
+        scoring_policy=POLICY,
+    )
+
+    assert snapshot.distribution.expected_value == 10
 
 
 def test_residual_candidate_rejects_invalid_config() -> None:
