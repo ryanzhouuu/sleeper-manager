@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from enum import StrEnum
@@ -109,7 +109,7 @@ class HistoricalFeatureDataset:
     feature_schema_version: str
     generated_at: datetime
     source_versions: tuple[DatasetSourceVersion, ...]
-    rows: tuple[HistoricalFeatureRow, ...]
+    rows: Sequence[HistoricalFeatureRow]
 
 
 def build_historical_feature_dataset(

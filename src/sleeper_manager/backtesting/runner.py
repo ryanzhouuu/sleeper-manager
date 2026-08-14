@@ -1,10 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
+from bisect import bisect_left
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import replace
 from datetime import datetime
+from itertools import islice
 from math import sqrt
 from statistics import median
+from typing import overload
 
 from sleeper_manager.backtesting.models import (
     BacktestComparison,
@@ -45,14 +48,23 @@ def run_backtest(
     if reference not in names:
         raise BacktestError(f"Unknown reference model: {reference!r}")
     _validate_dataset(dataset)
-    targets, target_skips = _eligible_targets(dataset.rows, config)
+    chronological_rows = tuple(
+        sorted(dataset.rows, key=lambda row: (row.game_start, row.game_id, row.player_id))
+    )
+    game_starts = tuple(row.game_start for row in chronological_rows)
+    targets, target_skips = _eligible_targets(chronological_rows, config)
     observations_by_model: dict[str, list[BacktestObservation]] = {
         model.name: [] for model in model_records
     }
     skips_by_model: dict[str, list[BacktestSkip]] = {model.name: [] for model in model_records}
 
     for target in targets:
-        point_in_time_dataset = _point_in_time_dataset(dataset, target)
+        point_in_time_dataset = _point_in_time_dataset(
+            dataset,
+            chronological_rows,
+            game_starts,
+            target,
+        )
         actual_score = calculate_fantasy_points(target.target_box_score, scoring_policy)
         for model in model_records:
             try:
@@ -141,17 +153,22 @@ def _eligible_targets(
     records = tuple(sorted(rows, key=lambda row: (row.game_start, row.game_id, row.player_id)))
     targets: list[HistoricalFeatureRow] = []
     skips: list[TargetSkip] = []
+    prior_games_by_player_season: dict[tuple[str, int], int] = {}
+    pending_game_time: datetime | None = None
+    pending_counts: dict[tuple[str, int], int] = {}
     for row in records:
+        if pending_game_time is not None and row.game_start != pending_game_time:
+            for key, count in pending_counts.items():
+                prior_games_by_player_season[key] = prior_games_by_player_season.get(key, 0) + count
+            pending_counts.clear()
+        pending_game_time = row.game_start
+        player_season = row.player_id, _season_key(row.game_start)
+        prior_games = prior_games_by_player_season.get(player_season, 0)
+        pending_counts[player_season] = pending_counts.get(player_season, 0) + 1
         if config.start_at is not None and row.game_start < config.start_at:
             continue
         if config.end_at is not None and row.game_start > config.end_at:
             continue
-        prior_games = sum(
-            prior.player_id == row.player_id
-            and prior.game_start < row.game_start
-            and _season_key(prior.game_start) == _season_key(row.game_start)
-            for prior in records
-        )
         if prior_games < config.min_prior_games:
             skips.append(
                 TargetSkip(
@@ -170,9 +187,12 @@ def _eligible_targets(
 
 
 def _point_in_time_dataset(
-    dataset: HistoricalFeatureDataset, target: HistoricalFeatureRow
+    dataset: HistoricalFeatureDataset,
+    chronological_rows: tuple[HistoricalFeatureRow, ...],
+    game_starts: tuple[datetime, ...],
+    target: HistoricalFeatureRow,
 ) -> HistoricalFeatureDataset:
-    prior_rows = tuple(row for row in dataset.rows if row.game_start < target.game_start)
+    prior_count = bisect_left(game_starts, target.game_start)
     sanitized_target = replace(
         target,
         target_minutes=None,
@@ -188,13 +208,46 @@ def _point_in_time_dataset(
     )
     return replace(
         dataset,
-        rows=tuple(
-            sorted(
-                prior_rows + (sanitized_target,),
-                key=lambda row: (row.game_start, row.game_id, row.player_id),
-            )
-        ),
+        rows=_PointInTimeRows(chronological_rows, prior_count, sanitized_target),
     )
+
+
+class _PointInTimeRows(Sequence[HistoricalFeatureRow]):
+    def __init__(
+        self,
+        rows: tuple[HistoricalFeatureRow, ...],
+        prior_count: int,
+        target: HistoricalFeatureRow,
+    ) -> None:
+        self._rows = rows
+        self._prior_count = prior_count
+        self._target = target
+
+    def __len__(self) -> int:
+        return self._prior_count + 1
+
+    def __iter__(self) -> Iterator[HistoricalFeatureRow]:
+        yield from islice(self._rows, self._prior_count)
+        yield self._target
+
+    @overload
+    def __getitem__(self, index: int) -> HistoricalFeatureRow: ...
+
+    @overload
+    def __getitem__(self, index: slice) -> tuple[HistoricalFeatureRow, ...]: ...
+
+    def __getitem__(
+        self, index: int | slice
+    ) -> HistoricalFeatureRow | tuple[HistoricalFeatureRow, ...]:
+        if isinstance(index, slice):
+            start, stop, step = index.indices(len(self))
+            return tuple(self[position] for position in range(start, stop, step))
+        normalized = index if index >= 0 else len(self) + index
+        if normalized < 0 or normalized >= len(self):
+            raise IndexError(index)
+        if normalized == self._prior_count:
+            return self._target
+        return self._rows[normalized]
 
 
 def _validate_snapshot(
