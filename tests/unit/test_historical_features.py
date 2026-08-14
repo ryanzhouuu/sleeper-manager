@@ -297,3 +297,28 @@ def test_historical_features_use_prior_only_opponent_stats_and_travel() -> None:
     assert row.time_zone_change_hours == 1
     assert row.travel_direction == "east"
     assert row.travel_fallback == "observed"
+
+
+def test_player_history_resets_at_season_boundary() -> None:
+    previous = game("previous", "2025-04-01T01:00:00")
+    target = game("target", "2025-10-20T01:00:00")
+    dataset = build_historical_feature_dataset(
+        box_scores=[
+            box("previous", "espn-1", "2025-04-01T01:00:00", 30, True),
+            box("target", "espn-1", "2025-10-20T01:00:00", 30, True),
+        ],
+        games=[previous, target],
+        teams=[team("CHI", "CHI"), team("WAS", "WAS")],
+        player_mappings=[],
+        injury_reports=[],
+        availability=[],
+        decision_cutoffs={
+            "previous": datetime(2025, 4, 1, tzinfo=UTC),
+            "target": datetime(2025, 10, 20, tzinfo=UTC),
+        },
+        dataset_version="v2",
+        generated_at=NOW,
+    )
+
+    assert dataset.rows[-1].prior_games == 0
+    assert dataset.rows[-1].prior_minutes_mean is None

@@ -175,7 +175,9 @@ def build_historical_feature_dataset(
         prior = tuple(
             record
             for record in prior_by_player.get(box_score.player_id, ())
-            if record.played_at is not None and record.played_at < game.start_time
+            if record.played_at is not None
+            and record.played_at < game.start_time
+            and _season_key(record.played_at) == _season_key(game.start_time)
         )
         latest_availability = _availability_at_cutoff(
             player_id=box_score.player_id,
