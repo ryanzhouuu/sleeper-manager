@@ -463,6 +463,13 @@ def _report(
             "unique_snapshots": len(injuries.snapshots),
             "unresolved_identity_count": injuries.unresolved_identity_count,
             "mapping_warning_count": injuries.mapping_warning_count,
+            "fallback_selections": sum(
+                value.selected_at is not None and value.selected_at != value.requested_at
+                for value in injuries.selections
+            ),
+            "unavailable_archive_objects": sum(
+                len(value.unavailable_candidates) for value in injuries.selections
+            ),
             "feature_observation_counts": dict(sorted(injury_observations.items())),
         },
         "configuration": {

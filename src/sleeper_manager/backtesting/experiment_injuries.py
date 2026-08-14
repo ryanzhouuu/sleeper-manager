@@ -49,6 +49,7 @@ class InjuryReportSelection:
     sha256: str | None
     cache_path: str | None
     attempts: int
+    unavailable_candidates: tuple[tuple[datetime, int], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,13 +120,14 @@ def acquire_injury_archive(
     snapshot_parser = parser or _parse_snapshot
     snapshots_by_timestamp: dict[datetime, OfficialInjuryReportSnapshot] = {}
     content_by_timestamp: dict[datetime, tuple[str, str, str]] = {}
-    unavailable: set[datetime] = set()
+    unavailable: dict[datetime, int] = {}
     selections: list[InjuryReportSelection] = []
     try:
         for requested_at in requested_report_timestamps(games):
             selected: OfficialInjuryReportSnapshot | None = None
             selected_metadata: tuple[str, str, str] | None = None
             attempts = 0
+            unavailable_candidates: list[tuple[datetime, int]] = []
             for hours in range(max_lookback_hours + 1):
                 attempts += 1
                 candidate_at = requested_at - timedelta(hours=hours)
@@ -135,6 +137,7 @@ def acquire_injury_archive(
                     selected_metadata = content_by_timestamp[candidate_at]
                     break
                 if candidate_at in unavailable:
+                    unavailable_candidates.append((candidate_at, unavailable[candidate_at]))
                     continue
                 url = official_injury_report_url(candidate_at)
                 cache_path = cache_dir / _cache_filename(candidate_at)
@@ -148,8 +151,9 @@ def acquire_injury_archive(
                         sleeper=sleeper,
                     )
                     sleeper(request_interval_seconds)
-                    if response.status_code == 404:
-                        unavailable.add(candidate_at)
+                    if response.status_code in {403, 404}:
+                        unavailable[candidate_at] = response.status_code
+                        unavailable_candidates.append((candidate_at, response.status_code))
                         continue
                     if response.status_code != 200:
                         raise InjuryArchiveError(
@@ -189,6 +193,7 @@ def acquire_injury_archive(
                     sha256=selected_metadata[1] if selected_metadata else None,
                     cache_path=selected_metadata[2] if selected_metadata else None,
                     attempts=attempts,
+                    unavailable_candidates=tuple(unavailable_candidates),
                 )
             )
     finally:

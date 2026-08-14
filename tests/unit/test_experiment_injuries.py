@@ -78,6 +78,9 @@ def test_archive_falls_back_and_reuses_cached_report(tmp_path: Path) -> None:
     assert len(client.urls) == 2
     assert first.selections[0].selected_at == datetime(2025, 1, 2, 0, 30, tzinfo=UTC)
     assert first.selections[0].attempts == 2
+    assert first.selections[0].unavailable_candidates == (
+        (datetime(2025, 1, 2, 1, 30, tzinfo=UTC), 404),
+    )
     assert first.selections[0].sha256 is not None
     assert len(first.snapshots) == 1
 
