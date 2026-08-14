@@ -72,6 +72,7 @@ def test_archive_falls_back_and_reuses_cached_report(tmp_path: Path) -> None:
         retrieved_at=datetime(2026, 8, 14, tzinfo=UTC),
         client=client,
         parser=parse_fixture,
+        request_interval_seconds=0,
     )
 
     assert len(client.urls) == 2
@@ -88,7 +89,27 @@ def test_archive_falls_back_and_reuses_cached_report(tmp_path: Path) -> None:
         retrieved_at=datetime(2026, 8, 14, tzinfo=UTC),
         client=cached_client,
         parser=parse_fixture,
+        request_interval_seconds=0,
     )
 
     assert len(cached_client.urls) == 1
     assert second.selections[0].selected_at == first.selections[0].selected_at
+
+
+def test_archive_retries_transient_cdn_denial(tmp_path: Path) -> None:
+    delays: list[float] = []
+    client = FakeClient([FakeResponse(403), FakeResponse(200, b"report")])
+
+    result = acquire_injury_archive(
+        (game("g1", datetime(2025, 1, 2, 2, 0, tzinfo=UTC)),),
+        (),
+        tmp_path,
+        retrieved_at=datetime(2026, 8, 14, tzinfo=UTC),
+        client=client,
+        parser=parse_fixture,
+        request_interval_seconds=0,
+        sleeper=delays.append,
+    )
+
+    assert len(result.snapshots) == 1
+    assert delays == [1.0, 0]

@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, cast
 
 import httpx
 
@@ -100,14 +101,21 @@ def acquire_injury_archive(
     client: HTTPClient | None = None,
     parser: SnapshotParser | None = None,
     max_lookback_hours: int = 24,
+    retry_attempts: int = 4,
+    request_interval_seconds: float = 0.1,
+    sleeper: Callable[[float], None] = time.sleep,
 ) -> InjuryArchiveResult:
     if retrieved_at.tzinfo is None:
         raise InjuryArchiveError("Injury archive retrieval timestamp must be timezone-aware")
     if max_lookback_hours < 0:
         raise InjuryArchiveError("Injury archive lookback must be non-negative")
+    if retry_attempts <= 0:
+        raise InjuryArchiveError("Injury archive retry attempts must be positive")
+    if request_interval_seconds < 0:
+        raise InjuryArchiveError("Injury archive request interval must be non-negative")
     cache_dir.mkdir(parents=True, exist_ok=True)
     owned_client = client is None
-    http_client = client or httpx.Client(timeout=60, follow_redirects=True)
+    http_client = client or cast(HTTPClient, httpx.Client(timeout=60, follow_redirects=True))
     snapshot_parser = parser or _parse_snapshot
     snapshots_by_timestamp: dict[datetime, OfficialInjuryReportSnapshot] = {}
     content_by_timestamp: dict[datetime, tuple[str, str, str]] = {}
@@ -133,7 +141,13 @@ def acquire_injury_archive(
                 if cache_path.is_file():
                     content = cache_path.read_bytes()
                 else:
-                    response = http_client.get(url)
+                    response = _request_with_retry(
+                        http_client,
+                        url,
+                        attempts=retry_attempts,
+                        sleeper=sleeper,
+                    )
+                    sleeper(request_interval_seconds)
                     if response.status_code == 404:
                         unavailable.add(candidate_at)
                         continue
@@ -212,6 +226,25 @@ def acquire_injury_archive(
 
 def _cache_filename(published_at: datetime) -> str:
     return f"injury-report-{published_at.astimezone(UTC):%Y%m%dT%H%MZ}.pdf"
+
+
+def _request_with_retry(
+    client: HTTPClient,
+    url: str,
+    *,
+    attempts: int,
+    sleeper: Callable[[float], None],
+) -> HTTPResponse:
+    response: HTTPResponse | None = None
+    for attempt in range(attempts):
+        response = client.get(url)
+        retryable = response.status_code in {403, 429} or response.status_code >= 500
+        if not retryable or attempt == attempts - 1:
+            return response
+        sleeper(float(2**attempt))
+    if response is None:
+        raise InjuryArchiveError("Injury archive request did not execute")
+    return response
 
 
 def _parse_snapshot(content: bytes, source: SourceMetadata) -> OfficialInjuryReportSnapshot:
