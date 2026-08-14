@@ -8,7 +8,7 @@ from datetime import datetime
 from math import isfinite
 from typing import Protocol
 
-from sleeper_manager.domain.projection import ProjectionDistribution, ProjectionSnapshot
+from sleeper_manager.domain.projection import ProjectionSnapshot
 from sleeper_manager.domain.scoring import ScoringPolicy
 from sleeper_manager.integrations.nba.historical_features import HistoricalFeatureDataset
 
@@ -85,16 +85,24 @@ class BacktestObservation:
     game_start: datetime
     available_as_of: datetime
     actual_score: float
-    distribution: ProjectionDistribution
+    expected_value: float
+    percentiles: tuple[tuple[int, float], ...]
+    exceedance_probabilities: tuple[tuple[float, float], ...]
 
     @property
     def absolute_error(self) -> float:
-        return abs(self.distribution.expected_value - self.actual_score)
+        return abs(self.expected_value - self.actual_score)
 
     @property
     def squared_error(self) -> float:
-        error = self.distribution.expected_value - self.actual_score
+        error = self.expected_value - self.actual_score
         return error * error
+
+    def probability_of_exceeding(self, threshold: float) -> float:
+        for configured_threshold, probability in self.exceedance_probabilities:
+            if configured_threshold == threshold:
+                return probability
+        raise BacktestError(f"No exceedance probability recorded for threshold {threshold}")
 
 
 @dataclass(frozen=True, slots=True)

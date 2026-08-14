@@ -93,7 +93,15 @@ def run_backtest(
                     game_start=target.game_start,
                     available_as_of=target.available_as_of,
                     actual_score=actual_score,
-                    distribution=snapshot.distribution,
+                    expected_value=snapshot.distribution.expected_value,
+                    percentiles=snapshot.distribution.percentiles,
+                    exceedance_probabilities=tuple(
+                        (
+                            threshold,
+                            snapshot.distribution.probability_of_exceeding(threshold),
+                        )
+                        for threshold in config.thresholds
+                    ),
                 )
             )
 
@@ -323,7 +331,7 @@ def _interval_metric(
     observed = 0
     widths: list[float] = []
     for observation in observations:
-        values = dict(observation.distribution.percentiles)
+        values = dict(observation.percentiles)
         lower_value = values[lower]
         upper_value = values[upper]
         observed += lower_value <= observation.actual_score <= upper_value
@@ -342,7 +350,7 @@ def _brier_score(observations: tuple[BacktestObservation, ...], threshold: float
         return None
     errors = tuple(
         (
-            observation.distribution.probability_of_exceeding(threshold)
+            observation.probability_of_exceeding(threshold)
             - float(observation.actual_score > threshold)
         )
         ** 2

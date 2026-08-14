@@ -511,7 +511,7 @@ def _aggregate_metrics(
         inside = 0
         interval_widths: list[float] = []
         for record in records:
-            percentiles = dict(record.distribution.percentiles)
+            percentiles = dict(record.percentiles)
             inside += percentiles[lower] <= record.actual_score <= percentiles[upper]
             interval_widths.append(percentiles[upper] - percentiles[lower])
         coverage.append((interval, inside / len(records)))
@@ -521,7 +521,7 @@ def _aggregate_metrics(
             threshold,
             sum(
                 (
-                    record.distribution.probability_of_exceeding(threshold)
+                    record.probability_of_exceeding(threshold)
                     - float(record.actual_score > threshold)
                 )
                 ** 2
