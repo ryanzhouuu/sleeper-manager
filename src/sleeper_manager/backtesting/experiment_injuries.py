@@ -1,0 +1,221 @@
+from __future__ import annotations
+
+import hashlib
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Protocol
+
+import httpx
+
+from sleeper_manager.domain.nba import ProviderPlayer, ScheduledGame, SourceMetadata
+from sleeper_manager.integrations.nba.official_injury_mapping import (
+    HistoricalPlayerAvailability,
+    map_official_injury_report,
+)
+from sleeper_manager.integrations.nba.official_injury_report import (
+    EASTERN_TIME,
+    REPORT_SCHEMA_VERSION,
+    OfficialInjuryReportSnapshot,
+    extract_official_injury_report_text,
+    official_injury_report_url,
+    parse_official_injury_report_text,
+)
+
+
+class InjuryArchiveError(RuntimeError):
+    pass
+
+
+class HTTPResponse(Protocol):
+    status_code: int
+    content: bytes
+
+
+class HTTPClient(Protocol):
+    def get(self, url: str) -> HTTPResponse: ...
+
+
+SnapshotParser = Callable[[bytes, SourceMetadata], OfficialInjuryReportSnapshot]
+
+
+@dataclass(frozen=True, slots=True)
+class InjuryReportSelection:
+    requested_at: datetime
+    selected_at: datetime | None
+    url: str | None
+    sha256: str | None
+    cache_path: str | None
+    attempts: int
+
+
+@dataclass(frozen=True, slots=True)
+class InjuryArchiveResult:
+    snapshots: tuple[OfficialInjuryReportSnapshot, ...]
+    availability: tuple[HistoricalPlayerAvailability, ...]
+    selections: tuple[InjuryReportSelection, ...]
+    unresolved_identity_count: int
+    mapping_warning_count: int
+
+
+def latest_report_timestamp(cutoff: datetime) -> datetime:
+    if cutoff.tzinfo is None:
+        raise InjuryArchiveError("Decision cutoff must be timezone-aware")
+    eastern = cutoff.astimezone(EASTERN_TIME)
+    if eastern.minute >= 30:
+        selected = eastern.replace(minute=30, second=0, microsecond=0)
+    else:
+        selected = (eastern - timedelta(hours=1)).replace(
+            minute=30,
+            second=0,
+            microsecond=0,
+        )
+    return selected.astimezone(UTC)
+
+
+def requested_report_timestamps(
+    games: Iterable[ScheduledGame],
+    *,
+    cutoff_minutes: int = 30,
+) -> tuple[datetime, ...]:
+    if cutoff_minutes < 0:
+        raise InjuryArchiveError("Decision cutoff minutes must be non-negative")
+    return tuple(
+        sorted(
+            {
+                latest_report_timestamp(game.start_time - timedelta(minutes=cutoff_minutes))
+                for game in games
+            }
+        )
+    )
+
+
+def acquire_injury_archive(
+    games: Iterable[ScheduledGame],
+    provider_players: Iterable[ProviderPlayer],
+    cache_dir: Path,
+    *,
+    retrieved_at: datetime,
+    client: HTTPClient | None = None,
+    parser: SnapshotParser | None = None,
+    max_lookback_hours: int = 24,
+) -> InjuryArchiveResult:
+    if retrieved_at.tzinfo is None:
+        raise InjuryArchiveError("Injury archive retrieval timestamp must be timezone-aware")
+    if max_lookback_hours < 0:
+        raise InjuryArchiveError("Injury archive lookback must be non-negative")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    owned_client = client is None
+    http_client = client or httpx.Client(timeout=60, follow_redirects=True)
+    snapshot_parser = parser or _parse_snapshot
+    snapshots_by_timestamp: dict[datetime, OfficialInjuryReportSnapshot] = {}
+    content_by_timestamp: dict[datetime, tuple[str, str, str]] = {}
+    unavailable: set[datetime] = set()
+    selections: list[InjuryReportSelection] = []
+    try:
+        for requested_at in requested_report_timestamps(games):
+            selected: OfficialInjuryReportSnapshot | None = None
+            selected_metadata: tuple[str, str, str] | None = None
+            attempts = 0
+            for hours in range(max_lookback_hours + 1):
+                attempts += 1
+                candidate_at = requested_at - timedelta(hours=hours)
+                cached = snapshots_by_timestamp.get(candidate_at)
+                if cached is not None:
+                    selected = cached
+                    selected_metadata = content_by_timestamp[candidate_at]
+                    break
+                if candidate_at in unavailable:
+                    continue
+                url = official_injury_report_url(candidate_at)
+                cache_path = cache_dir / _cache_filename(candidate_at)
+                if cache_path.is_file():
+                    content = cache_path.read_bytes()
+                else:
+                    response = http_client.get(url)
+                    if response.status_code == 404:
+                        unavailable.add(candidate_at)
+                        continue
+                    if response.status_code != 200:
+                        raise InjuryArchiveError(
+                            f"Official injury archive returned HTTP {response.status_code}: {url}"
+                        )
+                    content = response.content
+                    cache_path.write_bytes(content)
+                content_hash = hashlib.sha256(content).hexdigest()
+                source = SourceMetadata(
+                    provider="nba_official_injury_report",
+                    provider_id=url,
+                    retrieved_at=retrieved_at.astimezone(UTC),
+                    source_updated_at=candidate_at,
+                    schema_version=REPORT_SCHEMA_VERSION,
+                    content_hash=content_hash,
+                )
+                try:
+                    snapshot = snapshot_parser(content, source)
+                except Exception as error:
+                    raise InjuryArchiveError(
+                        f"Could not parse cached official injury report {cache_path}"
+                    ) from error
+                if snapshot.published_at != candidate_at:
+                    raise InjuryArchiveError(
+                        f"Official injury report timestamp mismatch for {cache_path}"
+                    )
+                snapshots_by_timestamp[candidate_at] = snapshot
+                selected = snapshot
+                selected_metadata = url, content_hash, str(cache_path)
+                content_by_timestamp[candidate_at] = selected_metadata
+                break
+            selections.append(
+                InjuryReportSelection(
+                    requested_at=requested_at,
+                    selected_at=selected.published_at if selected else None,
+                    url=selected_metadata[0] if selected_metadata else None,
+                    sha256=selected_metadata[1] if selected_metadata else None,
+                    cache_path=selected_metadata[2] if selected_metadata else None,
+                    attempts=attempts,
+                )
+            )
+    finally:
+        if owned_client and isinstance(http_client, httpx.Client):
+            http_client.close()
+
+    players = tuple(provider_players)
+    availability: list[HistoricalPlayerAvailability] = []
+    unresolved = 0
+    warnings = 0
+    for snapshot in snapshots_by_timestamp.values():
+        mapping = map_official_injury_report(snapshot, players)
+        availability.extend(mapping.availability)
+        unresolved += len(mapping.unresolved)
+        warnings += len(mapping.warnings)
+    return InjuryArchiveResult(
+        snapshots=tuple(
+            snapshots_by_timestamp[timestamp] for timestamp in sorted(snapshots_by_timestamp)
+        ),
+        availability=tuple(
+            sorted(
+                availability,
+                key=lambda record: (
+                    record.available_as_of,
+                    record.game_date,
+                    record.player_id,
+                ),
+            )
+        ),
+        selections=tuple(selections),
+        unresolved_identity_count=unresolved,
+        mapping_warning_count=warnings,
+    )
+
+
+def _cache_filename(published_at: datetime) -> str:
+    return f"injury-report-{published_at.astimezone(UTC):%Y%m%dT%H%MZ}.pdf"
+
+
+def _parse_snapshot(content: bytes, source: SourceMetadata) -> OfficialInjuryReportSnapshot:
+    return parse_official_injury_report_text(
+        extract_official_injury_report_text(content),
+        source=source,
+    )
