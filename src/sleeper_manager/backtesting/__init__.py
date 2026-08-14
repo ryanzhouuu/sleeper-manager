@@ -14,6 +14,20 @@ from sleeper_manager.backtesting.models import (
     TargetSkip,
 )
 from sleeper_manager.backtesting.runner import run_backtest
+from sleeper_manager.backtesting.validation import (
+    BootstrapInterval,
+    ChronologicalFold,
+    FoldResult,
+    GateResult,
+    PromotionDecision,
+    PromotionGateConfig,
+    SegmentComparison,
+    block_bootstrap_mae_delta,
+    evaluate_promotion,
+    regular_season_folds,
+    run_validation_folds,
+    segment_comparisons,
+)
 
 __all__ = (
     "BacktestComparison",
@@ -31,4 +45,16 @@ __all__ = (
     "ProjectionModel",
     "TargetSkip",
     "run_backtest",
+    "BootstrapInterval",
+    "ChronologicalFold",
+    "FoldResult",
+    "GateResult",
+    "PromotionDecision",
+    "PromotionGateConfig",
+    "SegmentComparison",
+    "block_bootstrap_mae_delta",
+    "evaluate_promotion",
+    "regular_season_folds",
+    "run_validation_folds",
+    "segment_comparisons",
 )
