@@ -55,6 +55,9 @@ def test_latest_report_timestamp_floors_to_prior_half_hour() -> None:
     assert latest_report_timestamp(datetime(2025, 1, 2, 1, 15, tzinfo=UTC)) == datetime(
         2025, 1, 2, 0, 30, tzinfo=UTC
     )
+    assert requested_report_timestamps(
+        (game("later", datetime(2025, 1, 2, 2, 30, tzinfo=UTC)),)
+    ) == (datetime(2025, 1, 2, 2, 0, tzinfo=UTC),)
 
 
 def test_archive_falls_back_and_reuses_cached_report(tmp_path: Path) -> None:
@@ -79,7 +82,7 @@ def test_archive_falls_back_and_reuses_cached_report(tmp_path: Path) -> None:
     assert first.selections[0].selected_at == datetime(2025, 1, 2, 0, 30, tzinfo=UTC)
     assert first.selections[0].attempts == 2
     assert first.selections[0].unavailable_candidates == (
-        (datetime(2025, 1, 2, 1, 30, tzinfo=UTC), 404),
+        (datetime(2025, 1, 2, 1, 30, tzinfo=UTC), "http_404"),
     )
     assert first.selections[0].sha256 is not None
     assert len(first.snapshots) == 1
@@ -116,3 +119,26 @@ def test_archive_retries_transient_cdn_denial(tmp_path: Path) -> None:
 
     assert len(result.snapshots) == 1
     assert delays == [1.0, 0]
+
+
+def test_archive_rejects_report_header_after_decision_cutoff(tmp_path: Path) -> None:
+    def quarter_hour_report(_: bytes, source: SourceMetadata) -> OfficialInjuryReportSnapshot:
+        assert source.source_updated_at is not None
+        published_at = source.source_updated_at.replace(minute=45)
+        return OfficialInjuryReportSnapshot(published_at, (), (), source)
+
+    result = acquire_injury_archive(
+        (game("g1", datetime(2025, 1, 2, 2, 0, tzinfo=UTC)),),
+        (),
+        tmp_path,
+        retrieved_at=datetime(2026, 8, 14, tzinfo=UTC),
+        client=FakeClient([FakeResponse(200, b"late"), FakeResponse(200, b"prior")]),
+        parser=quarter_hour_report,
+        request_interval_seconds=0,
+    )
+
+    assert result.selections[0].requested_at == datetime(2025, 1, 2, 1, 30, tzinfo=UTC)
+    assert result.selections[0].selected_at == datetime(2025, 1, 2, 0, 45, tzinfo=UTC)
+    assert result.selections[0].unavailable_candidates == (
+        (datetime(2025, 1, 2, 1, 30, tzinfo=UTC), "post_cutoff"),
+    )

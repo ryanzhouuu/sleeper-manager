@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import time
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol, cast
@@ -49,7 +49,7 @@ class InjuryReportSelection:
     sha256: str | None
     cache_path: str | None
     attempts: int
-    unavailable_candidates: tuple[tuple[datetime, int], ...]
+    unavailable_candidates: tuple[tuple[datetime, str], ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,14 +83,7 @@ def requested_report_timestamps(
 ) -> tuple[datetime, ...]:
     if cutoff_minutes < 0:
         raise InjuryArchiveError("Decision cutoff minutes must be non-negative")
-    return tuple(
-        sorted(
-            {
-                latest_report_timestamp(game.start_time - timedelta(minutes=cutoff_minutes))
-                for game in games
-            }
-        )
-    )
+    return tuple(sorted({game.start_time - timedelta(minutes=cutoff_minutes) for game in games}))
 
 
 def acquire_injury_archive(
@@ -118,24 +111,28 @@ def acquire_injury_archive(
     owned_client = client is None
     http_client = client or cast(HTTPClient, httpx.Client(timeout=60, follow_redirects=True))
     snapshot_parser = parser or _parse_snapshot
-    snapshots_by_timestamp: dict[datetime, OfficialInjuryReportSnapshot] = {}
-    content_by_timestamp: dict[datetime, tuple[str, str, str]] = {}
-    unavailable: dict[datetime, int] = {}
+    snapshots_by_nominal_time: dict[datetime, OfficialInjuryReportSnapshot] = {}
+    content_by_nominal_time: dict[datetime, tuple[str, str, str]] = {}
+    unavailable: dict[datetime, str] = {}
     selections: list[InjuryReportSelection] = []
     try:
         for requested_at in requested_report_timestamps(games):
             selected: OfficialInjuryReportSnapshot | None = None
             selected_metadata: tuple[str, str, str] | None = None
             attempts = 0
-            unavailable_candidates: list[tuple[datetime, int]] = []
+            unavailable_candidates: list[tuple[datetime, str]] = []
+            first_candidate_at = latest_report_timestamp(requested_at)
             for hours in range(max_lookback_hours + 1):
                 attempts += 1
-                candidate_at = requested_at - timedelta(hours=hours)
-                cached = snapshots_by_timestamp.get(candidate_at)
+                candidate_at = first_candidate_at - timedelta(hours=hours)
+                cached = snapshots_by_nominal_time.get(candidate_at)
                 if cached is not None:
-                    selected = cached
-                    selected_metadata = content_by_timestamp[candidate_at]
-                    break
+                    if cached.published_at <= requested_at:
+                        selected = cached
+                        selected_metadata = content_by_nominal_time[candidate_at]
+                        break
+                    unavailable_candidates.append((candidate_at, "post_cutoff"))
+                    continue
                 if candidate_at in unavailable:
                     unavailable_candidates.append((candidate_at, unavailable[candidate_at]))
                     continue
@@ -152,8 +149,9 @@ def acquire_injury_archive(
                     )
                     sleeper(request_interval_seconds)
                     if response.status_code in {403, 404}:
-                        unavailable[candidate_at] = response.status_code
-                        unavailable_candidates.append((candidate_at, response.status_code))
+                        status = f"http_{response.status_code}"
+                        unavailable[candidate_at] = status
+                        unavailable_candidates.append((candidate_at, status))
                         continue
                     if response.status_code != 200:
                         raise InjuryArchiveError(
@@ -176,14 +174,19 @@ def acquire_injury_archive(
                     raise InjuryArchiveError(
                         f"Could not parse cached official injury report {cache_path}"
                     ) from error
-                if snapshot.published_at != candidate_at:
+                if not _same_archive_hour(snapshot.published_at, candidate_at):
                     raise InjuryArchiveError(
                         f"Official injury report timestamp mismatch for {cache_path}"
                     )
-                snapshots_by_timestamp[candidate_at] = snapshot
+                actual_source = replace(source, source_updated_at=snapshot.published_at)
+                snapshot = replace(snapshot, source=actual_source)
+                snapshots_by_nominal_time[candidate_at] = snapshot
+                content_by_nominal_time[candidate_at] = url, content_hash, str(cache_path)
+                if snapshot.published_at > requested_at:
+                    unavailable_candidates.append((candidate_at, "post_cutoff"))
+                    continue
                 selected = snapshot
                 selected_metadata = url, content_hash, str(cache_path)
-                content_by_timestamp[candidate_at] = selected_metadata
                 break
             selections.append(
                 InjuryReportSelection(
@@ -204,6 +207,9 @@ def acquire_injury_archive(
     availability: list[HistoricalPlayerAvailability] = []
     unresolved = 0
     warnings = 0
+    snapshots_by_timestamp = {
+        snapshot.published_at: snapshot for snapshot in snapshots_by_nominal_time.values()
+    }
     for snapshot in snapshots_by_timestamp.values():
         mapping = map_official_injury_report(snapshot, players)
         availability.extend(mapping.availability)
@@ -233,6 +239,12 @@ def _cache_filename(published_at: datetime) -> str:
     return f"injury-report-{published_at.astimezone(UTC):%Y%m%dT%H%MZ}.pdf"
 
 
+def _same_archive_hour(published_at: datetime, nominal_at: datetime) -> bool:
+    published = published_at.astimezone(EASTERN_TIME)
+    nominal = nominal_at.astimezone(EASTERN_TIME)
+    return published.date() == nominal.date() and published.hour == nominal.hour
+
+
 def _request_with_retry(
     client: HTTPClient,
     url: str,
@@ -255,5 +267,5 @@ def _request_with_retry(
 def _parse_snapshot(content: bytes, source: SourceMetadata) -> OfficialInjuryReportSnapshot:
     return parse_official_injury_report_text(
         extract_official_injury_report_text(content),
-        source=source,
+        source=replace(source, source_updated_at=None),
     )
