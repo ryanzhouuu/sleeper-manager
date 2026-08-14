@@ -255,7 +255,7 @@ def _request_with_retry(
     response: HTTPResponse | None = None
     for attempt in range(attempts):
         response = client.get(url)
-        retryable = response.status_code in {403, 429} or response.status_code >= 500
+        retryable = response.status_code == 429 or response.status_code >= 500
         if not retryable or attempt == attempts - 1:
             return response
         sleeper(float(2**attempt))

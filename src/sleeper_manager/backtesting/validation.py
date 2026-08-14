@@ -207,23 +207,28 @@ def block_bootstrap_mae_delta(
             None,
             None,
         )
-    by_fold: dict[str, list[tuple[tuple[float, float], ...]]] = defaultdict(list)
+    by_fold: dict[str, list[tuple[float, float, int]]] = defaultdict(list)
     for (fold_name, _), errors in blocks.items():
-        by_fold[fold_name].append(errors)
+        by_fold[fold_name].append(
+            (
+                sum(reference for reference, _ in errors),
+                sum(candidate for _, candidate in errors),
+                len(errors),
+            )
+        )
     random = Random(seed)
     deltas: list[float] = []
     for _ in range(samples):
-        reference_errors: list[float] = []
-        candidate_errors: list[float] = []
+        reference_total = 0.0
+        candidate_total = 0.0
+        observation_count = 0
         for fold_blocks in by_fold.values():
             for _ in range(len(fold_blocks)):
                 sampled = fold_blocks[random.randrange(len(fold_blocks))]
-                reference_errors.extend(reference for reference, _ in sampled)
-                candidate_errors.extend(candidate for _, candidate in sampled)
-        deltas.append(
-            sum(candidate_errors) / len(candidate_errors)
-            - sum(reference_errors) / len(reference_errors)
-        )
+                reference_total += sampled[0]
+                candidate_total += sampled[1]
+                observation_count += sampled[2]
+        deltas.append(candidate_total / observation_count - reference_total / observation_count)
     ordered = tuple(sorted(deltas))
     return BootstrapInterval(
         "mae_delta",

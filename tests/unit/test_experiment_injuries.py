@@ -102,9 +102,9 @@ def test_archive_falls_back_and_reuses_cached_report(tmp_path: Path) -> None:
     assert second.selections[0].selected_at == first.selections[0].selected_at
 
 
-def test_archive_retries_transient_cdn_denial(tmp_path: Path) -> None:
+def test_archive_retries_transient_cdn_throttling(tmp_path: Path) -> None:
     delays: list[float] = []
-    client = FakeClient([FakeResponse(403), FakeResponse(200, b"report")])
+    client = FakeClient([FakeResponse(429), FakeResponse(200, b"report")])
 
     result = acquire_injury_archive(
         (game("g1", datetime(2025, 1, 2, 2, 0, tzinfo=UTC)),),
