@@ -71,6 +71,11 @@ class ScheduledGame:
     away_team_id: str
     status_detail: str | None
     source: SourceMetadata
+    venue_id: str | None = None
+    venue_name: str | None = None
+    venue_city: str | None = None
+    venue_state: str | None = None
+    neutral_site: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,6 +96,40 @@ class PlayerBoxScore:
     did_play: bool
     minutes: float | None
     line: BoxScoreLine
+    source: SourceMetadata
+    additional_sources: tuple[SourceMetadata, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class TeamBoxScore:
+    game_id: str
+    team_id: str
+    opponent_team_id: str
+    played_at: datetime
+    points: int
+    opponent_points: int
+    field_goal_attempts: int
+    free_throw_attempts: int
+    offensive_rebounds: int
+    turnovers: int
+    source: SourceMetadata
+
+    @property
+    def estimated_possessions(self) -> float:
+        return (
+            self.field_goal_attempts
+            + 0.44 * self.free_throw_attempts
+            - self.offensive_rebounds
+            + self.turnovers
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class PlayerGameFouls:
+    game_id: str
+    player_id: str
+    technical_fouls: int
+    flagrant_fouls: int
     source: SourceMetadata
 
 

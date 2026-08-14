@@ -1,4 +1,5 @@
 from collections.abc import Callable, Iterable, Mapping
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from math import isnan
 from tempfile import NamedTemporaryFile
@@ -9,9 +10,11 @@ import httpx
 from sleeper_manager.domain.nba import (
     GameStatus,
     PlayerBoxScore,
+    PlayerGameFouls,
     ProviderResult,
     ScheduledGame,
     SourceMetadata,
+    TeamBoxScore,
     quality_for_records,
 )
 from sleeper_manager.domain.scoring import BoxScoreLine
@@ -27,6 +30,14 @@ def player_box_score_url(season: int) -> str:
 
 def schedule_url(season: int) -> str:
     return f"{SPORTSDATAVERSE_BASE_URL}/espn_nba_schedules/nba_schedule_{season}.rds"
+
+
+def team_box_score_url(season: int) -> str:
+    return f"{SPORTSDATAVERSE_BASE_URL}/espn_nba_team_boxscores/team_box_{season}.rds"
+
+
+def play_by_play_url(season: int) -> str:
+    return f"{SPORTSDATAVERSE_BASE_URL}/espn_nba_pbp/play_by_play_{season}.rds"
 
 
 class SportsDataverseError(RuntimeError):
@@ -113,6 +124,12 @@ def _bool_value(value: Any, default: bool = False) -> bool:
     return str(value).casefold() in {"1", "true", "t", "yes", "y"}
 
 
+def _optional_string(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    return str(value).strip() or None
+
+
 def _source(provider_id: str, retrieved_at: datetime) -> SourceMetadata:
     return SourceMetadata(
         provider="sportsdataverse",
@@ -165,7 +182,7 @@ def parse_player_box_score_rows(
         (
             ("game_id", ("game_id", "gameId", "event_id")),
             ("player_id", ("player_id", "athlete_id", "athleteId")),
-            ("game_date", ("game_date", "date", "game_datetime")),
+            ("game_date", ("game_date_time", "game_datetime", "game_date", "date")),
             ("team_id", ("team_id", "teamId")),
         ),
     )
@@ -175,7 +192,8 @@ def parse_player_box_score_rows(
         player_id = _required_string(row, ("player_id", "athlete_id", "athleteId"), "player_id")
         team_id = _required_string(row, ("team_id", "teamId"), "team_id")
         played_at = _datetime_value(
-            _value(row, ("game_date", "date", "game_datetime")), "game_date"
+            _value(row, ("game_date_time", "game_datetime", "game_date", "date")),
+            "game_date",
         )
         did_not_play = _bool_value(_value(row, ("did_not_play", "didNotPlay")), False)
         line = BoxScoreLine(
@@ -243,7 +261,7 @@ def parse_schedule_rows(
         normalized_rows,
         (
             ("game_id", ("game_id", "gameId", "event_id")),
-            ("game_date", ("game_date", "date", "game_datetime")),
+            ("game_date", ("game_date_time", "game_date", "date", "game_datetime")),
             ("home_team_id", ("home_team_id", "home_team", "home_id")),
             ("away_team_id", ("away_team_id", "away_team", "away_id")),
         ),
@@ -252,7 +270,8 @@ def parse_schedule_rows(
     for row in normalized_rows:
         game_id = _required_string(row, ("game_id", "gameId", "event_id"), "game_id")
         start_time = _datetime_value(
-            _value(row, ("game_date", "date", "game_datetime")), "game_date"
+            _value(row, ("game_date_time", "game_datetime", "game_date", "date")),
+            "game_date",
         )
         home_team_id = _required_string(
             row, ("home_team_id", "home_team", "home_id"), "home_team_id"
@@ -264,11 +283,26 @@ def parse_schedule_rows(
             ScheduledGame(
                 provider_id=game_id,
                 start_time=start_time,
-                status=_historical_status(_value(row, ("status", "game_status"))),
+                status=_historical_status(
+                    _value(
+                        row,
+                        (
+                            "status_type_name",
+                            "status_type_description",
+                            "status",
+                            "game_status",
+                        ),
+                    )
+                ),
                 home_team_id=home_team_id,
                 away_team_id=away_team_id,
                 status_detail=_value(row, ("status_detail", "description")),
                 source=_source(game_id, retrieved_at),
+                venue_id=_optional_string(_value(row, ("venue_id",))),
+                venue_name=_optional_string(_value(row, ("venue_full_name", "venue_name"))),
+                venue_city=_optional_string(_value(row, ("venue_address_city", "venue_city"))),
+                venue_state=_optional_string(_value(row, ("venue_address_state", "venue_state"))),
+                neutral_site=_bool_value(_value(row, ("neutral_site",)), False),
             )
         )
     records = tuple(result)
@@ -280,6 +314,136 @@ def parse_schedule_rows(
             retrieved_at=retrieved_at,
         ),
     )
+
+
+def parse_team_box_score_rows(
+    rows: Iterable[Mapping[str, Any]], *, retrieved_at: datetime
+) -> ProviderResult[tuple[TeamBoxScore, ...]]:
+    normalized_rows = tuple(rows)
+    _validate_columns(
+        normalized_rows,
+        (
+            ("game_id", ("game_id", "gameId", "event_id")),
+            ("team_id", ("team_id", "teamId")),
+            ("opponent_team_id", ("opponent_team_id", "opponentTeamId")),
+            ("game_date", ("game_date_time", "game_date", "date")),
+            ("field_goal_attempts", ("field_goals_attempted", "fga")),
+            ("free_throw_attempts", ("free_throws_attempted", "fta")),
+            ("offensive_rebounds", ("offensive_rebounds", "oreb")),
+            ("turnovers", ("total_turnovers", "turnovers", "to")),
+        ),
+    )
+    result: list[TeamBoxScore] = []
+    for row in normalized_rows:
+        game_id = _required_string(row, ("game_id", "gameId", "event_id"), "game_id")
+        team_id = _required_string(row, ("team_id", "teamId"), "team_id")
+        result.append(
+            TeamBoxScore(
+                game_id=game_id,
+                team_id=team_id,
+                opponent_team_id=_required_string(
+                    row, ("opponent_team_id", "opponentTeamId"), "opponent_team_id"
+                ),
+                played_at=_datetime_value(
+                    _value(row, ("game_date_time", "game_date", "date")), "game_date"
+                ),
+                points=_int_value(_value(row, ("team_score", "points"))),
+                opponent_points=_int_value(_value(row, ("opponent_team_score", "opponent_points"))),
+                field_goal_attempts=_int_value(_value(row, ("field_goals_attempted", "fga"))),
+                free_throw_attempts=_int_value(_value(row, ("free_throws_attempted", "fta"))),
+                offensive_rebounds=_int_value(_value(row, ("offensive_rebounds", "oreb"))),
+                turnovers=_int_value(_value(row, ("total_turnovers", "turnovers", "to"))),
+                source=_source(f"{game_id}:{team_id}", retrieved_at),
+            )
+        )
+    records = tuple(result)
+    return ProviderResult(
+        records,
+        quality_for_records(
+            resource="historical_team_box_scores",
+            records=records,
+            retrieved_at=retrieved_at,
+        ),
+    )
+
+
+def parse_play_by_play_foul_rows(
+    rows: Iterable[Mapping[str, Any]], *, retrieved_at: datetime
+) -> ProviderResult[tuple[PlayerGameFouls, ...]]:
+    normalized_rows = tuple(rows)
+    _validate_columns(
+        normalized_rows,
+        (
+            ("game_id", ("game_id", "gameId", "event_id")),
+            ("play_type", ("type_text", "typeText")),
+            ("athlete_id", ("athlete_id_1", "athleteId1")),
+        ),
+    )
+    counts: dict[tuple[str, str], list[int]] = {}
+    for row in normalized_rows:
+        play_type = str(_value(row, ("type_text", "typeText"), "")).casefold()
+        is_technical = "technical" in play_type and "free throw" not in play_type
+        is_flagrant = "flagrant foul" in play_type and "free throw" not in play_type
+        if not is_technical and not is_flagrant:
+            continue
+        game_id = _required_string(row, ("game_id", "gameId", "event_id"), "game_id")
+        athlete_ids = {
+            _optional_string(_value(row, names))
+            for names in (
+                ("athlete_id_1", "athleteId1"),
+                ("athlete_id_2", "athleteId2"),
+                ("athlete_id_3", "athleteId3"),
+            )
+        }
+        for player_id in athlete_ids:
+            if player_id is None:
+                continue
+            key = game_id, player_id
+            totals = counts.setdefault(key, [0, 0])
+            totals[0] += int(is_technical)
+            totals[1] += int(is_flagrant)
+    records = tuple(
+        PlayerGameFouls(
+            game_id=game_id,
+            player_id=player_id,
+            technical_fouls=totals[0],
+            flagrant_fouls=totals[1],
+            source=_source(f"{game_id}:{player_id}:fouls", retrieved_at),
+        )
+        for (game_id, player_id), totals in sorted(counts.items())
+    )
+    return ProviderResult(
+        records,
+        quality_for_records(
+            resource="historical_player_game_fouls",
+            records=records,
+            retrieved_at=retrieved_at,
+        ),
+    )
+
+
+def apply_player_game_fouls(
+    box_scores: Iterable[PlayerBoxScore], fouls: Iterable[PlayerGameFouls]
+) -> tuple[PlayerBoxScore, ...]:
+    by_key = {(record.game_id, record.player_id): record for record in fouls}
+    result: list[PlayerBoxScore] = []
+    for box_score in box_scores:
+        foul = by_key.get((box_score.game_id, box_score.player_id))
+        if foul is None:
+            result.append(box_score)
+            continue
+        result.append(
+            replace(
+                box_score,
+                line=replace(
+                    box_score.line,
+                    technical_fouls=foul.technical_fouls,
+                    flagrant_fouls=foul.flagrant_fouls,
+                ),
+                additional_sources=box_score.additional_sources + (foul.source,),
+            )
+        )
+    return tuple(result)
 
 
 class SportsDataverseClient:
@@ -334,5 +498,19 @@ class SportsDataverseClient:
         retrieved_at = self._clock()
         return parse_schedule_rows(
             await self._download_rows(schedule_url(season)),
+            retrieved_at=retrieved_at,
+        )
+
+    async def team_box_scores(self, season: int) -> ProviderResult[tuple[TeamBoxScore, ...]]:
+        retrieved_at = self._clock()
+        return parse_team_box_score_rows(
+            await self._download_rows(team_box_score_url(season)),
+            retrieved_at=retrieved_at,
+        )
+
+    async def player_game_fouls(self, season: int) -> ProviderResult[tuple[PlayerGameFouls, ...]]:
+        retrieved_at = self._clock()
+        return parse_play_by_play_foul_rows(
+            await self._download_rows(play_by_play_url(season)),
             retrieved_at=retrieved_at,
         )
