@@ -288,6 +288,9 @@ def test_historical_features_use_prior_only_opponent_stats_and_travel() -> None:
     assert row.opponent_offensive_rating == comparison.opponent_offensive_rating
     assert row.opponent_defensive_rating == comparison.opponent_defensive_rating
     assert row.opponent_pace == comparison.opponent_pace
+    assert row.opponent_offense_band in {"low", "medium", "high"}
+    assert row.opponent_defense_band in {"low", "medium", "high"}
+    assert row.opponent_pace_band in {"low", "medium", "high"}
     assert row.prior_venue_id == "1847"
     assert row.destination_venue_id == "1823"
     assert row.travel_distance_miles is not None and row.travel_distance_miles > 500

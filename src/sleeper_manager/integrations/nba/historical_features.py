@@ -85,6 +85,9 @@ class HistoricalFeatureRow:
     opponent_pace: float | None = None
     opponent_sample_size: int = 0
     opponent_stats_fallback: OpponentStatsFallback = OpponentStatsFallback.MISSING
+    opponent_offense_band: str = "unknown"
+    opponent_defense_band: str = "unknown"
+    opponent_pace_band: str = "unknown"
     prior_venue_id: str | None = None
     destination_venue_id: str | None = None
     travel_distance_miles: float | None = None
@@ -227,6 +230,9 @@ def build_historical_feature_dataset(
                 opponent_pace=opponent_stats[2],
                 opponent_sample_size=opponent_stats[3],
                 opponent_stats_fallback=opponent_stats[4],
+                opponent_offense_band=opponent_stats[5],
+                opponent_defense_band=opponent_stats[6],
+                opponent_pace_band=opponent_stats[7],
                 prior_venue_id=travel.prior_venue_id,
                 destination_venue_id=travel.destination_venue_id,
                 travel_distance_miles=travel.distance_miles,
@@ -415,7 +421,16 @@ def _opponent_stats(
     team_box_scores: tuple[TeamBoxScore, ...],
     lookback_games: int = 10,
     shrinkage_games: float = 5.0,
-) -> tuple[float | None, float | None, float | None, int, OpponentStatsFallback]:
+) -> tuple[
+    float | None,
+    float | None,
+    float | None,
+    int,
+    OpponentStatsFallback,
+    str,
+    str,
+    str,
+]:
     prior = tuple(
         record
         for record in team_box_scores
@@ -424,15 +439,18 @@ def _opponent_stats(
         and record.estimated_possessions > 0
     )
     if not prior:
-        return None, None, None, 0, OpponentStatsFallback.MISSING
+        return None, None, None, 0, OpponentStatsFallback.MISSING, "unknown", "unknown", "unknown"
     opponent_prior = tuple(record for record in prior if record.team_id == opponent_team_id)[
         -lookback_games:
     ]
-    league_offense = _mean(record.points / record.estimated_possessions * 100 for record in prior)
-    league_defense = _mean(
+    league_offenses = tuple(record.points / record.estimated_possessions * 100 for record in prior)
+    league_defenses = tuple(
         record.opponent_points / record.estimated_possessions * 100 for record in prior
     )
-    league_pace = _mean(record.estimated_possessions for record in prior)
+    league_paces = tuple(record.estimated_possessions for record in prior)
+    league_offense = _mean(league_offenses)
+    league_defense = _mean(league_defenses)
+    league_pace = _mean(league_paces)
     if not opponent_prior:
         return (
             round(league_offense, 6),
@@ -440,6 +458,9 @@ def _opponent_stats(
             round(league_pace, 6),
             0,
             OpponentStatsFallback.LEAGUE_AVERAGE,
+            _value_band(league_offense, league_offenses),
+            _value_band(league_defense, league_defenses),
+            _value_band(league_pace, league_paces),
         )
     sample_size = len(opponent_prior)
     weight = sample_size / (sample_size + shrinkage_games)
@@ -453,12 +474,18 @@ def _opponent_stats(
         if sample_size >= lookback_games
         else OpponentStatsFallback.SHRUNK
     )
+    adjusted_offense = league_offense + weight * (offense - league_offense)
+    adjusted_defense = league_defense + weight * (defense - league_defense)
+    adjusted_pace = league_pace + weight * (pace - league_pace)
     return (
-        round(league_offense + weight * (offense - league_offense), 6),
-        round(league_defense + weight * (defense - league_defense), 6),
-        round(league_pace + weight * (pace - league_pace), 6),
+        round(adjusted_offense, 6),
+        round(adjusted_defense, 6),
+        round(adjusted_pace, 6),
         sample_size,
         fallback,
+        _value_band(adjusted_offense, league_offenses),
+        _value_band(adjusted_defense, league_defenses),
+        _value_band(adjusted_pace, league_paces),
     )
 
 
@@ -467,6 +494,15 @@ def _mean(values: Iterable[float]) -> float:
     if not records:
         raise HistoricalFeatureDatasetError("Cannot average an empty feature group")
     return sum(records) / len(records)
+
+
+def _value_band(value: float, population: tuple[float, ...]) -> str:
+    ordered = tuple(sorted(population))
+    if value < ordered[len(ordered) // 3]:
+        return "low"
+    if value < ordered[(2 * len(ordered)) // 3]:
+        return "medium"
+    return "high"
 
 
 def _season_key(value: datetime) -> int:
