@@ -24,7 +24,7 @@ from sleeper_manager.integrations.nba.official_injury_report import (
     OfficialInjuryReportSnapshot,
     ReportSubmissionStatus,
 )
-from sleeper_manager.integrations.nba.travel import travel_context
+from sleeper_manager.integrations.nba.travel import TravelContext, travel_context
 
 FEATURE_SCHEMA_VERSION = "2"
 
@@ -142,6 +142,23 @@ def build_historical_feature_dataset(
     team_schedule = _index_team_schedule(game_records)
     availability_by_player = _index_availability(availability_records)
     report_by_game_team = _index_reports(report_records)
+    opponent_stats_by_game_team: dict[
+        tuple[str, str],
+        tuple[
+            float | None,
+            float | None,
+            float | None,
+            int,
+            OpponentStatsFallback,
+            str,
+            str,
+            str,
+        ],
+    ] = {}
+    rest_by_game_team: dict[
+        tuple[str, str], tuple[int | None, bool | None, SourceMetadata | None]
+    ] = {}
+    travel_by_game_team: dict[tuple[str, str], TravelContext] = {}
     rows: list[HistoricalFeatureRow] = []
 
     for box_score in box_score_records:
@@ -160,18 +177,28 @@ def build_historical_feature_dataset(
         opponent_team_id, opponent_abbreviation, is_home = _opponent(
             game, box_score.team_id, team_abbreviations
         )
-        days_rest, is_back_to_back, schedule_source = _rest_features(
-            game, box_score.team_id, team_schedule
-        )
-        opponent_stats = _opponent_stats(
-            game,
-            opponent_team_id=opponent_team_id,
-            team_box_scores=team_box_score_records,
-        )
-        travel = travel_context(
-            game,
-            prior_games=team_schedule.get(box_score.team_id, ()),
-        )
+        game_team_key = game.provider_id, box_score.team_id
+        rest = rest_by_game_team.get(game_team_key)
+        if rest is None:
+            rest = _rest_features(game, box_score.team_id, team_schedule)
+            rest_by_game_team[game_team_key] = rest
+        days_rest, is_back_to_back, schedule_source = rest
+        opponent_stats_key = game.provider_id, opponent_team_id
+        opponent_stats = opponent_stats_by_game_team.get(opponent_stats_key)
+        if opponent_stats is None:
+            opponent_stats = _opponent_stats(
+                game,
+                opponent_team_id=opponent_team_id,
+                team_box_scores=team_box_score_records,
+            )
+            opponent_stats_by_game_team[opponent_stats_key] = opponent_stats
+        travel = travel_by_game_team.get(game_team_key)
+        if travel is None:
+            travel = travel_context(
+                game,
+                prior_games=team_schedule.get(box_score.team_id, ()),
+            )
+            travel_by_game_team[game_team_key] = travel
         prior = tuple(
             record
             for record in prior_by_player.get(box_score.player_id, ())
