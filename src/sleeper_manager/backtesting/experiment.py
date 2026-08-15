@@ -605,6 +605,7 @@ def _injury_mapping_diagnostics(
             "resolved",
             "resolved_name_only",
             "resolved_partial_name_team",
+            "resolved_subset_name_team",
         }:
             unresolved_names[
                 (season, diagnostic.team_abbreviation, diagnostic.normalized_name)
@@ -661,15 +662,16 @@ def _markdown_report(report: Mapping[str, Any]) -> str:
         "",
         "## Injury data quality",
         "",
-        "| Season | Team-confirmed | Name-only | Partial team | No name/team match | "
+        "| Season | Team-confirmed | Name-only | Partial team | Subset team | No name/team match | "
         "Ambiguous team | Ambiguous name | Ambiguous partial |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for season, counts in injury["mapping_coverage_by_season"].items():
         lines.append(
             f"| {season} | {counts.get('resolved', 0)} | "
             f"{counts.get('resolved_name_only', 0)} | "
             f"{counts.get('resolved_partial_name_team', 0)} | "
+            f"{counts.get('resolved_subset_name_team', 0)} | "
             f"{counts.get('no_name_team_match', 0)} | "
             f"{counts.get('ambiguous_name_team_match', 0)} | "
             f"{counts.get('ambiguous_name_only', 0)} | "

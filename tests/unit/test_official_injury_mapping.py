@@ -143,3 +143,60 @@ def test_official_injury_mapping_keeps_ambiguous_partial_name_unresolved() -> No
 
     assert len(result.unresolved) == 1
     assert result.diagnostics[0].category is InjuryMappingCategory.AMBIGUOUS_PARTIAL_NAME_TEAM
+
+
+def test_official_injury_mapping_resolves_unique_name_token_subset() -> None:
+    snapshot = parse_official_injury_report_text(FIXTURE.read_text(), source=SOURCE)
+    subset_snapshot = replace(
+        snapshot,
+        entries=(
+            replace(snapshot.entries[0], player_name="Schifino, Jalen", team_abbreviation="LAL"),
+        ),
+    )
+    result = map_official_injury_report(
+        subset_snapshot,
+        [provider("espn-schifino", "Jalen Hood-Schifino", "LAL")],
+    )
+
+    mapping = result.mappings[0]
+    assert mapping.player_id == "espn-schifino"
+    assert mapping.method is MappingMethod.NORMALIZED_SUBSET_NAME_TEAM
+    assert mapping.confidence is MappingConfidence.LOW
+    assert result.diagnostics[0].category is InjuryMappingCategory.RESOLVED_SUBSET_NAME_TEAM
+
+
+def test_official_injury_mapping_merges_spaced_initials_for_unique_subset() -> None:
+    snapshot = parse_official_injury_report_text(FIXTURE.read_text(), source=SOURCE)
+    initial_snapshot = replace(
+        snapshot,
+        entries=(
+            replace(snapshot.entries[0], player_name="Anunoby, O G", team_abbreviation="TOR"),
+        ),
+    )
+    result = map_official_injury_report(
+        initial_snapshot,
+        [provider("espn-anunoby", "OG Anunoby", "TOR")],
+    )
+
+    assert result.mappings[0].method is MappingMethod.NORMALIZED_SUBSET_NAME_TEAM
+    assert result.mappings[0].player_id == "espn-anunoby"
+
+
+def test_official_injury_mapping_keeps_ambiguous_name_token_subset_unresolved() -> None:
+    snapshot = parse_official_injury_report_text(FIXTURE.read_text(), source=SOURCE)
+    subset_snapshot = replace(
+        snapshot,
+        entries=(
+            replace(snapshot.entries[0], player_name="Smith, Jalen", team_abbreviation="CHI"),
+        ),
+    )
+    result = map_official_injury_report(
+        subset_snapshot,
+        [
+            provider("espn-smith-a", "Jalen A Smith", "CHI"),
+            provider("espn-smith-b", "Jalen B Smith", "CHI"),
+        ],
+    )
+
+    assert len(result.unresolved) == 1
+    assert result.diagnostics[0].category is InjuryMappingCategory.AMBIGUOUS_SUBSET_NAME_TEAM

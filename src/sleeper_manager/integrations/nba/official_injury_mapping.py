@@ -34,10 +34,12 @@ class InjuryMappingCategory(StrEnum):
     RESOLVED = "resolved"
     RESOLVED_NAME_ONLY = "resolved_name_only"
     RESOLVED_PARTIAL_NAME_TEAM = "resolved_partial_name_team"
+    RESOLVED_SUBSET_NAME_TEAM = "resolved_subset_name_team"
     NO_NAME_TEAM_MATCH = "no_name_team_match"
     AMBIGUOUS_NAME_TEAM_MATCH = "ambiguous_name_team_match"
     AMBIGUOUS_NAME_ONLY = "ambiguous_name_only"
     AMBIGUOUS_PARTIAL_NAME_TEAM = "ambiguous_partial_name_team"
+    AMBIGUOUS_SUBSET_NAME_TEAM = "ambiguous_subset_name_team"
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,6 +85,7 @@ def map_official_injury_report(
     by_name_team: dict[tuple[str, str], list[ProviderPlayer]] = {}
     by_name_ids: dict[str, set[str]] = {}
     by_first_name_team: dict[tuple[str, str], set[str]] = {}
+    by_token_name_team: dict[str, list[tuple[str, frozenset[str], tuple[str, ...]]]] = {}
     for player in candidates:
         name_key = normalize_player_name(player.full_name)
         by_name_ids.setdefault(name_key, set()).add(player.provider_id)
@@ -92,6 +95,11 @@ def map_official_injury_report(
             first_name = name_key.split(maxsplit=1)[0] if name_key else ""
             if first_name:
                 by_first_name_team.setdefault((first_name, team), set()).add(player.provider_id)
+            name_tokens = _name_tokens(player.full_name)
+            if name_tokens:
+                by_token_name_team.setdefault(team, []).append(
+                    (player.provider_id, frozenset(name_tokens), name_tokens)
+                )
 
     mappings: list[OfficialInjuryMapping] = []
     availability: list[HistoricalPlayerAvailability] = []
@@ -179,6 +187,49 @@ def map_official_injury_report(
             )
             continue
 
+        subset_ids = _subset_matches(
+            normalized_name,
+            team,
+            by_token_name_team.get(team or "", ()),
+        )
+        if len(subset_ids) == 1:
+            player_id = subset_ids[0]
+            mappings.append(
+                OfficialInjuryMapping(
+                    entry=entry,
+                    player_id=player_id,
+                    method=MappingMethod.NORMALIZED_SUBSET_NAME_TEAM,
+                    confidence=MappingConfidence.LOW,
+                    reason=(
+                        "Matched by unique normalized report-name token subset and "
+                        "official team"
+                    ),
+                    candidate_ids=subset_ids,
+                )
+            )
+            diagnostics[
+                (
+                    InjuryMappingCategory.RESOLVED_SUBSET_NAME_TEAM,
+                    _season_start_year(entry.game_date),
+                    team or entry.team_abbreviation.casefold(),
+                    normalized_name,
+                )
+            ] += 1
+            availability.append(
+                HistoricalPlayerAvailability(
+                    player_id=player_id,
+                    game_date=entry.game_date,
+                    game_time=entry.game_time,
+                    matchup=entry.matchup,
+                    team_abbreviation=entry.team_abbreviation,
+                    status=entry.status,
+                    detail=entry.reason,
+                    available_as_of=snapshot.published_at,
+                    source=snapshot.source,
+                )
+            )
+            continue
+
         name_only_ids = tuple(sorted(by_name_ids.get(normalized_name, set())))
         if len(name_only_ids) == 1 and not partial_ids:
             player_id = name_only_ids[0]
@@ -218,7 +269,7 @@ def map_official_injury_report(
             )
             continue
 
-        candidate_ids = team_match_ids or partial_ids or name_only_ids
+        candidate_ids = team_match_ids or partial_ids or subset_ids or name_only_ids
         category = (
             InjuryMappingCategory.AMBIGUOUS_NAME_TEAM_MATCH
             if team_match_ids
@@ -226,9 +277,13 @@ def map_official_injury_report(
                 InjuryMappingCategory.AMBIGUOUS_PARTIAL_NAME_TEAM
                 if partial_ids
                 else (
-                    InjuryMappingCategory.AMBIGUOUS_NAME_ONLY
-                    if name_only_ids
-                    else InjuryMappingCategory.NO_NAME_TEAM_MATCH
+                    InjuryMappingCategory.AMBIGUOUS_SUBSET_NAME_TEAM
+                    if subset_ids
+                    else (
+                        InjuryMappingCategory.AMBIGUOUS_NAME_ONLY
+                        if name_only_ids
+                        else InjuryMappingCategory.NO_NAME_TEAM_MATCH
+                    )
                 )
             )
         )
@@ -247,10 +302,15 @@ def map_official_injury_report(
                 "Multiple provider players matched normalized first name and official team"
                 if partial_ids
                 else (
-                    "Multiple provider players matched normalized report name without "
-                    "team confirmation"
-                    if name_only_ids
-                    else "No provider player matched normalized report name and team"
+                    "Multiple provider players matched normalized report-name tokens and "
+                    "official team"
+                    if subset_ids
+                    else (
+                        "Multiple provider players matched normalized report name without "
+                        "team confirmation"
+                        if name_only_ids
+                        else "No provider player matched normalized report name and team"
+                    )
                 )
             )
         )
@@ -298,3 +358,36 @@ def map_official_injury_report(
 
 def _season_start_year(value: date) -> int:
     return value.year if value.month >= 10 else value.year - 1
+
+
+def _name_tokens(name: str) -> tuple[str, ...]:
+    tokens = normalize_player_name(name).split()
+    merged: list[str] = []
+    for token in tokens:
+        if len(token) == 1 and merged and len(merged[-1]) == 1:
+            merged[-1] += token
+        else:
+            merged.append(token)
+    return tuple(merged)
+
+
+def _subset_matches(
+    normalized_report_name: str,
+    team: str | None,
+    candidates: Iterable[tuple[str, frozenset[str], tuple[str, ...]]],
+) -> tuple[str, ...]:
+    if team is None:
+        return ()
+    report_tokens = frozenset(_name_tokens(normalized_report_name))
+    if len(report_tokens) < 2:
+        return ()
+    matches = {
+        provider_id
+        for provider_id, provider_tokens, provider_token_sequence in candidates
+        if report_tokens <= provider_tokens
+        and (
+            report_tokens < provider_tokens
+            or provider_token_sequence != tuple(normalized_report_name.split())
+        )
+    }
+    return tuple(sorted(matches))

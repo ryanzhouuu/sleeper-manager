@@ -15,6 +15,7 @@ class MappingMethod(StrEnum):
     STABLE_ID = "stable_id"
     NORMALIZED_NAME_TEAM = "normalized_name_team"
     NORMALIZED_PARTIAL_NAME_TEAM = "normalized_partial_name_team"
+    NORMALIZED_SUBSET_NAME_TEAM = "normalized_subset_name_team"
     NORMALIZED_NAME_ONLY = "normalized_name_only"
     UNRESOLVED = "unresolved"
 
