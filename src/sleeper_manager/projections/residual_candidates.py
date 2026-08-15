@@ -46,6 +46,10 @@ class CachingProjectionModel:
             ProjectionSnapshot,
         ] = {}
 
+    @property
+    def model_version(self) -> str:
+        return str(getattr(self.projector, "model_version", type(self.projector).__name__))
+
     def project(
         self,
         dataset: HistoricalFeatureDataset,

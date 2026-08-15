@@ -9,7 +9,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from sleeper_manager.backtesting.controls import NaiveProjectionBaseline
+from sleeper_manager.backtesting.controls import CalibratedProjectionModel, NaiveProjectionBaseline
 from sleeper_manager.backtesting.experiment_data import (
     HistoricalExperimentInputs,
     artifact_manifest,
@@ -22,7 +22,7 @@ from sleeper_manager.backtesting.experiment_injuries import (
     InjuryArchiveResult,
     acquire_injury_archive,
 )
-from sleeper_manager.backtesting.models import BacktestConfig, BacktestModel
+from sleeper_manager.backtesting.models import BacktestConfig, BacktestModel, ProjectionModel
 from sleeper_manager.backtesting.validation import (
     DevelopmentDecision,
     FoldResult,
@@ -283,19 +283,29 @@ def _build_dataset(
 
 
 def _isolated_suite() -> _ModelSuite:
-    reference = CachingProjectionModel(DirectFantasyPointBaseline(), max_entries=4096)
+    reference = CachingProjectionModel(NaiveProjectionBaseline("season_average"), max_entries=4096)
     residual_history = ResidualHistory(reference)
     models = (
-        BacktestModel(REFERENCE_MODEL, reference),
-        BacktestModel("last_game", NaiveProjectionBaseline("last_game")),
-        BacktestModel("season_average", NaiveProjectionBaseline("season_average")),
+        BacktestModel(REFERENCE_MODEL, _calibrated(reference)),
+        BacktestModel(
+            "direct_baseline",
+            _calibrated(CachingProjectionModel(DirectFantasyPointBaseline(), max_entries=4096)),
+        ),
+        BacktestModel(
+            "last_game",
+            _calibrated(
+                CachingProjectionModel(NaiveProjectionBaseline("last_game"), max_entries=4096)
+            ),
+        ),
     ) + tuple(
         BacktestModel(
             feature.value,
-            ShrunkenResidualCandidate(
-                ResidualCandidateConfig((feature,)),
-                reference=reference,
-                residual_history=residual_history,
+            _calibrated(
+                ShrunkenResidualCandidate(
+                    ResidualCandidateConfig((feature,)),
+                    reference=reference,
+                    residual_history=residual_history,
+                )
             ),
         )
         for feature in ISOLATED_FEATURES
@@ -304,10 +314,22 @@ def _isolated_suite() -> _ModelSuite:
 
 
 def _cumulative_suite(features: tuple[ResidualFeature, ...]) -> _ModelSuite:
-    reference = CachingProjectionModel(DirectFantasyPointBaseline(), max_entries=4096)
+    reference = CachingProjectionModel(NaiveProjectionBaseline("season_average"), max_entries=4096)
     residual_history = ResidualHistory(reference)
     cumulative: list[ResidualFeature] = []
-    models: list[BacktestModel] = [BacktestModel(REFERENCE_MODEL, reference)]
+    models: list[BacktestModel] = [
+        BacktestModel(REFERENCE_MODEL, _calibrated(reference)),
+        BacktestModel(
+            "direct_baseline",
+            _calibrated(CachingProjectionModel(DirectFantasyPointBaseline(), max_entries=4096)),
+        ),
+        BacktestModel(
+            "last_game",
+            _calibrated(
+                CachingProjectionModel(NaiveProjectionBaseline("last_game"), max_entries=4096)
+            ),
+        ),
+    ]
     names: list[str] = []
     for feature in features:
         cumulative.append(feature)
@@ -315,15 +337,21 @@ def _cumulative_suite(features: tuple[ResidualFeature, ...]) -> _ModelSuite:
         models.append(
             BacktestModel(
                 name,
-                ShrunkenResidualCandidate(
-                    ResidualCandidateConfig(tuple(cumulative)),
-                    reference=reference,
-                    residual_history=residual_history,
+                _calibrated(
+                    ShrunkenResidualCandidate(
+                        ResidualCandidateConfig(tuple(cumulative)),
+                        reference=reference,
+                        residual_history=residual_history,
+                    )
                 ),
             )
         )
         names.append(name)
     return _ModelSuite(tuple(models), tuple(names))
+
+
+def _calibrated(model: ProjectionModel) -> CachingProjectionModel:
+    return CachingProjectionModel(CalibratedProjectionModel(model), max_entries=4096)
 
 
 def _audit_dataset(dataset: HistoricalFeatureDataset) -> dict[str, bool]:
@@ -360,7 +388,7 @@ def _frozen_manifest(
     league_fixture: Path,
 ) -> dict[str, Any]:
     return {
-        "manifest_version": "model-feature-validation-v1",
+        "manifest_version": "model-feature-validation-v2",
         "frozen_at": generated_at,
         "dataset_version": dataset.dataset_version,
         "feature_schema_version": dataset.feature_schema_version,
@@ -376,6 +404,9 @@ def _frozen_manifest(
         "bootstrap_samples": BOOTSTRAP_SAMPLES,
         "bootstrap_seed": BOOTSTRAP_SEED,
         "candidate_config": _candidate_configuration(),
+        "reference_model": REFERENCE_MODEL,
+        "diagnostic_models": ("direct_baseline", "last_game"),
+        "calibration": _calibration_configuration(),
         "development_decisions": tuple(development_decisions),
         "selected_cumulative_features": tuple(feature.value for feature in selected_features),
         "interaction_candidates": (),
@@ -397,6 +428,16 @@ def _candidate_configuration() -> dict[str, Any]:
             "travel": "no_prior_game or unknown_venue",
             "injury": "missing_report, team_not_yet_submitted, or not_listed",
         },
+    }
+
+
+def _calibration_configuration() -> dict[str, Any]:
+    return {
+        "model": "rolling empirical residual distribution",
+        "minimum_samples": 64,
+        "maximum_samples": 4096,
+        "refresh_interval": 256,
+        "point_in_time": True,
     }
 
 
@@ -440,7 +481,7 @@ def _report(
     }
     injury_observations = Counter(row.availability_observation.value for row in dataset.rows)
     return {
-        "report_version": "model-feature-validation-v1",
+        "report_version": "model-feature-validation-v2",
         "generated_at": generated_at,
         "dataset": {
             "dataset_version": dataset.dataset_version,
@@ -478,7 +519,10 @@ def _report(
             "intervals": config.intervals,
             "bootstrap_samples": BOOTSTRAP_SAMPLES,
             "bootstrap_seed": BOOTSTRAP_SEED,
+            "reference_model": REFERENCE_MODEL,
+            "diagnostic_models": ("direct_baseline", "last_game"),
             "candidate": _candidate_configuration(),
+            "calibration": _calibration_configuration(),
         },
         "frozen_manifest_path": str(frozen_manifest_path),
         "selected_cumulative_features": tuple(feature.value for feature in selected_features),
@@ -543,6 +587,9 @@ def _markdown_report(report: Mapping[str, Any]) -> str:
         "",
         f"Injury archive: {injury['selected_reports']}/{injury['requested_reports']} cutoff "
         f"reports selected; {injury['unresolved_identity_count']} report identities unresolved.",
+        "",
+        "Reference: season-average baseline with rolling point-in-time residual calibration; "
+        "direct baseline and last-game remain diagnostics.",
         "",
         "## Promotion recommendations",
         "",

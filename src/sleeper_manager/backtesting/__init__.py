@@ -1,4 +1,8 @@
-from sleeper_manager.backtesting.controls import NaiveProjectionBaseline, NaiveProjectionKind
+from sleeper_manager.backtesting.controls import (
+    CalibratedProjectionModel,
+    NaiveProjectionBaseline,
+    NaiveProjectionKind,
+)
 from sleeper_manager.backtesting.models import (
     BacktestComparison,
     BacktestConfig,
@@ -44,6 +48,7 @@ __all__ = (
     "IntervalMetric",
     "NaiveProjectionBaseline",
     "NaiveProjectionKind",
+    "CalibratedProjectionModel",
     "ProjectionModel",
     "TargetSkip",
     "run_backtest",

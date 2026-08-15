@@ -9,8 +9,10 @@ from sleeper_manager.backtesting import (
     NaiveProjectionBaseline,
     run_backtest,
 )
+from sleeper_manager.backtesting.controls import CalibratedProjectionModel
+from sleeper_manager.backtesting.experiment import _isolated_suite
 from sleeper_manager.domain.nba import AvailabilityStatus, SourceMetadata
-from sleeper_manager.domain.projection import ProjectionSnapshot
+from sleeper_manager.domain.projection import ProjectionDistribution, ProjectionSnapshot
 from sleeper_manager.domain.scoring import BoxScoreLine, ScoringPolicy
 from sleeper_manager.integrations.nba.historical_features import (
     AvailabilityObservation,
@@ -111,6 +113,95 @@ def test_backtest_reports_walk_forward_metrics_and_warmup_skips() -> None:
     )
     assert len(report.comparisons) == 2
     assert all(comparison.common_sample_count == 3 for comparison in report.comparisons)
+
+
+class FixedProjector:
+    def project(
+        self,
+        dataset: HistoricalFeatureDataset,
+        *,
+        player_id: str,
+        game_id: str,
+        scoring_policy: ScoringPolicy,
+        exceed_score: float | None = None,
+    ) -> ProjectionSnapshot:
+        target = next(
+            row for row in dataset.rows if row.player_id == player_id and row.game_id == game_id
+        )
+        distribution = ProjectionDistribution.from_weighted_observations(((-5, 1), (0, 1), (5, 1)))
+        return ProjectionSnapshot(
+            player_id,
+            game_id,
+            target.available_as_of,
+            "fixed-v1",
+            f"fixed-input-{game_id}-{player_id}",
+            scoring_policy.version,
+            distribution,
+            (),
+        )
+
+
+def test_calibrated_projection_uses_only_prior_residuals() -> None:
+    report = run_backtest(
+        fixture_dataset(),
+        scoring_policy=POLICY,
+        models=(
+            BacktestModel(
+                "calibrated",
+                CalibratedProjectionModel(
+                    FixedProjector(),
+                    min_samples=3,
+                    max_samples=10,
+                    refresh_interval=1,
+                ),
+            ),
+        ),
+        config=BacktestConfig(min_prior_games=0),
+    )
+
+    observations = {
+        observation.game_id: observation
+        for observation in report.result_for("calibrated").observations
+    }
+    assert observations["p1-g1"].percentiles == (
+        (10, -5.0),
+        (25, -5.0),
+        (50, 0.0),
+        (75, 5.0),
+        (90, 5.0),
+    )
+    assert observations["p1-g3"].percentiles[0][1] < observations["p1-g1"].percentiles[0][1]
+    assert observations["p1-g3"].percentiles[-1][1] > observations["p1-g1"].percentiles[-1][1]
+
+
+def test_validation_suite_uses_season_average_reference_and_keeps_direct_control() -> None:
+    suite = _isolated_suite()
+
+    assert tuple(model.name for model in suite.models[:3]) == (
+        "reference",
+        "direct_baseline",
+        "last_game",
+    )
+    reference = suite.models[0].projector.projector.projector.projector
+    assert isinstance(reference, NaiveProjectionBaseline)
+    assert reference.kind == "season_average"
+
+
+def test_calibrated_validation_suite_runs_walk_forward() -> None:
+    suite = _isolated_suite()
+
+    report = run_backtest(
+        fixture_dataset(),
+        scoring_policy=POLICY,
+        models=suite.models,
+        reference_model="reference",
+    )
+
+    assert report.result_for("reference").metrics.sample_count > 0
+    assert {comparison.candidate_model for comparison in report.comparisons} >= {
+        "direct_baseline",
+        "opponent_strength",
+    }
 
 
 class InspectingProjector:
