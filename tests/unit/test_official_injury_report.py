@@ -60,6 +60,32 @@ def test_official_report_parser_restores_pypdf_tokenized_rows() -> None:
     assert snapshot.not_yet_submitted_teams == ("was", "det")
 
 
+def test_official_report_parser_preserves_game_date_across_repeated_page_header() -> None:
+    text = """
+    Injury Report: 11/06/22 05:30 PM
+    Game Date Game Time Matchup Team Player Name Current Status Reason
+    11/07/2022 07:00 (ET) WAS@CHA Washington Wizards NOT YET SUBMITTED
+    Charlotte Hornets NOT YET SUBMITTED
+    Injury Report: 11/06/22 05:30 PM
+    Game Date Game Time Matchup Team Player Name Current Status Reason
+    08:45 (ET) TOR@CHI Chicago Bulls NOT YET SUBMITTED
+    Toronto Raptors NOT YET SUBMITTED
+    """
+
+    report_source = SourceMetadata(
+        provider="nba_official_injury_report",
+        provider_id="pagination-fixture",
+        retrieved_at=RETRIEVED_AT,
+        source_updated_at=datetime(2022, 11, 6, 22, 30, tzinfo=UTC),
+    )
+    snapshot = parse_official_injury_report_text(text, source=report_source)
+
+    reverse_matchup = tuple(
+        status for status in snapshot.team_statuses if status.matchup == "TOR@CHI"
+    )
+    assert {status.game_date.isoformat() for status in reverse_matchup} == {"2022-11-07"}
+
+
 def test_official_report_coverage_surfaces_missing_snapshots() -> None:
     snapshot = parse_official_injury_report_text(FIXTURE.read_text(), source=source())
     coverage = assess_official_report_coverage(

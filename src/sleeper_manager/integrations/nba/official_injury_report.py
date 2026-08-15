@@ -17,7 +17,7 @@ from sleeper_manager.integrations.nba.mapping import NBA_TEAM_NAMES
 
 OFFICIAL_INJURY_REPORT_BASE_URL = "https://ak-static.cms.nba.com/referee/injury"
 EASTERN_TIME = ZoneInfo("America/New_York")
-REPORT_SCHEMA_VERSION = "1"
+REPORT_SCHEMA_VERSION = "2"
 
 _REPORT_HEADER = re.compile(
     r"^Injury Report:\s*(?P<date>\d{2}/\d{2}/\d{2})\s+(?P<time>\d{1,2}:\d{2}\s+[AP]M)$"
@@ -194,7 +194,8 @@ def parse_official_injury_report_text(
 
         game_match = _GAME_HEADER.match(line)
         if game_match:
-            game_date = _parse_game_date(game_match.group("date"), report_date or date.min)
+            inherited_game_date = current_game[0] if current_game else report_date or date.min
+            game_date = _parse_game_date(game_match.group("date"), inherited_game_date)
             game_time_text = game_match.group("time")
             if game_time_text is None:
                 if current_game is None:
