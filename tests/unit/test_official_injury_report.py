@@ -10,9 +10,11 @@ from sleeper_manager.integrations.nba.official_injury_report import (
     OfficialInjuryReportClient,
     ReportSubmissionStatus,
     assess_official_report_coverage,
+    deserialize_official_injury_report_snapshot,
     official_injury_report_url,
     official_injury_report_urls,
     parse_official_injury_report_text,
+    serialize_official_injury_report_snapshot,
 )
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "nba" / "official_injury_report.txt"
@@ -44,6 +46,16 @@ def test_official_report_parser_preserves_report_time_status_reason_and_submissi
     assert snapshot.not_yet_submitted_teams == ("tor", "bos", "min")
     assert snapshot.team_statuses[-2].status is ReportSubmissionStatus.NOT_YET_SUBMITTED
     assert snapshot.team_statuses[-1].game_date.isoformat() == "2025-01-02"
+
+
+def test_official_report_snapshot_serialization_round_trips_nested_fields() -> None:
+    snapshot = parse_official_injury_report_text(FIXTURE.read_text(), source=source())
+
+    restored = deserialize_official_injury_report_snapshot(
+        serialize_official_injury_report_snapshot(snapshot)
+    )
+
+    assert restored == snapshot
 
 
 def test_official_report_url_uses_pdf_filename_publication_slot() -> None:

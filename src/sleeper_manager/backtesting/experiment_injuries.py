@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import time
 from collections import Counter
 from collections.abc import Callable, Iterable, Mapping
@@ -20,11 +21,14 @@ from sleeper_manager.integrations.nba.official_injury_mapping import (
 )
 from sleeper_manager.integrations.nba.official_injury_report import (
     EASTERN_TIME,
+    PARSED_REPORT_CACHE_SCHEMA_VERSION,
     REPORT_SCHEMA_VERSION,
     OfficialInjuryReportSnapshot,
+    deserialize_official_injury_report_snapshot,
     extract_official_injury_report_text,
     official_injury_report_urls,
     parse_official_injury_report_text,
+    serialize_official_injury_report_snapshot,
 )
 
 
@@ -116,6 +120,7 @@ def acquire_injury_archive(
     owned_client = client is None
     http_client = client or cast(HTTPClient, httpx.Client(timeout=60, follow_redirects=True))
     snapshot_parser = parser or _parse_snapshot
+    use_parsed_cache = parser is None
     snapshots_by_nominal_time: dict[datetime, OfficialInjuryReportSnapshot] = {}
     content_by_nominal_time: dict[datetime, tuple[str, str, str]] = {}
     unavailable: dict[tuple[datetime, str], str] = {}
@@ -176,7 +181,13 @@ def acquire_injury_archive(
                         content_hash=content_hash,
                     )
                     try:
-                        snapshot = snapshot_parser(content, source)
+                        snapshot, parsed_cache_hit = _load_snapshot(
+                            cache_path,
+                            content,
+                            source,
+                            snapshot_parser,
+                            use_parsed_cache=use_parsed_cache,
+                        )
                     except Exception as error:
                         raise InjuryArchiveError(
                             f"Could not parse cached official injury report {cache_path}"
@@ -187,6 +198,8 @@ def acquire_injury_archive(
                         )
                     actual_source = replace(source, source_updated_at=snapshot.published_at)
                     snapshot = replace(snapshot, source=actual_source)
+                    if use_parsed_cache and not parsed_cache_hit:
+                        _write_parsed_snapshot(cache_path, content_hash, snapshot)
                     snapshots_by_nominal_time[candidate_at] = snapshot
                     content_by_nominal_time[candidate_at] = url, content_hash, str(cache_path)
                     if snapshot.published_at > requested_at:
@@ -275,6 +288,66 @@ def acquire_injury_archive(
 def _cache_filename(published_at: datetime, source_index: int = 0) -> str:
     suffix = "" if source_index == 0 else "-minute"
     return f"injury-report-{published_at.astimezone(UTC):%Y%m%dT%H%MZ}{suffix}.pdf"
+
+
+def _load_snapshot(
+    cache_path: Path,
+    content: bytes,
+    source: SourceMetadata,
+    parser: SnapshotParser,
+    *,
+    use_parsed_cache: bool,
+) -> tuple[OfficialInjuryReportSnapshot, bool]:
+    content_hash = source.content_hash
+    if use_parsed_cache and content_hash is not None:
+        cached = _read_parsed_snapshot(cache_path, content_hash)
+        if cached is not None:
+            return cached, True
+    return parser(content, source), False
+
+
+def _parsed_cache_path(pdf_path: Path) -> Path:
+    return pdf_path.with_suffix(".json")
+
+
+def _read_parsed_snapshot(
+    pdf_path: Path,
+    content_hash: str,
+) -> OfficialInjuryReportSnapshot | None:
+    path = _parsed_cache_path(pdf_path)
+    try:
+        payload = json.loads(path.read_text())
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("cache_schema_version") != PARSED_REPORT_CACHE_SCHEMA_VERSION:
+            return None
+        if payload.get("pdf_sha256") != content_hash:
+            return None
+        snapshot_payload = payload.get("snapshot")
+        if not isinstance(snapshot_payload, dict):
+            return None
+        return deserialize_official_injury_report_snapshot(snapshot_payload)
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _write_parsed_snapshot(
+    pdf_path: Path,
+    content_hash: str,
+    snapshot: OfficialInjuryReportSnapshot,
+) -> None:
+    path = _parsed_cache_path(pdf_path)
+    temporary_path = path.with_name(f"{path.name}.tmp")
+    payload = {
+        "cache_schema_version": PARSED_REPORT_CACHE_SCHEMA_VERSION,
+        "pdf_sha256": content_hash,
+        "snapshot": serialize_official_injury_report_snapshot(snapshot),
+    }
+    try:
+        temporary_path.write_text(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+        temporary_path.replace(path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def _same_archive_hour(published_at: datetime, nominal_at: datetime) -> bool:

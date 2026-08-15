@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -117,6 +118,94 @@ def test_archive_falls_back_and_reuses_cached_report(tmp_path: Path) -> None:
     assert len(cached_client.urls) == 1
     assert second.selections[0].selected_at == first.selections[0].selected_at
     assert second.selections[0].url == first.selections[0].url
+
+
+def test_archive_reuses_versioned_parsed_snapshot_sidecar(tmp_path: Path, monkeypatch) -> None:
+    import sleeper_manager.backtesting.experiment_injuries as injuries_module
+
+    def parsed_snapshot(_: bytes, source: SourceMetadata) -> OfficialInjuryReportSnapshot:
+        assert source.source_updated_at is not None
+        return OfficialInjuryReportSnapshot(
+            published_at=source.source_updated_at,
+            entries=(),
+            team_statuses=(),
+            source=source,
+        )
+
+    monkeypatch.setattr(injuries_module, "_parse_snapshot", parsed_snapshot)
+    games = (game("g1", datetime(2025, 1, 2, 2, 0, tzinfo=UTC)),)
+
+    first = acquire_injury_archive(
+        games,
+        (),
+        tmp_path,
+        retrieved_at=datetime(2026, 8, 14, tzinfo=UTC),
+        client=FakeClient([FakeResponse(200, b"report")]),
+        request_interval_seconds=0,
+    )
+
+    pdf_path = Path(first.selections[0].cache_path or "")
+    sidecar_path = pdf_path.with_suffix(".json")
+    assert sidecar_path.is_file()
+
+    def unexpected_parse(_: bytes, __: SourceMetadata) -> OfficialInjuryReportSnapshot:
+        raise AssertionError("parsed sidecar should avoid PDF parsing")
+
+    monkeypatch.setattr(injuries_module, "_parse_snapshot", unexpected_parse)
+    second = acquire_injury_archive(
+        games,
+        (),
+        tmp_path,
+        retrieved_at=datetime(2026, 8, 14, tzinfo=UTC),
+        client=FakeClient([]),
+        request_interval_seconds=0,
+    )
+
+    assert second.snapshots == first.snapshots
+
+
+def test_archive_reparses_stale_parsed_snapshot_sidecar(tmp_path: Path, monkeypatch) -> None:
+    import sleeper_manager.backtesting.experiment_injuries as injuries_module
+
+    parse_count = 0
+
+    def parsed_snapshot(_: bytes, source: SourceMetadata) -> OfficialInjuryReportSnapshot:
+        nonlocal parse_count
+        parse_count += 1
+        assert source.source_updated_at is not None
+        return OfficialInjuryReportSnapshot(
+            published_at=source.source_updated_at,
+            entries=(),
+            team_statuses=(),
+            source=source,
+        )
+
+    monkeypatch.setattr(injuries_module, "_parse_snapshot", parsed_snapshot)
+    games = (game("g1", datetime(2025, 1, 2, 2, 0, tzinfo=UTC)),)
+    first = acquire_injury_archive(
+        games,
+        (),
+        tmp_path,
+        retrieved_at=datetime(2026, 8, 14, tzinfo=UTC),
+        client=FakeClient([FakeResponse(200, b"report")]),
+        request_interval_seconds=0,
+    )
+
+    sidecar_path = Path(first.selections[0].cache_path or "").with_suffix(".json")
+    payload = json.loads(sidecar_path.read_text())
+    payload["pdf_sha256"] = "stale"
+    sidecar_path.write_text(json.dumps(payload))
+
+    acquire_injury_archive(
+        games,
+        (),
+        tmp_path,
+        retrieved_at=datetime(2026, 8, 14, tzinfo=UTC),
+        client=FakeClient([]),
+        request_interval_seconds=0,
+    )
+
+    assert parse_count == 2
 
 
 def test_archive_retries_transient_cdn_throttling(tmp_path: Path) -> None:
