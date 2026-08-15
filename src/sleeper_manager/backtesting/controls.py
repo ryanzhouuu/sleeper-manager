@@ -132,6 +132,9 @@ class CalibratedProjectionModel:
         self._sorted_residuals: tuple[float, ...] = ()
         self._residual_mean = 0.0
         self._last_game_start: datetime | None = None
+        self._dataset_version: str | None = None
+        self._indexed_prior_count = 0
+        self._rows_by_key: dict[tuple[str, str], HistoricalFeatureRow] = {}
 
     @property
     def model_version(self) -> str:
@@ -151,6 +154,10 @@ class CalibratedProjectionModel:
         exceed_score: float | None = None,
     ) -> ProjectionSnapshot:
         target = _find_target(dataset.rows, player_id=player_id, game_id=game_id)
+        if self._dataset_version is None:
+            self._dataset_version = dataset.dataset_version
+        elif self._dataset_version != dataset.dataset_version:
+            raise BacktestError("Calibrated projections cannot mix dataset versions")
         if self._last_game_start is not None and target.game_start < self._last_game_start:
             raise BacktestError("Calibrated projections must be evaluated chronologically")
         self._resolve_pending(dataset, target=target, scoring_policy=scoring_policy)
@@ -198,18 +205,22 @@ class CalibratedProjectionModel:
         target: HistoricalFeatureRow,
         scoring_policy: ScoringPolicy,
     ) -> None:
-        prior_rows = {
-            (row.player_id, row.game_id): row
-            for row in dataset.rows
-            if row.game_start < target.game_start
-        }
+        point_in_time_count = getattr(dataset.rows, "prior_count", None)
+        if isinstance(point_in_time_count, int):
+            for row in dataset.rows[self._indexed_prior_count : point_in_time_count]:
+                self._rows_by_key.setdefault((row.player_id, row.game_id), row)
+            self._indexed_prior_count = max(self._indexed_prior_count, point_in_time_count)
+        else:
+            for row in dataset.rows:
+                if row.game_start < target.game_start:
+                    self._rows_by_key.setdefault((row.player_id, row.game_id), row)
         resolved: list[tuple[str, str]] = []
         for key, pending in self._pending.items():
             if pending.game_start >= target.game_start:
                 continue
-            row = prior_rows.get(key)
-            if row is not None:
-                actual = calculate_fantasy_points(row.target_box_score, scoring_policy)
+            prior_row = self._rows_by_key.get(key)
+            if prior_row is not None:
+                actual = calculate_fantasy_points(prior_row.target_box_score, scoring_policy)
                 self._add_residual(actual - pending.expected_value)
             resolved.append(key)
         for key in resolved:
