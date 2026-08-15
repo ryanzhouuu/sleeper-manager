@@ -180,6 +180,16 @@ def test_archive_aggregates_deterministic_mapping_diagnostics(tmp_path: Path) ->
                     status=AvailabilityStatus.OUT,
                     reason=None,
                 ),
+                OfficialInjuryReportEntry(
+                    game_date=datetime(2025, 1, 2, tzinfo=UTC).date(),
+                    game_time=datetime.min.time(),
+                    matchup="CHI@BOS",
+                    team_abbreviation="CHI",
+                    team_name="Chicago Bulls",
+                    player_name="Smith, Jalen",
+                    status=AvailabilityStatus.PROBABLE,
+                    reason=None,
+                ),
             ),
             team_statuses=(),
             source=source,
@@ -196,6 +206,14 @@ def test_archive_aggregates_deterministic_mapping_diagnostics(tmp_path: Path) ->
                 True,
                 SourceMetadata("fixture", "player", datetime(2025, 1, 2, tzinfo=UTC)),
             ),
+            ProviderPlayer(
+                "espn-smith",
+                "Jalen Smith",
+                "team-was",
+                "WAS",
+                True,
+                SourceMetadata("fixture", "player", datetime(2025, 1, 2, tzinfo=UTC)),
+            ),
         ),
         tmp_path,
         retrieved_at=datetime(2026, 8, 14, tzinfo=UTC),
@@ -206,4 +224,5 @@ def test_archive_aggregates_deterministic_mapping_diagnostics(tmp_path: Path) ->
 
     counts = {diagnostic.category: diagnostic.count for diagnostic in result.mapping_diagnostics}
     assert counts[InjuryMappingCategory.RESOLVED] == 1
+    assert counts[InjuryMappingCategory.RESOLVED_NAME_ONLY] == 1
     assert counts[InjuryMappingCategory.NO_NAME_TEAM_MATCH] == 1

@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from sleeper_manager.domain.nba import ProviderPlayer, SourceMetadata
+from sleeper_manager.integrations.nba.identity import MappingConfidence, MappingMethod
 from sleeper_manager.integrations.nba.official_injury_mapping import (
     InjuryMappingCategory,
     map_official_injury_report,
@@ -82,3 +83,26 @@ def test_official_injury_mapping_keeps_duplicate_identity_candidates_unresolved(
     assert sum(diagnostic.count for diagnostic in ambiguous) == 1
     assert result.unresolved[0].entry.player_name == "Dosunmu, Ayo"
     assert any(unresolved.entry.player_name == "Smith, Jalen" for unresolved in result.unresolved)
+
+
+def test_official_injury_mapping_uses_unique_stable_id_without_team_confirmation() -> None:
+    snapshot = parse_official_injury_report_text(FIXTURE.read_text(), source=SOURCE)
+    result = map_official_injury_report(
+        snapshot,
+        [
+            provider("espn-craig", "Torrey Craig", "CHI"),
+            provider("espn-smith", "Jalen Smith", "WAS"),
+            provider("espn-smith", "Jalen Smith", "MIA"),
+        ],
+    )
+
+    mapping = next(
+        mapping for mapping in result.mappings if mapping.entry.player_name == "Smith, Jalen"
+    )
+    assert mapping.player_id == "espn-smith"
+    assert mapping.method is MappingMethod.NORMALIZED_NAME_ONLY
+    assert mapping.confidence is MappingConfidence.LOW
+    assert any(
+        diagnostic.category is InjuryMappingCategory.RESOLVED_NAME_ONLY
+        for diagnostic in result.diagnostics
+    )

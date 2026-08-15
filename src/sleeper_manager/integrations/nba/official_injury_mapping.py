@@ -32,8 +32,10 @@ class HistoricalPlayerAvailability:
 
 class InjuryMappingCategory(StrEnum):
     RESOLVED = "resolved"
+    RESOLVED_NAME_ONLY = "resolved_name_only"
     NO_NAME_TEAM_MATCH = "no_name_team_match"
     AMBIGUOUS_NAME_TEAM_MATCH = "ambiguous_name_team_match"
+    AMBIGUOUS_NAME_ONLY = "ambiguous_name_only"
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,10 +79,12 @@ def map_official_injury_report(
 ) -> OfficialInjuryMappingReport:
     candidates = tuple(provider_players)
     by_name_team: dict[tuple[str, str], list[ProviderPlayer]] = {}
+    by_name_ids: dict[str, set[str]] = {}
     for player in candidates:
+        name_key = normalize_player_name(player.full_name)
+        by_name_ids.setdefault(name_key, set()).add(player.provider_id)
         team = normalize_team(player.team_abbreviation)
         if team is not None:
-            name_key = normalize_player_name(player.full_name)
             by_name_team.setdefault((name_key, team), []).append(player)
 
     mappings: list[OfficialInjuryMapping] = []
@@ -92,11 +96,12 @@ def map_official_injury_report(
         team = normalize_team(entry.team_abbreviation)
         normalized_name = normalize_report_player_name(entry.player_name)
         matches = by_name_team.get((normalized_name, team), []) if team is not None else []
-        if len(matches) == 1:
-            player = matches[0]
+        team_match_ids = tuple(sorted({player.provider_id for player in matches}))
+        if len(team_match_ids) == 1:
+            player_id = team_match_ids[0]
             mapping = OfficialInjuryMapping(
                 entry=entry,
-                player_id=player.provider_id,
+                player_id=player_id,
                 method=MappingMethod.NORMALIZED_NAME_TEAM,
                 confidence=MappingConfidence.MEDIUM,
                 reason="Matched by normalized official report name and team",
@@ -112,7 +117,7 @@ def map_official_injury_report(
             ] += 1
             availability.append(
                 HistoricalPlayerAvailability(
-                    player_id=player.provider_id,
+                    player_id=player_id,
                     game_date=entry.game_date,
                     game_time=entry.game_time,
                     matchup=entry.matchup,
@@ -125,11 +130,54 @@ def map_official_injury_report(
             )
             continue
 
-        candidate_ids = tuple(player.provider_id for player in matches)
+        name_only_ids = tuple(sorted(by_name_ids.get(normalized_name, set())))
+        if len(name_only_ids) == 1:
+            player_id = name_only_ids[0]
+            mappings.append(
+                OfficialInjuryMapping(
+                    entry=entry,
+                    player_id=player_id,
+                    method=MappingMethod.NORMALIZED_NAME_ONLY,
+                    confidence=MappingConfidence.LOW,
+                    reason=(
+                        "Matched by unique normalized report name; provider team "
+                        "confirmation was unavailable"
+                    ),
+                    candidate_ids=name_only_ids,
+                )
+            )
+            diagnostics[
+                (
+                    InjuryMappingCategory.RESOLVED_NAME_ONLY,
+                    _season_start_year(entry.game_date),
+                    team or entry.team_abbreviation.casefold(),
+                    normalized_name,
+                )
+            ] += 1
+            availability.append(
+                HistoricalPlayerAvailability(
+                    player_id=player_id,
+                    game_date=entry.game_date,
+                    game_time=entry.game_time,
+                    matchup=entry.matchup,
+                    team_abbreviation=entry.team_abbreviation,
+                    status=entry.status,
+                    detail=entry.reason,
+                    available_as_of=snapshot.published_at,
+                    source=snapshot.source,
+                )
+            )
+            continue
+
+        candidate_ids = team_match_ids or name_only_ids
         category = (
             InjuryMappingCategory.AMBIGUOUS_NAME_TEAM_MATCH
-            if matches
-            else InjuryMappingCategory.NO_NAME_TEAM_MATCH
+            if team_match_ids
+            else (
+                InjuryMappingCategory.AMBIGUOUS_NAME_ONLY
+                if name_only_ids
+                else InjuryMappingCategory.NO_NAME_TEAM_MATCH
+            )
         )
         diagnostics[
             (
@@ -141,8 +189,12 @@ def map_official_injury_report(
         ] += 1
         reason = (
             "Multiple provider players matched normalized report name and team"
-            if len(matches) > 1
-            else "No provider player matched normalized report name and team"
+            if team_match_ids
+            else (
+                "Multiple provider players matched normalized report name without team confirmation"
+                if name_only_ids
+                else "No provider player matched normalized report name and team"
+            )
         )
         mappings.append(
             OfficialInjuryMapping(
