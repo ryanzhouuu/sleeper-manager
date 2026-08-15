@@ -10,7 +10,7 @@ from sleeper_manager.backtesting import (
     run_backtest,
 )
 from sleeper_manager.backtesting.controls import CalibratedProjectionModel
-from sleeper_manager.backtesting.experiment import _isolated_suite
+from sleeper_manager.backtesting.experiment import _injury_mapping_diagnostics, _isolated_suite
 from sleeper_manager.domain.nba import AvailabilityStatus, SourceMetadata
 from sleeper_manager.domain.projection import ProjectionDistribution, ProjectionSnapshot
 from sleeper_manager.domain.scoring import BoxScoreLine, ScoringPolicy
@@ -18,6 +18,10 @@ from sleeper_manager.integrations.nba.historical_features import (
     AvailabilityObservation,
     HistoricalFeatureDataset,
     HistoricalFeatureRow,
+)
+from sleeper_manager.integrations.nba.official_injury_mapping import (
+    InjuryMappingCategory,
+    InjuryMappingDiagnostic,
 )
 from sleeper_manager.projections.direct_baseline import DirectFantasyPointBaseline
 
@@ -202,6 +206,34 @@ def test_calibrated_validation_suite_runs_walk_forward() -> None:
         "direct_baseline",
         "opponent_strength",
     }
+
+
+def test_injury_mapping_diagnostics_are_grouped_by_season_and_team() -> None:
+    report = _injury_mapping_diagnostics(
+        (
+            InjuryMappingDiagnostic(InjuryMappingCategory.RESOLVED, 2022, "chi", "a", 2),
+            InjuryMappingDiagnostic(
+                InjuryMappingCategory.NO_NAME_TEAM_MATCH, 2022, "chi", "missing", 3
+            ),
+            InjuryMappingDiagnostic(
+                InjuryMappingCategory.AMBIGUOUS_NAME_TEAM_MATCH, 2023, "bos", "duplicate", 1
+            ),
+        )
+    )
+
+    assert report["mapping_category_counts"] == {
+        "ambiguous_name_team_match": 1,
+        "no_name_team_match": 3,
+        "resolved": 2,
+    }
+    assert report["mapping_coverage_by_season"]["2022-23"] == {
+        "no_name_team_match": 3,
+        "resolved": 2,
+    }
+    assert report["mapping_coverage_by_season_team"]["2023-24"]["bos"] == {
+        "ambiguous_name_team_match": 1
+    }
+    assert report["unresolved_name_team_examples"][0]["normalized_name"] == "missing"
 
 
 class InspectingProjector:

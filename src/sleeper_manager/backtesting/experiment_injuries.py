@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
@@ -13,6 +14,8 @@ import httpx
 from sleeper_manager.domain.nba import ProviderPlayer, ScheduledGame, SourceMetadata
 from sleeper_manager.integrations.nba.official_injury_mapping import (
     HistoricalPlayerAvailability,
+    InjuryMappingCategory,
+    InjuryMappingDiagnostic,
     map_official_injury_report,
 )
 from sleeper_manager.integrations.nba.official_injury_report import (
@@ -59,6 +62,7 @@ class InjuryArchiveResult:
     selections: tuple[InjuryReportSelection, ...]
     unresolved_identity_count: int
     mapping_warning_count: int
+    mapping_diagnostics: tuple[InjuryMappingDiagnostic, ...] = ()
 
 
 def latest_report_timestamp(cutoff: datetime) -> datetime:
@@ -207,6 +211,7 @@ def acquire_injury_archive(
     availability: list[HistoricalPlayerAvailability] = []
     unresolved = 0
     warnings = 0
+    diagnostic_counts: Counter[tuple[InjuryMappingCategory, int, str, str]] = Counter()
     snapshots_by_timestamp = {
         snapshot.published_at: snapshot for snapshot in snapshots_by_nominal_time.values()
     }
@@ -215,6 +220,14 @@ def acquire_injury_archive(
         availability.extend(mapping.availability)
         unresolved += len(mapping.unresolved)
         warnings += len(mapping.warnings)
+        for diagnostic in mapping.diagnostics:
+            diagnostic_key = (
+                diagnostic.category,
+                diagnostic.season,
+                diagnostic.team_abbreviation,
+                diagnostic.normalized_name,
+            )
+            diagnostic_counts[diagnostic_key] += diagnostic.count
     return InjuryArchiveResult(
         snapshots=tuple(
             snapshots_by_timestamp[timestamp] for timestamp in sorted(snapshots_by_timestamp)
@@ -232,6 +245,19 @@ def acquire_injury_archive(
         selections=tuple(selections),
         unresolved_identity_count=unresolved,
         mapping_warning_count=warnings,
+        mapping_diagnostics=tuple(
+            InjuryMappingDiagnostic(
+                category=category,
+                season=season,
+                team_abbreviation=team_abbreviation,
+                normalized_name=normalized_name,
+                count=count,
+            )
+            for (category, season, team_abbreviation, normalized_name), count in sorted(
+                diagnostic_counts.items(),
+                key=lambda item: item[0],
+            )
+        ),
     )
 
 

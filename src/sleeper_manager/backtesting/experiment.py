@@ -40,6 +40,7 @@ from sleeper_manager.integrations.nba.historical_features import (
     HistoricalFeatureDataset,
     build_historical_feature_dataset,
 )
+from sleeper_manager.integrations.nba.official_injury_mapping import InjuryMappingDiagnostic
 from sleeper_manager.projections.direct_baseline import DirectFantasyPointBaseline
 from sleeper_manager.projections.residual_candidates import (
     CachingProjectionModel,
@@ -480,6 +481,13 @@ def _report(
         for candidate in candidate_names
     }
     injury_observations = Counter(row.availability_observation.value for row in dataset.rows)
+    injury_observations_by_season: dict[str, Counter[str]] = {}
+    for row in dataset.rows:
+        season = _season_label(row.game_start)
+        injury_observations_by_season.setdefault(season, Counter())[
+            row.availability_observation.value
+        ] += 1
+    mapping_diagnostics = _injury_mapping_diagnostics(injuries.mapping_diagnostics)
     return {
         "report_version": "model-feature-validation-v2",
         "generated_at": generated_at,
@@ -504,6 +512,7 @@ def _report(
             "unique_snapshots": len(injuries.snapshots),
             "unresolved_identity_count": injuries.unresolved_identity_count,
             "mapping_warning_count": injuries.mapping_warning_count,
+            **mapping_diagnostics,
             "fallback_selections": sum(
                 value.selected_at is not None and value.selected_at != value.requested_at
                 for value in injuries.selections
@@ -512,6 +521,10 @@ def _report(
                 len(value.unavailable_candidates) for value in injuries.selections
             ),
             "feature_observation_counts": dict(sorted(injury_observations.items())),
+            "feature_observation_counts_by_season": {
+                season: dict(sorted(counts.items()))
+                for season, counts in sorted(injury_observations_by_season.items())
+            },
         },
         "configuration": {
             "backtest_config_version": config.version,
@@ -573,6 +586,57 @@ def _fold_summary(result: FoldResult) -> dict[str, Any]:
     }
 
 
+def _injury_mapping_diagnostics(
+    diagnostics: Iterable[InjuryMappingDiagnostic],
+) -> dict[str, Any]:
+    category_counts: Counter[str] = Counter()
+    by_season: dict[str, Counter[str]] = {}
+    by_season_team: dict[str, dict[str, Counter[str]]] = {}
+    unresolved_names: Counter[tuple[str, str, str]] = Counter()
+    for diagnostic in diagnostics:
+        category = diagnostic.category.value
+        season = _season_label_from_start_year(diagnostic.season)
+        category_counts[category] += diagnostic.count
+        by_season.setdefault(season, Counter())[category] += diagnostic.count
+        by_season_team.setdefault(season, {}).setdefault(diagnostic.team_abbreviation, Counter())[
+            category
+        ] += diagnostic.count
+        if category != "resolved":
+            unresolved_names[
+                (season, diagnostic.team_abbreviation, diagnostic.normalized_name)
+            ] += diagnostic.count
+    return {
+        "mapping_category_counts": dict(sorted(category_counts.items())),
+        "mapping_coverage_by_season": {
+            season: dict(sorted(counts.items())) for season, counts in sorted(by_season.items())
+        },
+        "mapping_coverage_by_season_team": {
+            season: {
+                team: dict(sorted(counts.items())) for team, counts in sorted(team_counts.items())
+            }
+            for season, team_counts in sorted(by_season_team.items())
+        },
+        "unresolved_name_team_examples": [
+            {
+                "season": season,
+                "team_abbreviation": team,
+                "normalized_name": name,
+                "count": count,
+            }
+            for (season, team, name), count in unresolved_names.most_common(25)
+        ],
+    }
+
+
+def _season_label(value: datetime) -> str:
+    start_year = value.year if value.month >= 10 else value.year - 1
+    return _season_label_from_start_year(start_year)
+
+
+def _season_label_from_start_year(start_year: int) -> str:
+    return f"{start_year}-{(start_year + 1) % 100:02d}"
+
+
 def _markdown_report(report: Mapping[str, Any]) -> str:
     dataset = report["dataset"]
     injury = report["injury_archive"]
@@ -591,11 +655,38 @@ def _markdown_report(report: Mapping[str, Any]) -> str:
         "Reference: season-average baseline with rolling point-in-time residual calibration; "
         "direct baseline and last-game remain diagnostics.",
         "",
-        "## Promotion recommendations",
+        "## Injury data quality",
         "",
-        "| Candidate | Recommendation | Passed gates |",
-        "| --- | --- | ---: |",
+        "| Season | Resolved | No name/team match | Ambiguous match |",
+        "| --- | ---: | ---: | ---: |",
     ]
+    for season, counts in injury["mapping_coverage_by_season"].items():
+        lines.append(
+            f"| {season} | {counts.get('resolved', 0)} | "
+            f"{counts.get('no_name_team_match', 0)} | "
+            f"{counts.get('ambiguous_name_team_match', 0)} |"
+        )
+    lines.extend(
+        [
+            "",
+            "| Season | Reported | Not listed | Team not yet submitted | Missing report |",
+            "| --- | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for season, counts in injury["feature_observation_counts_by_season"].items():
+        lines.append(
+            f"| {season} | {counts.get('reported', 0)} | {counts.get('not_listed', 0)} | "
+            f"{counts.get('team_not_yet_submitted', 0)} | {counts.get('missing_report', 0)} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Promotion recommendations",
+            "",
+            "| Candidate | Recommendation | Passed gates |",
+            "| --- | --- | ---: |",
+        ]
+    )
     for decision in decisions:
         passed = sum(gate.passed for gate in decision.gates)
         lines.append(

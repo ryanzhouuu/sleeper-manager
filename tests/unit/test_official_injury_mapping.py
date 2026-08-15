@@ -2,7 +2,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from sleeper_manager.domain.nba import ProviderPlayer, SourceMetadata
-from sleeper_manager.integrations.nba.official_injury_mapping import map_official_injury_report
+from sleeper_manager.integrations.nba.official_injury_mapping import (
+    InjuryMappingCategory,
+    map_official_injury_report,
+)
 from sleeper_manager.integrations.nba.official_injury_report import (
     parse_official_injury_report_text,
 )
@@ -41,6 +44,10 @@ def test_official_injury_mapping_resolves_report_display_names_to_provider_ids()
     assert result.availability[0].player_id == "espn-craig"
     assert result.availability[0].available_as_of == PUBLISHED_AT
     assert result.availability[3].player_id == "espn-bagley"
+    assert sum(diagnostic.count for diagnostic in result.diagnostics) == 6
+    assert {diagnostic.category for diagnostic in result.diagnostics} == {
+        InjuryMappingCategory.RESOLVED
+    }
 
 
 def test_official_injury_mapping_surfaces_missing_identity_without_guessing() -> None:
@@ -50,3 +57,28 @@ def test_official_injury_mapping_surfaces_missing_identity_without_guessing() ->
     assert len(result.unresolved) == 5
     assert result.unresolved[0].entry.player_name == "Dosunmu, Ayo"
     assert result.warnings
+    assert {diagnostic.category for diagnostic in result.diagnostics} == {
+        InjuryMappingCategory.RESOLVED,
+        InjuryMappingCategory.NO_NAME_TEAM_MATCH,
+    }
+
+
+def test_official_injury_mapping_keeps_duplicate_identity_candidates_unresolved() -> None:
+    snapshot = parse_official_injury_report_text(FIXTURE.read_text(), source=SOURCE)
+    result = map_official_injury_report(
+        snapshot,
+        [
+            provider("espn-craig", "Torrey Craig", "CHI"),
+            provider("espn-smith-a", "Jalen Smith", "CHI"),
+            provider("espn-smith-b", "Jalen Smith", "CHI"),
+        ],
+    )
+
+    ambiguous = tuple(
+        diagnostic
+        for diagnostic in result.diagnostics
+        if diagnostic.category is InjuryMappingCategory.AMBIGUOUS_NAME_TEAM_MATCH
+    )
+    assert sum(diagnostic.count for diagnostic in ambiguous) == 1
+    assert result.unresolved[0].entry.player_name == "Dosunmu, Ayo"
+    assert any(unresolved.entry.player_name == "Smith, Jalen" for unresolved in result.unresolved)
