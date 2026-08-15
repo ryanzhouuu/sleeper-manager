@@ -142,6 +142,7 @@ def build_historical_feature_dataset(
     team_schedule = _index_team_schedule(game_records)
     availability_by_player = _index_availability(availability_records)
     report_by_game_team = _index_reports(report_records)
+    report_matchups_by_date_team = _index_report_matchups(report_by_game_team)
     opponent_stats_by_game_team: dict[
         tuple[str, str],
         tuple[
@@ -213,6 +214,7 @@ def build_historical_feature_dataset(
             opponent_abbreviation=opponent_abbreviation,
             cutoff=cutoff,
             reports=report_by_game_team,
+            report_matchups=report_matchups_by_date_team,
             availability=availability_by_player,
         )
         source_lineage = _lineage(
@@ -404,6 +406,15 @@ def _index_reports(
     }
 
 
+def _index_report_matchups(
+    reports: Mapping[tuple[date, str, str], tuple[OfficialInjuryReportSnapshot, ...]],
+) -> dict[tuple[date, str], tuple[str, ...]]:
+    result: dict[tuple[date, str], set[str]] = defaultdict(set)
+    for game_date, matchup, team_abbreviation in reports:
+        result[(game_date, team_abbreviation)].add(matchup)
+    return {key: tuple(sorted(matchups)) for key, matchups in result.items()}
+
+
 def _opponent(
     game: ScheduledGame,
     team_id: str,
@@ -564,6 +575,7 @@ def _availability_at_cutoff(
     opponent_abbreviation: str,
     cutoff: datetime,
     reports: Mapping[tuple[date, str, str], tuple[OfficialInjuryReportSnapshot, ...]],
+    report_matchups: Mapping[tuple[date, str], tuple[str, ...]],
     availability: Mapping[str, tuple[HistoricalPlayerAvailability, ...]],
 ) -> tuple[
     AvailabilityStatus,
@@ -573,7 +585,7 @@ def _availability_at_cutoff(
     SourceMetadata | None,
 ]:
     game_date = _local_game_date(game)
-    matchup = _matchup(game, team_abbreviation, opponent_abbreviation, reports)
+    matchup = _matchup(game, team_abbreviation, opponent_abbreviation, report_matchups)
     if matchup is None:
         return (
             AvailabilityStatus.UNKNOWN,
@@ -641,13 +653,9 @@ def _matchup(
     game: ScheduledGame,
     team_abbreviation: str,
     opponent_abbreviation: str,
-    reports: Mapping[tuple[date, str, str], tuple[OfficialInjuryReportSnapshot, ...]],
+    reports: Mapping[tuple[date, str], tuple[str, ...]],
 ) -> str | None:
-    candidate_matchups = {
-        key[1]
-        for key in reports
-        if key[0] == _local_game_date(game) and key[2] == team_abbreviation
-    }
+    candidate_matchups = reports.get((_local_game_date(game), team_abbreviation), ())
     expected_teams = {team_abbreviation, opponent_abbreviation}
     matchups = {
         matchup
