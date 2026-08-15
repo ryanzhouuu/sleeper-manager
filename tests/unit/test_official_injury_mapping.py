@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -106,3 +107,39 @@ def test_official_injury_mapping_uses_unique_stable_id_without_team_confirmation
         diagnostic.category is InjuryMappingCategory.RESOLVED_NAME_ONLY
         for diagnostic in result.diagnostics
     )
+
+
+def test_official_injury_mapping_recovers_unique_partial_name_and_team() -> None:
+    snapshot = parse_official_injury_report_text(FIXTURE.read_text(), source=SOURCE)
+    partial_snapshot = replace(
+        snapshot,
+        entries=(replace(snapshot.entries[0], player_name="II, Dereck", team_abbreviation="DAL"),),
+    )
+    result = map_official_injury_report(
+        partial_snapshot,
+        [provider("espn-lively", "Dereck Lively II", "DAL")],
+    )
+
+    mapping = result.mappings[0]
+    assert mapping.player_id == "espn-lively"
+    assert mapping.method is MappingMethod.NORMALIZED_PARTIAL_NAME_TEAM
+    assert mapping.confidence is MappingConfidence.LOW
+    assert result.diagnostics[0].category is InjuryMappingCategory.RESOLVED_PARTIAL_NAME_TEAM
+
+
+def test_official_injury_mapping_keeps_ambiguous_partial_name_unresolved() -> None:
+    snapshot = parse_official_injury_report_text(FIXTURE.read_text(), source=SOURCE)
+    partial_snapshot = replace(
+        snapshot,
+        entries=(replace(snapshot.entries[0], player_name="Robert", team_abbreviation="POR"),),
+    )
+    result = map_official_injury_report(
+        partial_snapshot,
+        [
+            provider("espn-robert-a", "Robert Williams III", "POR"),
+            provider("espn-robert-b", "Robert Covington", "POR"),
+        ],
+    )
+
+    assert len(result.unresolved) == 1
+    assert result.diagnostics[0].category is InjuryMappingCategory.AMBIGUOUS_PARTIAL_NAME_TEAM

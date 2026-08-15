@@ -14,6 +14,7 @@ class MappingMethod(StrEnum):
     EXPLICIT_OVERRIDE = "explicit_override"
     STABLE_ID = "stable_id"
     NORMALIZED_NAME_TEAM = "normalized_name_team"
+    NORMALIZED_PARTIAL_NAME_TEAM = "normalized_partial_name_team"
     NORMALIZED_NAME_ONLY = "normalized_name_only"
     UNRESOLVED = "unresolved"
 
