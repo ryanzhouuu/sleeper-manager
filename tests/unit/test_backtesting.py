@@ -219,6 +219,13 @@ def test_injury_mapping_diagnostics_are_grouped_by_season_and_team() -> None:
                 InjuryMappingCategory.RESOLVED_SUBSET_NAME_TEAM, 2022, "chi", "alias", 4
             ),
             InjuryMappingDiagnostic(
+                InjuryMappingCategory.RESOLVED_HISTORICAL_NAME_TEAM,
+                2022,
+                "chi",
+                "historical",
+                5,
+            ),
+            InjuryMappingDiagnostic(
                 InjuryMappingCategory.AMBIGUOUS_NAME_TEAM_MATCH, 2023, "bos", "duplicate", 1
             ),
         )
@@ -228,10 +235,12 @@ def test_injury_mapping_diagnostics_are_grouped_by_season_and_team() -> None:
         "ambiguous_name_team_match": 1,
         "no_name_team_match": 3,
         "resolved": 2,
+        "resolved_historical_name_team": 5,
         "resolved_subset_name_team": 4,
     }
     assert report["mapping_coverage_by_season"]["2022-23"] == {
         "no_name_team_match": 3,
+        "resolved_historical_name_team": 5,
         "resolved": 2,
         "resolved_subset_name_team": 4,
     }

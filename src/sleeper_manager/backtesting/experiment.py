@@ -4,7 +4,7 @@ import json
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
@@ -40,7 +40,9 @@ from sleeper_manager.integrations.nba.historical_features import (
     HistoricalFeatureDataset,
     build_historical_feature_dataset,
 )
+from sleeper_manager.integrations.nba.mapping import normalize_team
 from sleeper_manager.integrations.nba.official_injury_mapping import InjuryMappingDiagnostic
+from sleeper_manager.integrations.nba.official_injury_report import EASTERN_TIME
 from sleeper_manager.projections.direct_baseline import DirectFantasyPointBaseline
 from sleeper_manager.projections.residual_candidates import (
     CachingProjectionModel,
@@ -107,6 +109,7 @@ def run_model_feature_validation(
         inputs.provider_players,
         workspace / "injuries",
         retrieved_at=generated_at,
+        historical_player_ids_by_date_team=_historical_player_ids_by_date_team(inputs),
     )
     dataset = _build_dataset(inputs, injuries, scoring_policy, generated_at)
     audit = _audit_dataset(dataset)
@@ -281,6 +284,26 @@ def _build_dataset(
         generated_at=generated_at,
         team_box_scores=inputs.team_box_scores,
     )
+
+
+def _historical_player_ids_by_date_team(
+    inputs: HistoricalExperimentInputs,
+) -> dict[tuple[date, str], frozenset[str]]:
+    team_abbreviations = {
+        team.provider_id: normalize_team(team.abbreviation) for team in inputs.teams
+    }
+    game_dates = {
+        game.provider_id: game.start_time.astimezone(EASTERN_TIME).date()
+        for game in inputs.games
+    }
+    index: dict[tuple[date, str], set[str]] = {}
+    for box_score in inputs.player_box_scores:
+        game_date = game_dates.get(box_score.game_id)
+        team = team_abbreviations.get(box_score.team_id)
+        if game_date is None or team is None:
+            continue
+        index.setdefault((game_date, team), set()).add(box_score.player_id)
+    return {key: frozenset(player_ids) for key, player_ids in index.items()}
 
 
 def _isolated_suite() -> _ModelSuite:
@@ -606,6 +629,7 @@ def _injury_mapping_diagnostics(
             "resolved_name_only",
             "resolved_partial_name_team",
             "resolved_subset_name_team",
+            "resolved_historical_name_team",
         }:
             unresolved_names[
                 (season, diagnostic.team_abbreviation, diagnostic.normalized_name)
@@ -662,9 +686,10 @@ def _markdown_report(report: Mapping[str, Any]) -> str:
         "",
         "## Injury data quality",
         "",
-        "| Season | Team-confirmed | Name-only | Partial team | Subset team | No name/team match | "
+        "| Season | Team-confirmed | Name-only | Partial team | Subset team | Historical date | "
+        "No name/team match | "
         "Ambiguous team | Ambiguous name | Ambiguous partial |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for season, counts in injury["mapping_coverage_by_season"].items():
         lines.append(
@@ -672,6 +697,7 @@ def _markdown_report(report: Mapping[str, Any]) -> str:
             f"{counts.get('resolved_name_only', 0)} | "
             f"{counts.get('resolved_partial_name_team', 0)} | "
             f"{counts.get('resolved_subset_name_team', 0)} | "
+            f"{counts.get('resolved_historical_name_team', 0)} | "
             f"{counts.get('no_name_team_match', 0)} | "
             f"{counts.get('ambiguous_name_team_match', 0)} | "
             f"{counts.get('ambiguous_name_only', 0)} | "

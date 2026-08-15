@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from sleeper_manager.domain.nba import ProviderPlayer, SourceMetadata
@@ -143,6 +143,29 @@ def test_official_injury_mapping_keeps_ambiguous_partial_name_unresolved() -> No
 
     assert len(result.unresolved) == 1
     assert result.diagnostics[0].category is InjuryMappingCategory.AMBIGUOUS_PARTIAL_NAME_TEAM
+
+
+def test_official_injury_mapping_uses_unique_historical_candidate() -> None:
+    snapshot = parse_official_injury_report_text(FIXTURE.read_text(), source=SOURCE)
+    historical_snapshot = replace(
+        snapshot,
+        entries=(replace(snapshot.entries[0], player_name="Dennis", team_abbreviation="BKN"),),
+    )
+    result = map_official_injury_report(
+        historical_snapshot,
+        [
+            provider("espn-schroder", "Dennis Schroder", "BKN"),
+            provider("espn-smith", "Dennis Smith Jr.", "BKN"),
+        ],
+        historical_player_ids_by_date_team={
+            (date(2025, 1, 1), "bkn"): frozenset({"espn-smith"})
+        },
+    )
+
+    mapping = result.mappings[0]
+    assert mapping.player_id == "espn-smith"
+    assert mapping.method is MappingMethod.NORMALIZED_HISTORICAL_NAME_TEAM
+    assert result.diagnostics[0].category is InjuryMappingCategory.RESOLVED_HISTORICAL_NAME_TEAM
 
 
 def test_official_injury_mapping_resolves_unique_name_token_subset() -> None:

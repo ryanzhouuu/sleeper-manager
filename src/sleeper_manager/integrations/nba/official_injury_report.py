@@ -42,6 +42,7 @@ _SUPPORTED_STATUSES = {
     "doubtful": AvailabilityStatus.DOUBTFUL,
     "out": AvailabilityStatus.OUT,
 }
+_NAME_SUFFIX_TOKENS = {"Jr.,", "Sr.,", "II,", "III,", "IV,"}
 
 
 class OfficialInjuryReportError(RuntimeError):
@@ -444,6 +445,11 @@ def _tokenized_boundary(tokens: list[str], index: int, matchup: str | None) -> b
         return True
     if matchup is not None and _tokenized_team(tokens, index, matchup) is not None:
         return True
+    if index + 3 < len(tokens) and tokens[index + 1] in _NAME_SUFFIX_TOKENS:
+        return any(
+            tokens[candidate].casefold() in _SUPPORTED_STATUSES
+            for candidate in range(index + 3, min(index + 8, len(tokens)))
+        )
     if tokens[index].endswith(","):
         return any(
             token.casefold() in _SUPPORTED_STATUSES
@@ -476,11 +482,28 @@ def _tokenized_player_line(
     end = status_index + 1
     while end < len(tokens) and not _tokenized_boundary(tokens, end, matchup):
         end += 1
-    name = " ".join(tokens[index:status_index])
+    name_start = _tokenized_player_name_start(tokens, index, status_index)
+    name = " ".join(tokens[name_start:status_index])
     status = tokens[status_index]
     reason = " ".join(tokens[status_index + 1 : end])
     line = f"{name} {status}" + (f" {reason}" if reason else "")
     return line, end
+
+
+def _tokenized_player_name_start(tokens: list[str], index: int, status_index: int) -> int:
+    suffix_positions = [
+        position
+        for position in range(index + 1, status_index)
+        if tokens[position] in _NAME_SUFFIX_TOKENS
+    ]
+    if suffix_positions:
+        return suffix_positions[-1] - 1
+    comma_positions = [
+        position
+        for position in range(index + 1, status_index)
+        if tokens[position].endswith(",")
+    ]
+    return comma_positions[-1] if comma_positions else index
 
 
 def _normalize_tokenized_report_text(text: str) -> str:

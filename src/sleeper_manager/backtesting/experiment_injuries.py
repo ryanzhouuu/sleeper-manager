@@ -3,9 +3,9 @@ from __future__ import annotations
 import hashlib
 import time
 from collections import Counter
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -96,6 +96,7 @@ def acquire_injury_archive(
     cache_dir: Path,
     *,
     retrieved_at: datetime,
+    historical_player_ids_by_date_team: Mapping[tuple[date, str], frozenset[str]] | None = None,
     client: HTTPClient | None = None,
     parser: SnapshotParser | None = None,
     max_lookback_hours: int = 24,
@@ -222,7 +223,11 @@ def acquire_injury_archive(
         snapshot.published_at: snapshot for snapshot in snapshots_by_nominal_time.values()
     }
     for snapshot in snapshots_by_timestamp.values():
-        mapping = map_official_injury_report(snapshot, players)
+        mapping = map_official_injury_report(
+            snapshot,
+            players,
+            historical_player_ids_by_date_team=historical_player_ids_by_date_team,
+        )
         availability.extend(mapping.availability)
         unresolved += len(mapping.unresolved)
         warnings += len(mapping.warnings)

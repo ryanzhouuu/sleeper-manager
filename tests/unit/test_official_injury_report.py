@@ -1,6 +1,7 @@
 import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
+from textwrap import dedent
 
 import httpx
 
@@ -74,6 +75,63 @@ def test_official_report_parser_restores_pypdf_tokenized_rows() -> None:
     ]
     assert snapshot.entries[1].game_time.isoformat() == "07:00:00"
     assert snapshot.not_yet_submitted_teams == ("was", "det")
+
+
+def test_official_report_parser_keeps_suffix_surname_after_prior_reason_tokens() -> None:
+    text = """
+    Injury
+    Report:
+    01/01/25
+    08:30
+    AM
+    Page
+    1
+    of
+    1
+    Game
+    Date
+    Game
+    Time
+    Matchup
+    Team
+    Player
+    Name
+    Current
+    Status
+    Reason
+    01/01/2025
+    07:00
+    (ET)
+    CHI@BKN
+    Chicago
+    Bulls
+    Craig,
+    Torrey
+    Out
+    Injury/Illness
+    -
+    Left
+    Calf;
+    Strain
+    Brooklyn
+    Nets
+    Repair
+    Smith
+    Jr.,
+    Dennis
+    Doubtful
+    Injury/Illness
+    -
+    Back;
+    Soreness
+    """
+
+    snapshot = parse_official_injury_report_text(dedent(text), source=source())
+
+    assert [entry.player_name for entry in snapshot.entries] == [
+        "Craig, Torrey",
+        "Smith Jr., Dennis",
+    ]
 
 
 def test_official_report_parser_preserves_game_date_across_repeated_page_header() -> None:

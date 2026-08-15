@@ -1,5 +1,5 @@
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from enum import StrEnum
@@ -35,6 +35,7 @@ class InjuryMappingCategory(StrEnum):
     RESOLVED_NAME_ONLY = "resolved_name_only"
     RESOLVED_PARTIAL_NAME_TEAM = "resolved_partial_name_team"
     RESOLVED_SUBSET_NAME_TEAM = "resolved_subset_name_team"
+    RESOLVED_HISTORICAL_NAME_TEAM = "resolved_historical_name_team"
     NO_NAME_TEAM_MATCH = "no_name_team_match"
     AMBIGUOUS_NAME_TEAM_MATCH = "ambiguous_name_team_match"
     AMBIGUOUS_NAME_ONLY = "ambiguous_name_only"
@@ -80,6 +81,8 @@ class OfficialInjuryMappingReport:
 def map_official_injury_report(
     snapshot: OfficialInjuryReportSnapshot,
     provider_players: Iterable[ProviderPlayer],
+    *,
+    historical_player_ids_by_date_team: Mapping[tuple[date, str], frozenset[str]] | None = None,
 ) -> OfficialInjuryMappingReport:
     candidates = tuple(provider_players)
     by_name_team: dict[tuple[str, str], list[ProviderPlayer]] = {}
@@ -149,6 +152,53 @@ def map_official_injury_report(
             if team is not None and len(normalized_name.split()) == 1
             else ()
         )
+        historical_partial_ids = (
+            tuple(
+                player_id
+                for player_id in partial_ids
+                if player_id
+                in historical_player_ids_by_date_team.get((entry.game_date, team), frozenset())
+            )
+            if historical_player_ids_by_date_team is not None and team is not None
+            else ()
+        )
+        if len(partial_ids) > 1 and len(historical_partial_ids) == 1:
+            player_id = historical_partial_ids[0]
+            mappings.append(
+                OfficialInjuryMapping(
+                    entry=entry,
+                    player_id=player_id,
+                    method=MappingMethod.NORMALIZED_HISTORICAL_NAME_TEAM,
+                    confidence=MappingConfidence.MEDIUM,
+                    reason=(
+                        "Matched by unique normalized first name and official team; "
+                        "historical box-score evidence identified one candidate on the game date"
+                    ),
+                    candidate_ids=historical_partial_ids,
+                )
+            )
+            diagnostics[
+                (
+                    InjuryMappingCategory.RESOLVED_HISTORICAL_NAME_TEAM,
+                    _season_start_year(entry.game_date),
+                    team or entry.team_abbreviation.casefold(),
+                    normalized_name,
+                )
+            ] += 1
+            availability.append(
+                HistoricalPlayerAvailability(
+                    player_id=player_id,
+                    game_date=entry.game_date,
+                    game_time=entry.game_time,
+                    matchup=entry.matchup,
+                    team_abbreviation=entry.team_abbreviation,
+                    status=entry.status,
+                    detail=entry.reason,
+                    available_as_of=snapshot.published_at,
+                    source=snapshot.source,
+                )
+            )
+            continue
         if len(partial_ids) == 1:
             player_id = partial_ids[0]
             mappings.append(
