@@ -210,6 +210,7 @@ def build_historical_feature_dataset(
             player_id=box_score.player_id,
             game=game,
             team_abbreviation=team_abbreviation,
+            opponent_abbreviation=opponent_abbreviation,
             cutoff=cutoff,
             reports=report_by_game_team,
             availability=availability_by_player,
@@ -560,6 +561,7 @@ def _availability_at_cutoff(
     player_id: str,
     game: ScheduledGame,
     team_abbreviation: str,
+    opponent_abbreviation: str,
     cutoff: datetime,
     reports: Mapping[tuple[date, str, str], tuple[OfficialInjuryReportSnapshot, ...]],
     availability: Mapping[str, tuple[HistoricalPlayerAvailability, ...]],
@@ -571,7 +573,7 @@ def _availability_at_cutoff(
     SourceMetadata | None,
 ]:
     game_date = _local_game_date(game)
-    matchup = _matchup(game, team_abbreviation, reports)
+    matchup = _matchup(game, team_abbreviation, opponent_abbreviation, reports)
     if matchup is None:
         return (
             AvailabilityStatus.UNKNOWN,
@@ -638,12 +640,19 @@ def _availability_at_cutoff(
 def _matchup(
     game: ScheduledGame,
     team_abbreviation: str,
+    opponent_abbreviation: str,
     reports: Mapping[tuple[date, str, str], tuple[OfficialInjuryReportSnapshot, ...]],
 ) -> str | None:
-    matchups = {
+    candidate_matchups = {
         key[1]
         for key in reports
         if key[0] == _local_game_date(game) and key[2] == team_abbreviation
+    }
+    expected_teams = {team_abbreviation, opponent_abbreviation}
+    matchups = {
+        matchup
+        for matchup in candidate_matchups
+        if {normalize_team(value) for value in matchup.split("@")} == expected_teams
     }
     if not matchups:
         return None

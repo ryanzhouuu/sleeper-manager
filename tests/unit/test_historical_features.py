@@ -138,6 +138,16 @@ def test_historical_feature_dataset_uses_latest_report_at_cutoff_and_distinguish
     Washington Wizards NOT YET SUBMITTED
     """
     report = parse_official_injury_report_text(report_text, source=report_source)
+    unrelated_report_text = """
+    Injury Report: 01/01/25 07:30 PM
+    Game Date Game Time Matchup Team Player Name Current Status Reason
+    01/02/2025 08:00 (ET) CHI@BOS Chicago Bulls NOT YET SUBMITTED
+    Boston Celtics NOT YET SUBMITTED
+    """
+    unrelated_report = parse_official_injury_report_text(
+        unrelated_report_text,
+        source=report_source,
+    )
     availability = HistoricalPlayerAvailability(
         "espn-1",
         report.entries[0].game_date,
@@ -157,7 +167,7 @@ def test_historical_feature_dataset_uses_latest_report_at_cutoff_and_distinguish
         games=[target],
         teams=[team("CHI", "CHI"), team("WAS", "WAS")],
         player_mappings=[],
-        injury_reports=[report],
+        injury_reports=[report, unrelated_report],
         availability=[availability],
         decision_cutoffs={"game-2": datetime(2025, 1, 2, 23, tzinfo=UTC)},
         dataset_version="v1",
