@@ -17,6 +17,7 @@ from sleeper_manager.integrations.nba.official_injury_mapping import InjuryMappi
 from sleeper_manager.integrations.nba.official_injury_report import (
     OfficialInjuryReportEntry,
     OfficialInjuryReportSnapshot,
+    official_injury_report_minute_url,
 )
 
 
@@ -89,8 +90,13 @@ def test_archive_falls_back_and_reuses_cached_report(tmp_path: Path) -> None:
     )
 
     assert len(client.urls) == 2
-    assert first.selections[0].selected_at == datetime(2025, 1, 2, 0, 30, tzinfo=UTC)
-    assert first.selections[0].attempts == 2
+    assert first.selections[0].selected_at == datetime(2025, 1, 2, 1, 30, tzinfo=UTC)
+    assert first.selections[0].attempts == 1
+    assert first.selections[0].url == official_injury_report_minute_url(
+        datetime(2025, 1, 2, 1, 30, tzinfo=UTC)
+    )
+    assert first.selections[0].cache_path is not None
+    assert first.selections[0].cache_path.endswith("-minute.pdf")
     assert first.selections[0].unavailable_candidates == (
         (datetime(2025, 1, 2, 1, 30, tzinfo=UTC), "http_404"),
     )
@@ -110,6 +116,7 @@ def test_archive_falls_back_and_reuses_cached_report(tmp_path: Path) -> None:
 
     assert len(cached_client.urls) == 1
     assert second.selections[0].selected_at == first.selections[0].selected_at
+    assert second.selections[0].url == first.selections[0].url
 
 
 def test_archive_retries_transient_cdn_throttling(tmp_path: Path) -> None:

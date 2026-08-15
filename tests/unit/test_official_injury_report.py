@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from sleeper_manager.integrations.nba.official_injury_report import (
     ReportSubmissionStatus,
     assess_official_report_coverage,
     official_injury_report_url,
+    official_injury_report_urls,
     parse_official_injury_report_text,
 )
 
@@ -46,6 +48,20 @@ def test_official_report_parser_preserves_report_time_status_reason_and_submissi
 def test_official_report_url_uses_pdf_filename_publication_slot() -> None:
     assert official_injury_report_url(PUBLISHED_AT) == (
         "https://ak-static.cms.nba.com/referee/injury/Injury-Report_2025-01-01_08AM.pdf"
+    )
+
+
+def test_official_report_urls_include_minute_qualified_fallback() -> None:
+    assert official_injury_report_urls(PUBLISHED_AT) == (
+        "https://ak-static.cms.nba.com/referee/injury/Injury-Report_2025-01-01_08AM.pdf",
+        "https://ak-static.cms.nba.com/referee/injury/Injury-Report_2025-01-01_08_30AM.pdf",
+    )
+
+
+def test_official_report_urls_support_non_half_hour_modern_slots() -> None:
+    published_at = datetime(2025, 1, 1, 13, 45, tzinfo=UTC)
+    assert official_injury_report_urls(published_at) == (
+        "https://ak-static.cms.nba.com/referee/injury/Injury-Report_2025-01-01_08_45AM.pdf",
     )
 
 
@@ -118,3 +134,28 @@ def test_official_report_client_hashes_and_parses_downloaded_pdf() -> None:
     import asyncio
 
     assert asyncio.run(run()) == "Craig, Torrey"
+
+
+def test_official_report_client_tries_minute_qualified_fallback() -> None:
+    async def run() -> tuple[str, tuple[str, ...]]:
+        requested: list[str] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            requested.append(str(request.url))
+            if len(requested) == 1:
+                return httpx.Response(404)
+            return httpx.Response(200, content=b"pdf bytes")
+
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport) as client:
+            async with OfficialInjuryReportClient(
+                client=client,
+                clock=lambda: RETRIEVED_AT,
+                pdf_text_extractor=lambda _: FIXTURE.read_text(),
+            ) as adapter:
+                result = await adapter.report(PUBLISHED_AT)
+                return result.entries[0].player_name, tuple(requested)
+
+    player_name, requested_urls = asyncio.run(run())
+    assert player_name == "Craig, Torrey"
+    assert requested_urls == official_injury_report_urls(PUBLISHED_AT)

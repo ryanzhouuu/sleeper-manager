@@ -23,7 +23,7 @@ from sleeper_manager.integrations.nba.official_injury_report import (
     REPORT_SCHEMA_VERSION,
     OfficialInjuryReportSnapshot,
     extract_official_injury_report_text,
-    official_injury_report_url,
+    official_injury_report_urls,
     parse_official_injury_report_text,
 )
 
@@ -117,7 +117,7 @@ def acquire_injury_archive(
     snapshot_parser = parser or _parse_snapshot
     snapshots_by_nominal_time: dict[datetime, OfficialInjuryReportSnapshot] = {}
     content_by_nominal_time: dict[datetime, tuple[str, str, str]] = {}
-    unavailable: dict[datetime, str] = {}
+    unavailable: dict[tuple[datetime, str], str] = {}
     selections: list[InjuryReportSelection] = []
     try:
         for requested_at in requested_report_timestamps(games):
@@ -137,61 +137,67 @@ def acquire_injury_archive(
                         break
                     unavailable_candidates.append((candidate_at, "post_cutoff"))
                     continue
-                if candidate_at in unavailable:
-                    unavailable_candidates.append((candidate_at, unavailable[candidate_at]))
-                    continue
-                url = official_injury_report_url(candidate_at)
-                cache_path = cache_dir / _cache_filename(candidate_at)
-                if cache_path.is_file():
-                    content = cache_path.read_bytes()
-                else:
-                    response = _request_with_retry(
-                        http_client,
-                        url,
-                        attempts=retry_attempts,
-                        sleeper=sleeper,
-                    )
-                    sleeper(request_interval_seconds)
-                    if response.status_code in {403, 404}:
-                        status = f"http_{response.status_code}"
-                        unavailable[candidate_at] = status
-                        unavailable_candidates.append((candidate_at, status))
+                for source_index, url in enumerate(official_injury_report_urls(candidate_at)):
+                    unavailable_key = candidate_at, url
+                    if unavailable_key in unavailable:
+                        unavailable_candidates.append((candidate_at, unavailable[unavailable_key]))
                         continue
-                    if response.status_code != 200:
-                        raise InjuryArchiveError(
-                            f"Official injury archive returned HTTP {response.status_code}: {url}"
+                    cache_path = cache_dir / _cache_filename(candidate_at, source_index)
+                    if cache_path.is_file():
+                        content = cache_path.read_bytes()
+                    else:
+                        response = _request_with_retry(
+                            http_client,
+                            url,
+                            attempts=retry_attempts,
+                            sleeper=sleeper,
                         )
-                    content = response.content
-                    cache_path.write_bytes(content)
-                content_hash = hashlib.sha256(content).hexdigest()
-                source = SourceMetadata(
-                    provider="nba_official_injury_report",
-                    provider_id=url,
-                    retrieved_at=retrieved_at.astimezone(UTC),
-                    source_updated_at=candidate_at,
-                    schema_version=REPORT_SCHEMA_VERSION,
-                    content_hash=content_hash,
-                )
-                try:
-                    snapshot = snapshot_parser(content, source)
-                except Exception as error:
-                    raise InjuryArchiveError(
-                        f"Could not parse cached official injury report {cache_path}"
-                    ) from error
-                if not _same_archive_hour(snapshot.published_at, candidate_at):
-                    raise InjuryArchiveError(
-                        f"Official injury report timestamp mismatch for {cache_path}"
+                        sleeper(request_interval_seconds)
+                        if response.status_code in {403, 404}:
+                            status = f"http_{response.status_code}"
+                            unavailable[unavailable_key] = status
+                            unavailable_candidates.append((candidate_at, status))
+                            continue
+                        if response.status_code != 200:
+                            raise InjuryArchiveError(
+                                "Official injury archive returned "
+                                f"HTTP {response.status_code}: {url}"
+                            )
+                        content = response.content
+                        cache_path.write_bytes(content)
+                    content_hash = hashlib.sha256(content).hexdigest()
+                    source = SourceMetadata(
+                        provider="nba_official_injury_report",
+                        provider_id=url,
+                        retrieved_at=retrieved_at.astimezone(UTC),
+                        source_updated_at=candidate_at,
+                        schema_version=REPORT_SCHEMA_VERSION,
+                        content_hash=content_hash,
                     )
-                actual_source = replace(source, source_updated_at=snapshot.published_at)
-                snapshot = replace(snapshot, source=actual_source)
-                snapshots_by_nominal_time[candidate_at] = snapshot
-                content_by_nominal_time[candidate_at] = url, content_hash, str(cache_path)
-                if snapshot.published_at > requested_at:
-                    unavailable_candidates.append((candidate_at, "post_cutoff"))
-                    continue
-                selected = snapshot
-                selected_metadata = url, content_hash, str(cache_path)
-                break
+                    try:
+                        snapshot = snapshot_parser(content, source)
+                    except Exception as error:
+                        raise InjuryArchiveError(
+                            f"Could not parse cached official injury report {cache_path}"
+                        ) from error
+                    if not _same_archive_hour(snapshot.published_at, candidate_at):
+                        raise InjuryArchiveError(
+                            f"Official injury report timestamp mismatch for {cache_path}"
+                        )
+                    actual_source = replace(source, source_updated_at=snapshot.published_at)
+                    snapshot = replace(snapshot, source=actual_source)
+                    snapshots_by_nominal_time[candidate_at] = snapshot
+                    content_by_nominal_time[candidate_at] = url, content_hash, str(cache_path)
+                    if snapshot.published_at > requested_at:
+                        unavailable_candidates.append((candidate_at, "post_cutoff"))
+                        break
+                    selected = snapshot
+                    selected_metadata = url, content_hash, str(cache_path)
+                    break
+                if selected is not None or candidate_at in snapshots_by_nominal_time:
+                    cached_snapshot = snapshots_by_nominal_time[candidate_at]
+                    if cached_snapshot.published_at <= requested_at:
+                        break
             selections.append(
                 InjuryReportSelection(
                     requested_at=requested_at,
@@ -261,8 +267,9 @@ def acquire_injury_archive(
     )
 
 
-def _cache_filename(published_at: datetime) -> str:
-    return f"injury-report-{published_at.astimezone(UTC):%Y%m%dT%H%MZ}.pdf"
+def _cache_filename(published_at: datetime, source_index: int = 0) -> str:
+    suffix = "" if source_index == 0 else "-minute"
+    return f"injury-report-{published_at.astimezone(UTC):%Y%m%dT%H%MZ}{suffix}.pdf"
 
 
 def _same_archive_hour(published_at: datetime, nominal_at: datetime) -> bool:

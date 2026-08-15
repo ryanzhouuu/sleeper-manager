@@ -113,6 +113,22 @@ def official_injury_report_url(published_at: datetime) -> str:
     )
 
 
+def official_injury_report_minute_url(published_at: datetime) -> str:
+    local_time = _as_eastern(published_at)
+    filename_time = local_time.strftime("%I_%M%p")
+    return (
+        f"{OFFICIAL_INJURY_REPORT_BASE_URL}/Injury-Report_{local_time:%Y-%m-%d}_{filename_time}.pdf"
+    )
+
+
+def official_injury_report_urls(published_at: datetime) -> tuple[str, ...]:
+    """Return compatible first-party URLs, preferring the legacy archive slot."""
+    minute_url = official_injury_report_minute_url(published_at)
+    if _as_eastern(published_at).minute != 30:
+        return (minute_url,)
+    return (official_injury_report_url(published_at), minute_url)
+
+
 def _as_eastern(value: datetime) -> datetime:
     if value.tzinfo is None:
         raise ValueError("Injury report timestamps must include a timezone")
@@ -597,11 +613,26 @@ class OfficialInjuryReportClient:
             await self._client.aclose()
 
     async def report(self, published_at: datetime) -> OfficialInjuryReportSnapshot:
-        url = official_injury_report_url(published_at)
-        response = await self._client.get(url)
-        if response.status_code != 200:
+        response: httpx.Response | None = None
+        url: str | None = None
+        for candidate_url in official_injury_report_urls(published_at):
+            candidate_response = await self._client.get(candidate_url)
+            if candidate_response.status_code in {403, 404}:
+                response = candidate_response
+                url = candidate_url
+                continue
+            if candidate_response.status_code != 200:
+                raise OfficialInjuryReportError(
+                    "Official injury report request failed with "
+                    f"HTTP {candidate_response.status_code}: {candidate_url}"
+                )
+            response = candidate_response
+            url = candidate_url
+            break
+        if response is None or response.status_code != 200 or url is None:
+            status = response.status_code if response is not None else "unknown"
             raise OfficialInjuryReportError(
-                f"Official injury report request failed with HTTP {response.status_code}: {url}"
+                f"Official injury report request failed with HTTP {status}: {url}"
             )
         retrieved_at = self._clock()
         if retrieved_at.tzinfo is None:
