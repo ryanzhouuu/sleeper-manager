@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -251,7 +252,7 @@ def artifact_manifest(artifacts: Iterable[SourceArtifact]) -> list[dict[str, obj
 
 def _default_rds_reader(path: str) -> Mapping[str, Any]:
     try:
-        import pyreadr  # type: ignore[import-untyped]
+        pyreadr = importlib.import_module("pyreadr")
     except ImportError as error:
         raise ExperimentDataError("Historical experiment ingestion requires pyreadr") from error
     tables = pyreadr.read_r(path)
