@@ -114,7 +114,7 @@ def _load_cached_archive(workspace: Path, requested_league_id: str) -> Historica
         previous = payloads[previous_id].get("previous_league_id")
     chain = resolve_predecessor_chain(requested_league_id, payloads)
     resolved_id = next(
-        (league_id for league_id in reversed(chain) if _has_archive_events(root / league_id)),
+        (league_id for league_id in chain if _has_archive_events(root / league_id)),
         requested_league_id,
     )
     archive_root = root / resolved_id
