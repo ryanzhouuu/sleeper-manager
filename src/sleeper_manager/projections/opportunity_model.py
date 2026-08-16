@@ -57,7 +57,7 @@ class OpportunityModelConfig:
             "percentiles": self.percentiles,
         }
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
-        return f"opportunity-v2-{digest}"
+        return f"opportunity-v3-{digest}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -278,8 +278,30 @@ class EnvironmentModel:
         pace = target.pace_factor or 1.0
         pace = min(max(pace, self.config.pace_clip[0]), self.config.pace_clip[1])
         defense = 1.0
-        if target.opponent_defensive_rating is not None:
-            defense = min(max(1.0 + (100.0 - target.opponent_defensive_rating) / 1000, 0.9), 1.1)
+        if (
+            target.opponent_defensive_rating is not None
+            and target.league_defensive_rating is not None
+            and target.league_defensive_rating > 0
+        ):
+            defense = min(
+                max(
+                    target.opponent_defensive_rating / target.league_defensive_rating,
+                    0.9,
+                ),
+                1.1,
+            )
+            defense_fallback = ProjectionFallback.OBSERVED
+            defense_message = (
+                "Scaled opponent defense by the opponent defensive rating "
+                f"{target.opponent_defensive_rating:.2f} relative to the prior league "
+                f"baseline {target.league_defensive_rating:.2f}."
+            )
+        else:
+            defense_fallback = ProjectionFallback.MISSING
+            defense_message = (
+                "Opponent defense was unavailable or had a non-positive league baseline; "
+                "used a neutral factor."
+            )
         rest = 0.97 if target.is_back_to_back else 1.0
         if target.days_rest is not None and target.days_rest >= 2:
             rest = 1.01
@@ -304,10 +326,8 @@ class EnvironmentModel:
                 defense - 1.0,
                 ProjectionAdjustmentKind.MULTIPLICATIVE,
                 float(target.opponent_sample_size),
-                ProjectionFallback.OBSERVED
-                if target.opponent_defensive_rating is not None
-                else ProjectionFallback.MISSING,
-                "Applied opponent defense separately from pace.",
+                defense_fallback,
+                defense_message,
             ),
             _Estimate(
                 rest,
@@ -540,6 +560,14 @@ def _input_version(
         "dataset": dataset.dataset_version,
         "feature_schema": dataset.feature_schema_version,
         "target": (target.player_id, target.game_id, target.available_as_of.isoformat()),
+        "target_environment": (
+            target.pace_factor,
+            target.opponent_defensive_rating,
+            target.league_defensive_rating,
+            target.days_rest,
+            target.is_back_to_back,
+            target.time_zone_change_hours,
+        ),
         "player_prior": tuple(_input_row(row) for row in prior_rows),
         "league_prior": tuple(_input_row(row) for row in league_prior_rows),
         "scoring": scoring_policy.version,

@@ -297,6 +297,7 @@ def test_historical_features_use_prior_only_opponent_stats_and_travel() -> None:
     assert row.opponent_stats_fallback is OpponentStatsFallback.SHRUNK
     assert row.opponent_offensive_rating == comparison.opponent_offensive_rating
     assert row.opponent_defensive_rating == comparison.opponent_defensive_rating
+    assert row.league_defensive_rating == comparison.league_defensive_rating
     assert row.opponent_pace == comparison.opponent_pace
     assert row.opponent_offense_band in {"low", "medium", "high"}
     assert row.opponent_defense_band in {"low", "medium", "high"}
@@ -307,6 +308,12 @@ def test_historical_features_use_prior_only_opponent_stats_and_travel() -> None:
     assert row.time_zone_change_hours == 1
     assert row.travel_direction == "east"
     assert row.travel_fallback == "observed"
+
+    expected_league_defense = (
+        prior_opponent.opponent_points / prior_opponent.estimated_possessions * 100
+        + prior_league.opponent_points / prior_league.estimated_possessions * 100
+    ) / 2
+    assert row.league_defensive_rating == pytest.approx(expected_league_defense)
 
 
 def test_historical_features_include_symmetric_overtime_normalized_pace_factor() -> None:

@@ -90,6 +90,7 @@ class HistoricalFeatureRow:
     source_lineage: tuple[SourceMetadata, ...]
     opponent_offensive_rating: float | None = None
     opponent_defensive_rating: float | None = None
+    league_defensive_rating: float | None = None
     opponent_pace: float | None = None
     opponent_sample_size: int = 0
     opponent_stats_fallback: OpponentStatsFallback = OpponentStatsFallback.MISSING
@@ -163,6 +164,7 @@ def build_historical_feature_dataset(
             float | None,
             float | None,
             float | None,
+            float | None,
             int,
             OpponentStatsFallback,
             str,
@@ -217,7 +219,7 @@ def build_historical_feature_dataset(
                 team_box_scores=team_box_score_records,
             )
             own_pace_by_game_team[own_pace_key] = own_pace
-        expected_pace = _expected_matchup_pace(own_pace[0], opponent_stats[2])
+        expected_pace = _expected_matchup_pace(own_pace[0], opponent_stats[3])
         exposure_pace = _baseline_exposure_pace(
             prior_by_player.get(box_score.player_id, ()),
             team_id=box_score.team_id,
@@ -295,12 +297,13 @@ def build_historical_feature_dataset(
                 source_lineage=source_lineage,
                 opponent_offensive_rating=opponent_stats[0],
                 opponent_defensive_rating=opponent_stats[1],
-                opponent_pace=opponent_stats[2],
-                opponent_sample_size=opponent_stats[3],
-                opponent_stats_fallback=opponent_stats[4],
-                opponent_offense_band=opponent_stats[5],
-                opponent_defense_band=opponent_stats[6],
-                opponent_pace_band=opponent_stats[7],
+                league_defensive_rating=opponent_stats[2],
+                opponent_pace=opponent_stats[3],
+                opponent_sample_size=opponent_stats[4],
+                opponent_stats_fallback=opponent_stats[5],
+                opponent_offense_band=opponent_stats[6],
+                opponent_defense_band=opponent_stats[7],
+                opponent_pace_band=opponent_stats[8],
                 own_team_pace=own_pace[0],
                 own_team_pace_sample_size=own_pace[1],
                 own_team_pace_fallback=own_pace[2],
@@ -508,6 +511,7 @@ def _opponent_stats(
     float | None,
     float | None,
     float | None,
+    float | None,
     int,
     OpponentStatsFallback,
     str,
@@ -522,7 +526,17 @@ def _opponent_stats(
         and record.estimated_possessions > 0
     )
     if not prior:
-        return None, None, None, 0, OpponentStatsFallback.MISSING, "unknown", "unknown", "unknown"
+        return (
+            None,
+            None,
+            None,
+            None,
+            0,
+            OpponentStatsFallback.MISSING,
+            "unknown",
+            "unknown",
+            "unknown",
+        )
     opponent_prior = tuple(record for record in prior if record.team_id == opponent_team_id)[
         -lookback_games:
     ]
@@ -537,6 +551,7 @@ def _opponent_stats(
     if not opponent_prior:
         return (
             round(league_offense, 6),
+            round(league_defense, 6),
             round(league_defense, 6),
             round(league_pace, 6),
             0,
@@ -563,6 +578,7 @@ def _opponent_stats(
     return (
         round(adjusted_offense, 6),
         round(adjusted_defense, 6),
+        round(league_defense, 6),
         round(adjusted_pace, 6),
         sample_size,
         fallback,

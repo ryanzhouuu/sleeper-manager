@@ -11,7 +11,10 @@ from sleeper_manager.integrations.nba.historical_features import (
     HistoricalFeatureRow,
     PaceStatsFallback,
 )
-from sleeper_manager.projections.opportunity_model import InterpretableOpportunityModel
+from sleeper_manager.projections.opportunity_model import (
+    EnvironmentModel,
+    InterpretableOpportunityModel,
+)
 
 NOW = datetime(2026, 1, 10, 18, tzinfo=UTC)
 
@@ -25,6 +28,8 @@ def row(
     points: int,
     pace_factor: float | None = None,
     player_id: str = "player-1",
+    opponent_defensive_rating: float | None = 100,
+    league_defensive_rating: float | None = None,
 ) -> HistoricalFeatureRow:
     return HistoricalFeatureRow(
         dataset_version="fixture",
@@ -58,7 +63,8 @@ def row(
         target_line_blocks=0,
         target_line_turnovers=0,
         source_lineage=(),
-        opponent_defensive_rating=100,
+        opponent_defensive_rating=opponent_defensive_rating,
+        league_defensive_rating=league_defensive_rating,
         opponent_sample_size=5,
         own_team_pace=100,
         own_team_pace_fallback=PaceStatsFallback.OBSERVED,
@@ -282,3 +288,53 @@ def test_no_league_prior_keeps_player_rate_without_claiming_shrinkage() -> None:
     assert estimate.value == pytest.approx(1.0)
     assert estimate.fallback is ProjectionFallback.MISSING
     assert "without shrinkage" in estimate.message
+
+
+def test_opponent_defense_is_neutral_at_league_baseline_and_has_correct_direction() -> None:
+    model = EnvironmentModel(InterpretableOpportunityModel().config)
+
+    def defense(opponent_rating: float | None, league_rating: float | None):
+        target = row(
+            "target",
+            NOW,
+            did_play=False,
+            minutes=None,
+            points=0,
+            opponent_defensive_rating=opponent_rating,
+            league_defensive_rating=league_rating,
+        )
+        return model.estimate(target)[1]
+
+    neutral = defense(100, 100)
+    worse = defense(110, 100)
+    better = defense(90, 100)
+
+    assert neutral.value == pytest.approx(1.0)
+    assert neutral.fallback is ProjectionFallback.OBSERVED
+    assert "100.00" in neutral.message
+    assert worse.value > 1.0
+    assert better.value < 1.0
+
+
+def test_opponent_defense_factor_is_clipped_and_missing_inputs_are_neutral() -> None:
+    model = EnvironmentModel(InterpretableOpportunityModel().config)
+
+    def defense(opponent_rating: float | None, league_rating: float | None):
+        target = row(
+            "target",
+            NOW,
+            did_play=False,
+            minutes=None,
+            points=0,
+            opponent_defensive_rating=opponent_rating,
+            league_defensive_rating=league_rating,
+        )
+        return model.estimate(target)[1]
+
+    assert defense(200, 100).value == pytest.approx(1.1)
+    assert defense(1, 100).value == pytest.approx(0.9)
+    for opponent_rating, league_rating in ((None, 100), (100, None), (100, 0)):
+        estimate = defense(opponent_rating, league_rating)
+        assert estimate.value == pytest.approx(1.0)
+        assert estimate.fallback is ProjectionFallback.MISSING
+        assert "neutral" in estimate.message
