@@ -58,6 +58,8 @@ class SleeperTransactionPayload(BaseModel):
     roster_ids: list[int | str] = Field(default_factory=list)
     adds: dict[str, int | str] | None = None
     drops: dict[str, int | str] | None = None
+    created: int | float | str | None = None
+    status_updated: int | float | str | None = None
 
 
 class SleeperPlayerPayload(BaseModel):
@@ -68,3 +70,4 @@ class SleeperPlayerPayload(BaseModel):
     last_name: str | None = None
     team: str | None = None
     espn_id: int | str | None = None
+    fantasy_positions: list[str] = Field(default_factory=list)
