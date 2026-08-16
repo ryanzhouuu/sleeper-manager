@@ -150,6 +150,9 @@ def build_historical_feature_dataset(
     report_records = tuple(injury_reports)
     availability_records = tuple(availability)
     team_box_score_records = tuple(team_box_scores)
+    team_box_score_by_game_team = {
+        (record.game_id, record.team_id): record for record in team_box_score_records
+    }
     game_by_id = _index_games(game_records)
     team_abbreviations = _index_teams(team_records)
     sleeper_by_provider_id = _index_player_mappings(player_mappings)
@@ -223,7 +226,7 @@ def build_historical_feature_dataset(
         exposure_pace = _baseline_exposure_pace(
             prior_by_player.get(box_score.player_id, ()),
             team_id=box_score.team_id,
-            team_box_scores=team_box_score_records,
+            team_box_score_by_game_team=team_box_score_by_game_team,
             target_start=game.start_time,
         )
         pace_factor = (
@@ -642,21 +645,17 @@ def _baseline_exposure_pace(
     prior_player_games: Iterable[PlayerBoxScore],
     *,
     team_id: str,
-    team_box_scores: tuple[TeamBoxScore, ...],
+    team_box_score_by_game_team: Mapping[tuple[str, str], TeamBoxScore],
     target_start: datetime,
 ) -> float | None:
-    paces_by_game = {
-        record.game_id: record.pace_48
-        for record in team_box_scores
-        if record.team_id == team_id and record.played_at < target_start and record.pace_48 > 0
-    }
-    values = tuple(
-        paces_by_game[record.game_id]
-        for record in prior_player_games
-        if record.game_id in paces_by_game
-        and record.played_at is not None
-        and record.played_at < target_start
-    )
+    values: list[float] = []
+    for player_game in prior_player_games:
+        if player_game.played_at is None or player_game.played_at >= target_start:
+            continue
+        team_game = team_box_score_by_game_team.get((player_game.game_id, team_id))
+        if team_game is None or team_game.played_at >= target_start or team_game.pace_48 <= 0:
+            continue
+        values.append(team_game.pace_48)
     return round(_mean(values), 6) if values else None
 
 

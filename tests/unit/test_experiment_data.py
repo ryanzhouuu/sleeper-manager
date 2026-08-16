@@ -23,6 +23,24 @@ class FakeTable:
         return self.rows
 
 
+class ProjectableFakeTable(FakeTable):
+    def __init__(
+        self,
+        rows: list[dict[str, Any]],
+        projections: list[tuple[str, ...]],
+    ) -> None:
+        super().__init__(rows)
+        self.columns = tuple(rows[0]) if rows else ()
+        self.projections = projections
+
+    def __len__(self) -> int:
+        return len(self.rows)
+
+    def __getitem__(self, columns: list[str]) -> FakeTable:
+        self.projections.append(tuple(columns))
+        return FakeTable([{column: row.get(column) for column in columns} for row in self.rows])
+
+
 def test_load_historical_inputs_filters_regular_season_and_adds_fouls(
     tmp_path: Path,
 ) -> None:
@@ -102,6 +120,7 @@ def test_load_historical_inputs_filters_regular_season_and_adds_fouls(
             "game_id": "g1",
             "type_text": "Technical Foul",
             "athlete_id_1": "p1",
+            "unused_payload": "discarded before record conversion",
         }
     ]
     tables: dict[str, list[dict[str, Any]]] = {
@@ -111,7 +130,11 @@ def test_load_historical_inputs_filters_regular_season_and_adds_fouls(
         "play_by_play_2023.rds": play,
     }
 
+    projections: list[tuple[str, ...]] = []
+
     def reader(path: str) -> dict[str, FakeTable]:
+        if Path(path).name == "play_by_play_2023.rds":
+            return {"table": ProjectableFakeTable(play, projections)}
         return {"table": FakeTable(tables[Path(path).name])}
 
     result = load_historical_experiment_inputs(
@@ -129,6 +152,7 @@ def test_load_historical_inputs_filters_regular_season_and_adds_fouls(
     assert result.excluded_player_rows == 0
     assert artifact_manifest(result.artifacts)[0]["sha256"]
     assert decision_cutoff(result.games[0]) == played_at - timedelta(minutes=30)
+    assert projections == [("game_id", "type_text", "athlete_id_1")]
 
 
 def test_scoring_and_dataset_versions_are_deterministic(tmp_path: Path) -> None:

@@ -42,6 +42,21 @@ class RDSReader(Protocol):
     def __call__(self, path: str) -> Mapping[str, Any]: ...
 
 
+_PLAY_BY_PLAY_COLUMNS = (
+    "game_id",
+    "gameId",
+    "event_id",
+    "type_text",
+    "typeText",
+    "athlete_id_1",
+    "athleteId1",
+    "athlete_id_2",
+    "athleteId2",
+    "athlete_id_3",
+    "athleteId3",
+)
+
+
 @dataclass(frozen=True, slots=True)
 class SourceArtifact:
     season: int
@@ -179,6 +194,7 @@ def load_historical_experiment_inputs(
             resource="play_by_play",
             url=play_by_play_url(season),
             reader=reader,
+            columns=_PLAY_BY_PLAY_COLUMNS,
         )
         artifacts.append(artifact)
         relevant_play_rows = tuple(
@@ -283,10 +299,14 @@ def _load_resource(
     resource: str,
     url: str,
     reader: RDSReader,
+    columns: tuple[str, ...] | None = None,
 ) -> tuple[tuple[Mapping[str, Any], ...], SourceArtifact]:
     if not path.is_file():
         raise ExperimentDataError(f"Missing historical source artifact: {path}")
-    content = path.read_bytes()
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
     try:
         tables = reader(str(path))
     except Exception as error:
@@ -296,6 +316,11 @@ def _load_resource(
     table = next(iter(tables.values()))
     if not hasattr(table, "to_dict"):
         raise ExperimentDataError(f"Historical source table is not row-oriented: {path}")
+    row_count = len(table) if hasattr(table, "__len__") else None
+    if columns is not None and hasattr(table, "columns") and hasattr(table, "__getitem__"):
+        available = set(table.columns)
+        selected = [column for column in columns if column in available]
+        table = table[selected]
     values = table.to_dict(orient="records")
     if not isinstance(values, list) or not all(isinstance(row, Mapping) for row in values):
         raise ExperimentDataError(f"Historical source table has invalid rows: {path}")
@@ -305,9 +330,9 @@ def _load_resource(
         resource=resource,
         path=str(path),
         url=url,
-        sha256=hashlib.sha256(content).hexdigest(),
-        byte_count=len(content),
-        row_count=len(rows),
+        sha256=digest.hexdigest(),
+        byte_count=path.stat().st_size,
+        row_count=row_count if row_count is not None else len(rows),
     )
 
 
