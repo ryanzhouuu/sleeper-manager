@@ -136,7 +136,7 @@ def test_sparse_high_rate_player_shrinks_toward_lower_independent_league_rate() 
     target = row("target", NOW, did_play=False, minutes=None, points=0)
 
     snapshot = InterpretableOpportunityModel().project(
-        HistoricalFeatureDataset("fixture", "4", NOW, (), (prior, league, target)),
+        HistoricalFeatureDataset("fixture", "5", NOW, (), (prior, league, target)),
         player_id="player-1",
         game_id="target",
         scoring_policy=ScoringPolicy(points=1),
@@ -167,7 +167,7 @@ def test_sparse_low_rate_player_shrinks_toward_higher_independent_league_rate() 
     target = row("target", NOW, did_play=False, minutes=None, points=0)
 
     snapshot = InterpretableOpportunityModel().project(
-        HistoricalFeatureDataset("fixture", "4", NOW, (), (prior, league, target)),
+        HistoricalFeatureDataset("fixture", "5", NOW, (), (prior, league, target)),
         player_id="player-1",
         game_id="target",
         scoring_policy=ScoringPolicy(points=1),
@@ -202,7 +202,7 @@ def test_more_player_minutes_reduce_production_shrinkage() -> None:
             points=int(minutes),
         )
         snapshot = InterpretableOpportunityModel().project(
-            HistoricalFeatureDataset("fixture", "4", NOW, (), (prior, league, target)),
+            HistoricalFeatureDataset("fixture", "5", NOW, (), (prior, league, target)),
             player_id="player-1",
             game_id="target",
             scoring_policy=ScoringPolicy(points=1),
@@ -243,7 +243,7 @@ def test_prior_league_outcome_changes_projection_and_input_version_but_future_do
         )
         return InterpretableOpportunityModel().project(
             HistoricalFeatureDataset(
-                "fixture", "4", NOW, (), (player_prior, *other_rows, target, future)
+                "fixture", "5", NOW, (), (player_prior, *other_rows, target, future)
             ),
             player_id="player-1",
             game_id="target",

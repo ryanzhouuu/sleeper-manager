@@ -26,7 +26,7 @@ from sleeper_manager.integrations.nba.official_injury_report import (
 )
 from sleeper_manager.integrations.nba.travel import TravelContext, travel_context
 
-FEATURE_SCHEMA_VERSION = "4"
+FEATURE_SCHEMA_VERSION = "5"
 
 
 class HistoricalFeatureDatasetError(ValueError):

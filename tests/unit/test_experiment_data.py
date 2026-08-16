@@ -142,7 +142,7 @@ def test_scoring_and_dataset_versions_are_deterministic(tmp_path: Path) -> None:
     assert policy.points == 1
     assert policy.rebounds == 1.2
     assert first == second
-    assert first.startswith("historical-features-v4-")
+    assert first.startswith("historical-features-v5-")
 
 
 def test_load_historical_inputs_joins_schedule_periods_to_team_boxes(tmp_path: Path) -> None:
