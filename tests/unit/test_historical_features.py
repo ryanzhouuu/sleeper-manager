@@ -292,7 +292,7 @@ def test_historical_features_use_prior_only_opponent_stats_and_travel() -> None:
 
     row = dataset.rows[-1]
     comparison = without_future.rows[-1]
-    assert dataset.feature_schema_version == "3"
+    assert dataset.feature_schema_version == "4"
     assert row.opponent_sample_size == 1
     assert row.opponent_stats_fallback is OpponentStatsFallback.SHRUNK
     assert row.opponent_offensive_rating == comparison.opponent_offensive_rating

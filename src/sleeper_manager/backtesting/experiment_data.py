@@ -4,7 +4,7 @@ import hashlib
 import importlib
 import json
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
@@ -30,6 +30,7 @@ from sleeper_manager.integrations.nba.historical import (
     schedule_url,
     team_box_score_url,
 )
+from sleeper_manager.integrations.nba.historical_features import FEATURE_SCHEMA_VERSION
 from sleeper_manager.integrations.nba.mapping import normalize_team
 
 
@@ -153,12 +154,24 @@ def load_historical_experiment_inputs(
             for row in _regular_season_rows(team_rows)
             if _string(row.get("game_id")) in game_ids
         )
-        team_box_scores.extend(
-            parse_team_box_score_rows(
-                regular_team_rows,
-                retrieved_at=timestamp,
-            ).records
-        )
+        schedule_by_game_id = {game.provider_id: game for game in parsed_games}
+        parsed_team_box_scores = parse_team_box_score_rows(
+            regular_team_rows,
+            retrieved_at=timestamp,
+        ).records
+        for team_box_score in parsed_team_box_scores:
+            schedule = schedule_by_game_id.get(team_box_score.game_id)
+            if schedule is None:
+                raise ExperimentDataError(
+                    f"Team box score {team_box_score.game_id!r} has no matching schedule record"
+                )
+            team_box_scores.append(
+                replace(
+                    team_box_score,
+                    regulation_periods=schedule.regulation_periods,
+                    completed_periods=schedule.completed_periods,
+                )
+            )
 
         play_rows, artifact = _load_resource(
             season_dir / f"play_by_play_{season}.rds",
@@ -214,7 +227,7 @@ def dataset_version_for(
     *,
     scoring_policy: ScoringPolicy,
     injury_hashes: Iterable[str] = (),
-    feature_schema_version: str = "3",
+    feature_schema_version: str = FEATURE_SCHEMA_VERSION,
 ) -> str:
     payload = {
         "artifacts": [
@@ -232,7 +245,9 @@ def dataset_version_for(
         "target_semantics": "reconstructed_sleeper_policy",
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    return f"historical-features-v3-{hashlib.sha256(encoded).hexdigest()[:16]}"
+    return (
+        f"historical-features-v{feature_schema_version}-{hashlib.sha256(encoded).hexdigest()[:16]}"
+    )
 
 
 def artifact_manifest(artifacts: Iterable[SourceArtifact]) -> list[dict[str, object]]:

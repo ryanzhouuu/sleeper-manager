@@ -3,6 +3,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from sleeper_manager.backtesting.experiment_data import (
     artifact_manifest,
     dataset_version_for,
@@ -140,4 +142,85 @@ def test_scoring_and_dataset_versions_are_deterministic(tmp_path: Path) -> None:
     assert policy.points == 1
     assert policy.rebounds == 1.2
     assert first == second
-    assert first.startswith("historical-features-v3-")
+    assert first.startswith("historical-features-v4-")
+
+
+def test_load_historical_inputs_joins_schedule_periods_to_team_boxes(tmp_path: Path) -> None:
+    season_dir = tmp_path / "2023"
+    season_dir.mkdir()
+    names = (
+        "nba_schedule_2023.rds",
+        "player_box_2023.rds",
+        "team_box_2023.rds",
+        "play_by_play_2023.rds",
+    )
+    for name in names:
+        (season_dir / name).write_bytes(name.encode())
+
+    starts = {
+        "regulation": datetime(2023, 1, 2, tzinfo=UTC),
+        "one_ot": datetime(2023, 1, 3, tzinfo=UTC),
+        "two_ot": datetime(2023, 1, 4, tzinfo=UTC),
+    }
+    schedule = [
+        {
+            "game_id": game_id,
+            "season_type": 2,
+            "game_date_time": start,
+            "home_id": "1",
+            "away_id": "2",
+            "status_type_name": "Final",
+            "format_regulation_periods": 4,
+            "status_period": periods,
+        }
+        for game_id, start, periods in (
+            ("regulation", starts["regulation"], 4),
+            ("one_ot", starts["one_ot"], 5),
+            ("two_ot", starts["two_ot"], 6),
+        )
+    ]
+    team = [
+        {
+            "game_id": game_id,
+            "season_type": 2,
+            "game_date_time": starts[key],
+            "team_id": team_id,
+            "opponent_team_id": opponent_id,
+            "team_score": 100,
+            "opponent_team_score": 95,
+            "field_goals_attempted": 90,
+            "free_throws_attempted": 20,
+            "offensive_rebounds": 10,
+            "total_turnovers": 12,
+        }
+        for key, game_id in (
+            ("regulation", "regulation"),
+            ("one_ot", "one_ot"),
+            ("two_ot", "two_ot"),
+        )
+        for team_id, opponent_id in (("1", "2"), ("2", "1"))
+    ]
+    tables: dict[str, list[dict[str, Any]]] = {
+        "nba_schedule_2023.rds": schedule,
+        "player_box_2023.rds": [],
+        "team_box_2023.rds": team,
+        "play_by_play_2023.rds": [],
+    }
+
+    def reader(path: str) -> dict[str, FakeTable]:
+        return {"table": FakeTable(tables[Path(path).name])}
+
+    result = load_historical_experiment_inputs(
+        tmp_path,
+        seasons=(2023,),
+        retrieved_at=datetime(2026, 8, 14, tzinfo=UTC),
+        rds_reader=reader,
+    )
+
+    durations = {game.provider_id: game.duration_minutes for game in result.games}
+    assert durations == {"regulation": 48, "one_ot": 53, "two_ot": 58}
+    periods = {"regulation": 4, "one_ot": 5, "two_ot": 6}
+    for team_box_score in result.team_box_scores:
+        duration = durations[team_box_score.game_id]
+        assert team_box_score.completed_periods == periods[team_box_score.game_id]
+        assert team_box_score.pace_48 == pytest.approx(100.8 * 48 / duration)
