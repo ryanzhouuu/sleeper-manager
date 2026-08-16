@@ -3,11 +3,46 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from datetime import datetime
+from enum import StrEnum
 from math import erf, isfinite, sqrt
 
 
 class ProjectionCompatibilityError(ValueError):
     pass
+
+
+class ProjectionAdjustmentKind(StrEnum):
+    ADDITIVE = "additive"
+    MULTIPLICATIVE = "multiplicative"
+
+
+class ProjectionFallback(StrEnum):
+    OBSERVED = "observed"
+    SHRUNK = "shrunk"
+    PRIOR_SEASON = "prior_season"
+    LEAGUE_AVERAGE = "league_average"
+    MISSING = "missing"
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectionComponent:
+    code: str
+    estimate: float
+    baseline: float | None
+    adjustment: float | None
+    kind: ProjectionAdjustmentKind
+    effective_sample: float
+    fallback: ProjectionFallback
+    message: str
+
+    def __post_init__(self) -> None:
+        if not self.code.strip() or not self.message.strip():
+            raise ProjectionCompatibilityError("Projection components require a code and message")
+        values = (self.estimate, self.baseline, self.adjustment, self.effective_sample)
+        if any(value is not None and not isfinite(value) for value in values):
+            raise ProjectionCompatibilityError("Projection component values must be finite")
+        if self.effective_sample < 0:
+            raise ProjectionCompatibilityError("Projection component sample must be non-negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +197,7 @@ class ProjectionSnapshot:
     scoring_policy_version: str
     distribution: ProjectionDistribution
     reasons: tuple[ProjectionReason, ...]
+    components: tuple[ProjectionComponent, ...] = ()
 
 
 def _weighted_quantile(
