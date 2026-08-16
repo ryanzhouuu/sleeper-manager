@@ -91,10 +91,7 @@ def _write_archive(
     }
     (root / "league.json").write_text(json.dumps(league), encoding="utf-8")
     (root / "rosters.json").write_text("[]", encoding="utf-8")
-    if has_events:
-        week = root / "weeks" / "1"
-        week.mkdir(parents=True)
-        (week / "matchups.json").write_text(
-            json.dumps([{"roster_id": 1, "players": [], "starters": []}]),
-            encoding="utf-8",
-        )
+    week = root / "weeks" / "1"
+    week.mkdir(parents=True)
+    matchups = [{"roster_id": 1, "players": [], "starters": []}] if has_events else []
+    (week / "matchups.json").write_text(json.dumps(matchups), encoding="utf-8")

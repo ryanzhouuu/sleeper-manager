@@ -210,7 +210,13 @@ def _read_list(path: Path) -> list[dict[str, Any]]:
 
 def _has_archive_events(path: Path) -> bool:
     weeks = path / "weeks"
-    return weeks.is_dir() and any(weeks.glob("*/matchups.json"))
+    if not weeks.is_dir():
+        return False
+    for matchup_path in weeks.glob("*/matchups.json"):
+        payload = _read_json(matchup_path)
+        if isinstance(payload, list) and any(isinstance(value, dict) for value in payload):
+            return True
+    return False
 
 
 def _retrieved_at(path: Path) -> datetime:
