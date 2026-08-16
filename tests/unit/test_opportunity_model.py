@@ -342,6 +342,67 @@ def test_prior_league_outcome_changes_projection_and_input_version_but_future_do
     assert changed_future.input_version == baseline.input_version
 
 
+def test_incremental_league_prior_matches_reference_history_scan() -> None:
+    player_priors = (
+        row(
+            "player-old",
+            NOW - timedelta(days=10),
+            did_play=True,
+            minutes=20,
+            points=12,
+        ),
+        row(
+            "player-new",
+            NOW - timedelta(days=1),
+            did_play=True,
+            minutes=32,
+            points=30,
+        ),
+    )
+    league_priors = (
+        row(
+            "league-old",
+            NOW - timedelta(days=8),
+            did_play=True,
+            minutes=18,
+            points=9,
+            player_id="player-2",
+        ),
+        row(
+            "league-new",
+            NOW - timedelta(days=2),
+            did_play=True,
+            minutes=36,
+            points=45,
+            player_id="player-3",
+        ),
+    )
+    target = row("target", NOW, did_play=False, minutes=None, points=0)
+    history = tuple(sorted((*player_priors, *league_priors), key=lambda item: item.game_start))
+    policy = ScoringPolicy(points=1)
+    model = InterpretableOpportunityModel()
+
+    snapshot = model.project(
+        HistoricalFeatureDataset("fixture", "5", NOW, (), (*history, target)),
+        player_id="player-1",
+        game_id="target",
+        scoring_policy=policy,
+    )
+    reference = model.production_rate.estimate(
+        target,
+        player_priors,
+        policy,
+        league_prior_rows=history,
+    )
+    component = next(
+        candidate for candidate in snapshot.components if candidate.code == "production_rate"
+    )
+
+    assert component.estimate == pytest.approx(reference.value, abs=1e-6)
+    assert component.fallback is reference.fallback
+    assert component.message == reference.message
+
+
 def test_no_league_prior_keeps_player_rate_without_claiming_shrinkage() -> None:
     prior = row("player-prior", NOW - timedelta(days=1), did_play=True, minutes=30, points=30)
     target = row("target", NOW, did_play=False, minutes=None, points=0)

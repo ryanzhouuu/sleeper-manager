@@ -90,6 +90,20 @@ class _Estimate:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class _LeagueProductionPrior:
+    independent_rate: float | None
+    shared_rate: float | None
+    fingerprint: str
+
+
+@dataclass(frozen=True, slots=True)
+class _ProductionPrefix:
+    game_start: datetime
+    score: float
+    minutes: float
+
+
 class AvailabilityModel:
     def __init__(self, config: OpportunityModelConfig) -> None:
         self.config = config
@@ -186,6 +200,7 @@ class ProductionRateModel:
         scoring_policy: ScoringPolicy,
         *,
         league_prior_rows: Sequence[HistoricalFeatureRow] = (),
+        league_prior: _LeagueProductionPrior | None = None,
     ) -> _Estimate:
         observations = tuple(
             (row, weight)
@@ -207,45 +222,39 @@ class ProductionRateModel:
         rates = _production_rates(observations, scoring_policy)
         player_rate = _weighted_mean(rates)
         effective_minutes = sum(weight for _, weight in rates)
-        independent_prior_rows = tuple(
-            row for row in league_prior_rows if row.player_id != target.player_id
-        )
-        independent_observations = tuple(
-            (row, weight)
-            for row, weight in _weighted_rows(
-                target, independent_prior_rows, self.config.recency_half_life_days
-            )
-            if row.target_did_play and row.target_minutes is not None and row.target_minutes > 0
-        )
-        if independent_observations:
-            league_rate = _weighted_mean(
-                _production_rates(independent_observations, scoring_policy)
-            )
+        if league_prior is not None and league_prior.independent_rate is not None:
+            league_rate = league_prior.independent_rate
             prior_source = "independent league prior"
+        elif league_prior is not None and league_prior.shared_rate is not None:
+            league_rate = league_prior.shared_rate
+            prior_source = "shared player-history fallback"
         else:
-            shared_observations = tuple(
-                (row, weight)
-                for row, weight in _weighted_rows(
-                    target, league_prior_rows, self.config.recency_half_life_days
-                )
-                if row.target_did_play and row.target_minutes is not None and row.target_minutes > 0
+            independent_prior_rows = tuple(
+                row for row in league_prior_rows if row.player_id != target.player_id
             )
-            if shared_observations:
-                league_rate = _weighted_mean(_production_rates(shared_observations, scoring_policy))
-                prior_source = "shared player-history fallback"
-            else:
-                return _Estimate(
-                    value=player_rate,
-                    baseline=player_rate,
-                    adjustment=0.0,
-                    kind=ProjectionAdjustmentKind.ADDITIVE,
-                    effective_sample=effective_minutes,
-                    fallback=ProjectionFallback.MISSING,
-                    message=(
-                        "No league production prior was available; retained the player-only "
-                        "rate without shrinkage."
-                    ),
+            independent_observations = _played_observations(
+                target,
+                independent_prior_rows,
+                self.config.recency_half_life_days,
+            )
+            if independent_observations:
+                league_rate = _weighted_mean(
+                    _production_rates(independent_observations, scoring_policy)
                 )
+                prior_source = "independent league prior"
+            else:
+                shared_observations = _played_observations(
+                    target,
+                    league_prior_rows,
+                    self.config.recency_half_life_days,
+                )
+                if shared_observations:
+                    league_rate = _weighted_mean(
+                        _production_rates(shared_observations, scoring_policy)
+                    )
+                    prior_source = "shared player-history fallback"
+                else:
+                    return _unshrunk_rate(player_rate, effective_minutes)
         shrinkage = effective_minutes / (
             effective_minutes + self.config.production_shrinkage_minutes
         )
@@ -407,14 +416,26 @@ class _HistoricalIndex:
     handled by discarding and rebuilding rather than raising.
     """
 
-    def __init__(self, dataset_version: str, scoring_policy_version: str) -> None:
+    def __init__(
+        self,
+        dataset_version: str,
+        scoring_policy: ScoringPolicy,
+        recency_half_life_days: float,
+    ) -> None:
         self.dataset_version = dataset_version
-        self.scoring_policy_version = scoring_policy_version
+        self.scoring_policy = scoring_policy
+        self.scoring_policy_version = scoring_policy.version
+        self.recency_half_life_days = recency_half_life_days
         self._rows: list[HistoricalFeatureRow] = []
         self._by_target: dict[tuple[str, str], HistoricalFeatureRow] = {}
         self._duplicate_targets: set[tuple[str, str]] = set()
         self._player_rows: dict[str, list[HistoricalFeatureRow]] = {}
-        self._league_rows: list[HistoricalFeatureRow] = []
+        self._league_starts: list[datetime] = []
+        self._league_score_prefix: list[float] = []
+        self._league_minutes_prefix: list[float] = []
+        self._league_fingerprints: list[str] = []
+        self._league_by_player: dict[str, list[_ProductionPrefix]] = {}
+        self._league_origin: datetime | None = None
 
     def matches(self, dataset_version: str, scoring_policy_version: str) -> bool:
         return (
@@ -447,9 +468,33 @@ class _HistoricalIndex:
         count = bisect_left(rows, cutoff, key=lambda candidate: candidate.game_start)
         return tuple(rows[:count])
 
-    def league_prior_rows(self, cutoff: datetime) -> tuple[HistoricalFeatureRow, ...]:
-        count = bisect_left(self._league_rows, cutoff, key=lambda candidate: candidate.game_start)
-        return tuple(self._league_rows[:count])
+    def league_production_prior(self, player_id: str, cutoff: datetime) -> _LeagueProductionPrior:
+        count = bisect_left(self._league_starts, cutoff)
+        if count == 0:
+            return _LeagueProductionPrior(None, None, "empty")
+        score = self._league_score_prefix[count - 1]
+        minutes = self._league_minutes_prefix[count - 1]
+        player_score, player_minutes = self._player_production_sums(player_id, cutoff)
+        independent_minutes = minutes - player_minutes
+        independent_rate = (
+            (score - player_score) / independent_minutes if independent_minutes > 0 else None
+        )
+        shared_rate = score / minutes if minutes > 0 else None
+        return _LeagueProductionPrior(
+            independent_rate,
+            shared_rate,
+            self._league_fingerprints[count - 1],
+        )
+
+    def _player_production_sums(self, player_id: str, cutoff: datetime) -> tuple[float, float]:
+        rows = self._league_by_player.get(player_id)
+        if not rows:
+            return 0.0, 0.0
+        count = bisect_left(rows, cutoff, key=lambda candidate: candidate.game_start)
+        if count == 0:
+            return 0.0, 0.0
+        prefix = rows[count - 1]
+        return prefix.score, prefix.minutes
 
     def _sync(self, rows: Sequence[HistoricalFeatureRow]) -> int:
         limit = _prior_count(rows)
@@ -487,14 +532,40 @@ class _HistoricalIndex:
             self._by_target[key] = row
         self._player_rows.setdefault(row.player_id, []).append(row)
         if row.target_did_play and row.target_minutes is not None and row.target_minutes > 0:
-            self._league_rows.append(row)
+            self._commit_league_production(row)
+
+    def _commit_league_production(self, row: HistoricalFeatureRow) -> None:
+        if self._league_origin is None:
+            self._league_origin = row.game_start
+        age_days = (row.game_start - self._league_origin).total_seconds() / 86400
+        base_weight = exp(log(2) * age_days / self.recency_half_life_days)
+        score = calculate_fantasy_points(row.target_box_score, self.scoring_policy) * base_weight
+        minutes = (row.target_minutes or 0.0) * base_weight
+        self._league_starts.append(row.game_start)
+        self._league_score_prefix.append(score + _last(self._league_score_prefix))
+        self._league_minutes_prefix.append(minutes + _last(self._league_minutes_prefix))
+        prior_fingerprint = self._league_fingerprints[-1] if self._league_fingerprints else ""
+        encoded = json.dumps(_input_row(row), separators=(",", ":")).encode()
+        fingerprint = hashlib.sha256(prior_fingerprint.encode() + encoded).hexdigest()
+        self._league_fingerprints.append(fingerprint)
+        player_rows = self._league_by_player.setdefault(row.player_id, [])
+        player_score = player_rows[-1].score if player_rows else 0.0
+        player_minutes = player_rows[-1].minutes if player_rows else 0.0
+        player_rows.append(
+            _ProductionPrefix(row.game_start, player_score + score, player_minutes + minutes)
+        )
 
     def _reset(self) -> None:
         self._rows = []
         self._by_target = {}
         self._duplicate_targets = set()
         self._player_rows = {}
-        self._league_rows = []
+        self._league_starts = []
+        self._league_score_prefix = []
+        self._league_minutes_prefix = []
+        self._league_fingerprints = []
+        self._league_by_player = {}
+        self._league_origin = None
 
 
 def _prior_count(rows: Sequence[HistoricalFeatureRow]) -> int | None:
@@ -515,10 +586,14 @@ class InterpretableOpportunityModel:
     def model_version(self) -> str:
         return self.config.model_version
 
-    def _history(self, dataset_version: str, scoring_policy_version: str) -> _HistoricalIndex:
+    def _history(self, dataset_version: str, scoring_policy: ScoringPolicy) -> _HistoricalIndex:
         index = self._index
-        if index is None or not index.matches(dataset_version, scoring_policy_version):
-            index = _HistoricalIndex(dataset_version, scoring_policy_version)
+        if index is None or not index.matches(dataset_version, scoring_policy.version):
+            index = _HistoricalIndex(
+                dataset_version,
+                scoring_policy,
+                self.config.recency_half_life_days,
+            )
             self._index = index
         return index
 
@@ -531,17 +606,17 @@ class InterpretableOpportunityModel:
         scoring_policy: ScoringPolicy,
         exceed_score: float | None = None,
     ) -> ProjectionSnapshot:
-        index = self._history(dataset.dataset_version, scoring_policy.version)
+        index = self._history(dataset.dataset_version, scoring_policy)
         target = index.resolve_target(dataset.rows, player_id, game_id)
         player_prior_rows = index.player_prior_rows(player_id, target.game_start)
-        league_prior_rows = index.league_prior_rows(target.game_start)
+        league_prior = index.league_production_prior(player_id, target.game_start)
         availability = self.availability.estimate(target, player_prior_rows)
         minutes = self.minutes.estimate(target, player_prior_rows)
         rate = self.production_rate.estimate(
             target,
             player_prior_rows,
             scoring_policy,
-            league_prior_rows=league_prior_rows,
+            league_prior=league_prior,
         )
         environments = self.environment.estimate(target)
         environment_multiplier = 1.0
@@ -603,7 +678,7 @@ class InterpretableOpportunityModel:
                 dataset,
                 target,
                 player_prior_rows,
-                league_prior_rows,
+                league_prior.fingerprint,
                 scoring_policy,
                 self.config,
             ),
@@ -630,6 +705,37 @@ def _weighted_rows(
         for row in rows
         if row.game_start < target.game_start
     )
+
+
+def _played_observations(
+    target: HistoricalFeatureRow,
+    rows: Iterable[HistoricalFeatureRow],
+    half_life: float,
+) -> tuple[tuple[HistoricalFeatureRow, float], ...]:
+    return tuple(
+        (row, weight)
+        for row, weight in _weighted_rows(target, rows, half_life)
+        if row.target_did_play and row.target_minutes is not None and row.target_minutes > 0
+    )
+
+
+def _unshrunk_rate(player_rate: float, effective_minutes: float) -> _Estimate:
+    return _Estimate(
+        value=player_rate,
+        baseline=player_rate,
+        adjustment=0.0,
+        kind=ProjectionAdjustmentKind.ADDITIVE,
+        effective_sample=effective_minutes,
+        fallback=ProjectionFallback.MISSING,
+        message=(
+            "No league production prior was available; retained the player-only "
+            "rate without shrinkage."
+        ),
+    )
+
+
+def _last(values: Sequence[float]) -> float:
+    return values[-1] if values else 0.0
 
 
 def _weighted_mean(values: Iterable[tuple[float, float]]) -> float:
@@ -702,7 +808,7 @@ def _input_version(
     dataset: HistoricalFeatureDataset,
     target: HistoricalFeatureRow,
     prior_rows: Sequence[HistoricalFeatureRow],
-    league_prior_rows: Sequence[HistoricalFeatureRow],
+    league_prior_fingerprint: str,
     scoring_policy: ScoringPolicy,
     config: OpportunityModelConfig,
 ) -> str:
@@ -720,7 +826,7 @@ def _input_version(
             target.time_zone_change_hours,
         ),
         "player_prior": tuple(_input_row(row) for row in prior_rows),
-        "league_prior": tuple(_input_row(row) for row in league_prior_rows),
+        "league_prior": league_prior_fingerprint,
         "scoring": scoring_policy.version,
     }
     return "inputs-" + hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
