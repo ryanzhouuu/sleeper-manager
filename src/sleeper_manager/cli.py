@@ -8,6 +8,10 @@ from pathlib import Path
 
 from sleeper_manager import __version__
 from sleeper_manager.backtesting.experiment import run_model_feature_validation
+from sleeper_manager.backtesting.lock_in_experiment import (
+    LockInExperimentError,
+    run_lock_in_policy_validation,
+)
 from sleeper_manager.config import Settings
 from sleeper_manager.domain.league import LeagueProfile
 from sleeper_manager.integrations.nba.espn import ESPNAPIError, ESPNClient
@@ -56,6 +60,26 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("tests/fixtures/sleeper/current_league.json"),
         help="Sleeper league payload providing the scoring_settings object",
+    )
+    lock_in = subcommands.add_parser(
+        "validate-lock-in-policy",
+        help=(
+            "Replay cached historical rosters and validate counterfactual Lock-In policy decisions"
+        ),
+    )
+    lock_in.add_argument(
+        "--workspace",
+        type=Path,
+        default=Path(".local/model-validation"),
+        help="Ignored local directory containing cached Sleeper inputs and reports",
+    )
+    lock_in.add_argument("--current-league-id", required=True)
+    lock_in.add_argument("--historical-league-id", required=True)
+    lock_in.add_argument("--stress-league-id", required=True)
+    lock_in.add_argument(
+        "--refresh-sleeper",
+        action="store_true",
+        help="Explicitly request provider refresh instead of using cached inputs",
     )
     return parser
 
@@ -252,6 +276,22 @@ def main(argv: list[str] | None = None) -> int:
         print(f"JSON report: {output.report_json_path}")
         print(f"Markdown report: {output.report_markdown_path}")
         return 0
+    if args.command == "validate-lock-in-policy":
+        try:
+            lock_output = run_lock_in_policy_validation(
+                args.workspace,
+                current_league_id=args.current_league_id,
+                historical_league_id=args.historical_league_id,
+                stress_league_id=args.stress_league_id,
+                refresh_sleeper=args.refresh_sleeper,
+            )
+        except (LockInExperimentError, OSError, ValueError) as error:
+            print(f"Lock-In policy validation failed: {error}", file=sys.stderr)
+            return 2
+        print(f"Status: {lock_output.status}")
+        print(f"JSON report: {lock_output.report_json_path}")
+        print(f"Markdown report: {lock_output.report_markdown_path}")
+        return 0 if lock_output.status == "complete" else 1
     return 2
 
 

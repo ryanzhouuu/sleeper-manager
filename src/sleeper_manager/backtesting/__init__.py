@@ -1,7 +1,22 @@
+from sleeper_manager.backtesting.cohorts import (
+    CohortConfig,
+    CohortRankingError,
+    IndependentCohortRanker,
+    RankedPlayer,
+    cohort_for_rank,
+    rank_players_as_of,
+)
 from sleeper_manager.backtesting.controls import (
     CalibratedProjectionModel,
     NaiveProjectionBaseline,
     NaiveProjectionKind,
+)
+from sleeper_manager.backtesting.league_archive import (
+    HistoricalLeagueArchive,
+    HistoricalTransaction,
+    LeagueArchiveError,
+    PlayerEligibilitySnapshot,
+    parse_historical_league_archive,
 )
 from sleeper_manager.backtesting.models import (
     BacktestComparison,
@@ -16,6 +31,34 @@ from sleeper_manager.backtesting.models import (
     IntervalMetric,
     ProjectionModel,
     TargetSkip,
+)
+from sleeper_manager.backtesting.replay import (
+    ReplayConfig,
+    ReplayError,
+    ReplayState,
+    compare_team_week,
+    optimize_oracle,
+    oracle_team_week_result,
+)
+from sleeper_manager.backtesting.replay_models import (
+    LockCandidate,
+    LockedSlot,
+    ReplayDecision,
+    ReplayGame,
+    ReplayGameStatus,
+    ReplayPlayerGame,
+    TeamWeekComparison,
+    TeamWeekReplayResult,
+)
+from sleeper_manager.backtesting.replay_validation import (
+    BootstrapInterval as ReplayBootstrapInterval,
+)
+from sleeper_manager.backtesting.replay_validation import (
+    PairedPolicyDelta,
+    PolicyScore,
+    ReplayMetricSummary,
+    paired_policy_delta,
+    summarize_team_weeks,
 )
 from sleeper_manager.backtesting.runner import run_backtest
 from sleeper_manager.backtesting.validation import (
@@ -52,6 +95,37 @@ __all__ = (
     "ProjectionModel",
     "TargetSkip",
     "run_backtest",
+    "CohortConfig",
+    "CohortRankingError",
+    "IndependentCohortRanker",
+    "RankedPlayer",
+    "cohort_for_rank",
+    "rank_players_as_of",
+    "HistoricalLeagueArchive",
+    "HistoricalTransaction",
+    "LeagueArchiveError",
+    "PlayerEligibilitySnapshot",
+    "parse_historical_league_archive",
+    "ReplayConfig",
+    "ReplayError",
+    "ReplayState",
+    "compare_team_week",
+    "optimize_oracle",
+    "oracle_team_week_result",
+    "LockCandidate",
+    "LockedSlot",
+    "ReplayDecision",
+    "ReplayGame",
+    "ReplayGameStatus",
+    "ReplayPlayerGame",
+    "TeamWeekComparison",
+    "TeamWeekReplayResult",
+    "ReplayBootstrapInterval",
+    "PairedPolicyDelta",
+    "PolicyScore",
+    "ReplayMetricSummary",
+    "paired_policy_delta",
+    "summarize_team_weeks",
     "BootstrapInterval",
     "ChronologicalFold",
     "DevelopmentDecision",
