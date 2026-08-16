@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+from bisect import bisect_left
 from collections.abc import Iterable, Sequence
 from dataclasses import astuple, dataclass
+from datetime import datetime
 from math import exp, isfinite, log
 
 from sleeper_manager.domain.nba import AvailabilityStatus
@@ -355,6 +357,130 @@ class EnvironmentModel:
         )
 
 
+class _HistoricalIndex:
+    """Incremental prior-row index for one (dataset, scoring-policy) version pair.
+
+    ``project()`` used to rescan the entire point-in-time row prefix on every call to
+    find the target row and to filter player/league prior rows. That is O(n) work per
+    target, and a production-sized backtest calls it once per target per model. This
+    index instead commits rows once, in the order the caller reveals them, and answers
+    later prior-row queries with a bisection over already-sorted per-player and
+    league buckets.
+
+    Two input shapes are supported:
+
+    * A growing point-in-time prefix (as produced by the backtest runner), recognized
+      by a duck-typed ``prior_count`` attribute giving the exact number of legitimate
+      prior rows (the row at that position is the current, still-in-flight target and
+      is never committed, so a run of targets sharing one tipoff does not force a
+      rebuild).
+    * An ordinary, complete `Sequence[HistoricalFeatureRow]`, which is indexed in full
+      on first use and then reused as-is for later queries against the same object.
+
+    Both paths share one continuity check: before trusting an incoming sequence as a
+    continuation of what is already committed, the row at the last position both views
+    can see is compared by identity. A match confirms it is the same underlying
+    sequence, at which point a visible prefix that is smaller than what has already
+    been committed is a chronological regression and raises explicitly. A mismatch
+    means the caller handed over unrelated data under the same version key, which is
+    handled by discarding and rebuilding rather than raising.
+    """
+
+    def __init__(self, dataset_version: str, scoring_policy_version: str) -> None:
+        self.dataset_version = dataset_version
+        self.scoring_policy_version = scoring_policy_version
+        self._rows: list[HistoricalFeatureRow] = []
+        self._by_target: dict[tuple[str, str], HistoricalFeatureRow] = {}
+        self._duplicate_targets: set[tuple[str, str]] = set()
+        self._player_rows: dict[str, list[HistoricalFeatureRow]] = {}
+        self._league_rows: list[HistoricalFeatureRow] = []
+
+    def matches(self, dataset_version: str, scoring_policy_version: str) -> bool:
+        return (
+            self.dataset_version == dataset_version
+            and self.scoring_policy_version == scoring_policy_version
+        )
+
+    def resolve_target(
+        self, rows: Sequence[HistoricalFeatureRow], player_id: str, game_id: str
+    ) -> HistoricalFeatureRow:
+        limit = self._sync(rows)
+        if limit == len(rows) - 1:
+            candidate = rows[limit]
+            if candidate.player_id == player_id and candidate.game_id == game_id:
+                return candidate
+        key = (player_id, game_id)
+        if key in self._duplicate_targets:
+            raise OpportunityModelError("Expected one feature row for player/game, found multiple")
+        row = self._by_target.get(key)
+        if row is None:
+            raise OpportunityModelError("Expected one feature row for player/game, found 0")
+        return row
+
+    def player_prior_rows(
+        self, player_id: str, cutoff: datetime
+    ) -> tuple[HistoricalFeatureRow, ...]:
+        rows = self._player_rows.get(player_id)
+        if not rows:
+            return ()
+        count = bisect_left(rows, cutoff, key=lambda candidate: candidate.game_start)
+        return tuple(rows[:count])
+
+    def league_prior_rows(self, cutoff: datetime) -> tuple[HistoricalFeatureRow, ...]:
+        count = bisect_left(self._league_rows, cutoff, key=lambda candidate: candidate.game_start)
+        return tuple(self._league_rows[:count])
+
+    def _sync(self, rows: Sequence[HistoricalFeatureRow]) -> int:
+        limit = _prior_count(rows)
+        if limit is None:
+            limit = len(rows)
+        committed = len(self._rows)
+        check_index = min(limit, committed) - 1
+        if check_index < 0 or rows[check_index] is self._rows[check_index]:
+            if limit < committed:
+                raise OpportunityModelError(
+                    "Historical index detected a chronological regression: the visible "
+                    f"row prefix shrank from {committed} to {limit} rows for what was "
+                    "already confirmed to be the same underlying sequence."
+                )
+        else:
+            self._reset()
+        self._advance(rows, limit)
+        return limit
+
+    def _advance(self, rows: Sequence[HistoricalFeatureRow], limit: int) -> None:
+        for index in range(len(self._rows), limit):
+            self._commit(rows[index])
+
+    def _commit(self, row: HistoricalFeatureRow) -> None:
+        if self._rows and row.game_start < self._rows[-1].game_start:
+            raise OpportunityModelError(
+                "Historical index requires chronologically ordered rows; encountered "
+                f"{row.game_start.isoformat()} after {self._rows[-1].game_start.isoformat()}."
+            )
+        self._rows.append(row)
+        key = (row.player_id, row.game_id)
+        if key in self._by_target:
+            self._duplicate_targets.add(key)
+        else:
+            self._by_target[key] = row
+        self._player_rows.setdefault(row.player_id, []).append(row)
+        if row.target_did_play and row.target_minutes is not None and row.target_minutes > 0:
+            self._league_rows.append(row)
+
+    def _reset(self) -> None:
+        self._rows = []
+        self._by_target = {}
+        self._duplicate_targets = set()
+        self._player_rows = {}
+        self._league_rows = []
+
+
+def _prior_count(rows: Sequence[HistoricalFeatureRow]) -> int | None:
+    value = getattr(rows, "prior_count", None)
+    return value if isinstance(value, int) else None
+
+
 class InterpretableOpportunityModel:
     def __init__(self, config: OpportunityModelConfig | None = None) -> None:
         self.config = config or OpportunityModelConfig()
@@ -362,6 +488,14 @@ class InterpretableOpportunityModel:
         self.minutes = MinutesModel(self.config)
         self.production_rate = ProductionRateModel(self.config)
         self.environment = EnvironmentModel(self.config)
+        self._index: _HistoricalIndex | None = None
+
+    def _history(self, dataset_version: str, scoring_policy_version: str) -> _HistoricalIndex:
+        index = self._index
+        if index is None or not index.matches(dataset_version, scoring_policy_version):
+            index = _HistoricalIndex(dataset_version, scoring_policy_version)
+            self._index = index
+        return index
 
     def project(
         self,
@@ -372,20 +506,10 @@ class InterpretableOpportunityModel:
         scoring_policy: ScoringPolicy,
         exceed_score: float | None = None,
     ) -> ProjectionSnapshot:
-        target = _find_target(dataset.rows, player_id, game_id)
-        player_prior_rows = tuple(
-            row
-            for row in dataset.rows
-            if row.player_id == player_id and row.game_start < target.game_start
-        )
-        league_prior_rows = tuple(
-            row
-            for row in dataset.rows
-            if row.game_start < target.game_start
-            and row.target_did_play
-            and row.target_minutes is not None
-            and row.target_minutes > 0
-        )
+        index = self._history(dataset.dataset_version, scoring_policy.version)
+        target = index.resolve_target(dataset.rows, player_id, game_id)
+        player_prior_rows = index.player_prior_rows(player_id, target.game_start)
+        league_prior_rows = index.league_prior_rows(target.game_start)
         availability = self.availability.estimate(target, player_prior_rows)
         minutes = self.minutes.estimate(target, player_prior_rows)
         rate = self.production_rate.estimate(
@@ -462,17 +586,6 @@ class InterpretableOpportunityModel:
             reasons=reasons,
             components=components,
         )
-
-
-def _find_target(
-    rows: Sequence[HistoricalFeatureRow], player_id: str, game_id: str
-) -> HistoricalFeatureRow:
-    matches = tuple(row for row in rows if row.player_id == player_id and row.game_id == game_id)
-    if len(matches) != 1:
-        raise OpportunityModelError(
-            f"Expected one feature row for player/game, found {len(matches)}"
-        )
-    return matches[0]
 
 
 def _weighted_rows(
