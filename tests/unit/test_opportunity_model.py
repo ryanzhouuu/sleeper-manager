@@ -9,6 +9,7 @@ from sleeper_manager.integrations.nba.historical_features import (
     AvailabilityObservation,
     HistoricalFeatureDataset,
     HistoricalFeatureRow,
+    OpponentStatsFallback,
     PaceStatsFallback,
 )
 from sleeper_manager.projections.opportunity_model import (
@@ -30,6 +31,7 @@ def row(
     player_id: str = "player-1",
     opponent_defensive_rating: float | None = 100,
     league_defensive_rating: float | None = None,
+    opponent_stats_fallback: OpponentStatsFallback = OpponentStatsFallback.OBSERVED,
 ) -> HistoricalFeatureRow:
     return HistoricalFeatureRow(
         dataset_version="fixture",
@@ -66,6 +68,7 @@ def row(
         opponent_defensive_rating=opponent_defensive_rating,
         league_defensive_rating=league_defensive_rating,
         opponent_sample_size=5,
+        opponent_stats_fallback=opponent_stats_fallback,
         own_team_pace=100,
         own_team_pace_fallback=PaceStatsFallback.OBSERVED,
         expected_matchup_pace=100,
@@ -338,3 +341,22 @@ def test_opponent_defense_factor_is_clipped_and_missing_inputs_are_neutral() -> 
         assert estimate.value == pytest.approx(1.0)
         assert estimate.fallback is ProjectionFallback.MISSING
         assert "neutral" in estimate.message
+
+
+def test_opponent_defense_preserves_historical_fallback_metadata() -> None:
+    target = row(
+        "target",
+        NOW,
+        did_play=False,
+        minutes=None,
+        points=0,
+        opponent_defensive_rating=110,
+        league_defensive_rating=100,
+        opponent_stats_fallback=OpponentStatsFallback.SHRUNK,
+    )
+
+    estimate = EnvironmentModel(InterpretableOpportunityModel().config).estimate(target)[1]
+
+    assert estimate.value == pytest.approx(1.1)
+    assert estimate.fallback is ProjectionFallback.SHRUNK
+    assert "prior league baseline" in estimate.message

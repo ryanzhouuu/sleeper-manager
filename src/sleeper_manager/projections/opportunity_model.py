@@ -20,6 +20,7 @@ from sleeper_manager.integrations.nba.historical_features import (
     AvailabilityObservation,
     HistoricalFeatureDataset,
     HistoricalFeatureRow,
+    OpponentStatsFallback,
 )
 
 
@@ -290,7 +291,7 @@ class EnvironmentModel:
                 ),
                 1.1,
             )
-            defense_fallback = ProjectionFallback.OBSERVED
+            defense_fallback = _defense_fallback(target.opponent_stats_fallback)
             defense_message = (
                 "Scaled opponent defense by the opponent defensive rating "
                 f"{target.opponent_defensive_rating:.2f} relative to the prior league "
@@ -547,6 +548,15 @@ def _status_probability(status: AvailabilityStatus) -> float:
         AvailabilityStatus.OUT: 0.02,
         AvailabilityStatus.UNKNOWN: 0.75,
     }[status]
+
+
+def _defense_fallback(fallback: OpponentStatsFallback) -> ProjectionFallback:
+    return {
+        OpponentStatsFallback.OBSERVED: ProjectionFallback.OBSERVED,
+        OpponentStatsFallback.SHRUNK: ProjectionFallback.SHRUNK,
+        OpponentStatsFallback.LEAGUE_AVERAGE: ProjectionFallback.LEAGUE_AVERAGE,
+        OpponentStatsFallback.MISSING: ProjectionFallback.MISSING,
+    }[fallback]
 
 
 def _input_version(
