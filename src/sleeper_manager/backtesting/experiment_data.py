@@ -214,7 +214,7 @@ def dataset_version_for(
     *,
     scoring_policy: ScoringPolicy,
     injury_hashes: Iterable[str] = (),
-    feature_schema_version: str = "2",
+    feature_schema_version: str = "3",
 ) -> str:
     payload = {
         "artifacts": [
@@ -232,7 +232,7 @@ def dataset_version_for(
         "target_semantics": "reconstructed_sleeper_policy",
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    return f"historical-features-v2-{hashlib.sha256(encoded).hexdigest()[:16]}"
+    return f"historical-features-v3-{hashlib.sha256(encoded).hexdigest()[:16]}"
 
 
 def artifact_manifest(artifacts: Iterable[SourceArtifact]) -> list[dict[str, object]]:

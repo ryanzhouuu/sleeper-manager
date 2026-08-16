@@ -91,6 +91,42 @@ def test_release_schedule_schema_preserves_tipoff_and_venue() -> None:
     assert game.venue_city == "Chicago"
 
 
+def test_schedule_and_team_box_parsers_preserve_period_metadata() -> None:
+    schedule = parse_schedule_rows(
+        [
+            {
+                "game_id": "ot-game",
+                "game_date": "2026-01-02T01:30:00Z",
+                "home_id": "home",
+                "away_id": "away",
+                "format_regulation_periods": 4,
+                "status_period": 6,
+            }
+        ],
+        retrieved_at=RETRIEVED_AT,
+    ).records[0]
+    team_box = parse_team_box_score_rows(
+        [
+            {
+                "game_id": "ot-game",
+                "game_date": "2026-01-02T01:30:00Z",
+                "team_id": "home",
+                "opponent_team_id": "away",
+                "field_goals_attempted": 90,
+                "free_throws_attempted": 20,
+                "offensive_rebounds": 10,
+                "total_turnovers": 12,
+                "format_regulation_periods": 4,
+                "status_period": 6,
+            }
+        ],
+        retrieved_at=RETRIEVED_AT,
+    ).records[0]
+
+    assert schedule.duration_minutes == 58
+    assert team_box.pace_48 == pytest.approx(100.8 * 48 / 58)
+
+
 def test_team_boxes_supply_prior_only_possession_inputs() -> None:
     result = parse_team_box_score_rows(
         [

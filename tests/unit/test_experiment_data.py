@@ -140,4 +140,4 @@ def test_scoring_and_dataset_versions_are_deterministic(tmp_path: Path) -> None:
     assert policy.points == 1
     assert policy.rebounds == 1.2
     assert first == second
-    assert first.startswith("historical-features-v2-")
+    assert first.startswith("historical-features-v3-")

@@ -26,7 +26,7 @@ from sleeper_manager.integrations.nba.official_injury_report import (
 )
 from sleeper_manager.integrations.nba.travel import TravelContext, travel_context
 
-FEATURE_SCHEMA_VERSION = "2"
+FEATURE_SCHEMA_VERSION = "3"
 
 
 class HistoricalFeatureDatasetError(ValueError):
@@ -43,6 +43,14 @@ class AvailabilityObservation(StrEnum):
 class OpponentStatsFallback(StrEnum):
     OBSERVED = "observed"
     SHRUNK = "shrunk"
+    LEAGUE_AVERAGE = "league_average"
+    MISSING = "missing"
+
+
+class PaceStatsFallback(StrEnum):
+    OBSERVED = "observed"
+    SHRUNK = "shrunk"
+    PRIOR_SEASON = "prior_season"
     LEAGUE_AVERAGE = "league_average"
     MISSING = "missing"
 
@@ -88,6 +96,12 @@ class HistoricalFeatureRow:
     opponent_offense_band: str = "unknown"
     opponent_defense_band: str = "unknown"
     opponent_pace_band: str = "unknown"
+    own_team_pace: float | None = None
+    own_team_pace_sample_size: int = 0
+    own_team_pace_fallback: PaceStatsFallback = PaceStatsFallback.MISSING
+    expected_matchup_pace: float | None = None
+    baseline_exposure_pace: float | None = None
+    pace_factor: float | None = None
     prior_venue_id: str | None = None
     destination_venue_id: str | None = None
     travel_distance_miles: float | None = None
@@ -156,6 +170,7 @@ def build_historical_feature_dataset(
             str,
         ],
     ] = {}
+    own_pace_by_game_team: dict[tuple[str, str], tuple[float | None, int, PaceStatsFallback]] = {}
     rest_by_game_team: dict[
         tuple[str, str], tuple[int | None, bool | None, SourceMetadata | None]
     ] = {}
@@ -193,6 +208,27 @@ def build_historical_feature_dataset(
                 team_box_scores=team_box_score_records,
             )
             opponent_stats_by_game_team[opponent_stats_key] = opponent_stats
+        own_pace_key = game.provider_id, box_score.team_id
+        own_pace = own_pace_by_game_team.get(own_pace_key)
+        if own_pace is None:
+            own_pace = _team_pace(
+                game,
+                team_id=box_score.team_id,
+                team_box_scores=team_box_score_records,
+            )
+            own_pace_by_game_team[own_pace_key] = own_pace
+        expected_pace = _expected_matchup_pace(own_pace[0], opponent_stats[2])
+        exposure_pace = _baseline_exposure_pace(
+            prior_by_player.get(box_score.player_id, ()),
+            team_id=box_score.team_id,
+            team_box_scores=team_box_score_records,
+            target_start=game.start_time,
+        )
+        pace_factor = (
+            round(expected_pace / exposure_pace, 6)
+            if expected_pace is not None and exposure_pace is not None and exposure_pace > 0
+            else None
+        )
         travel = travel_by_game_team.get(game_team_key)
         if travel is None:
             travel = travel_context(
@@ -265,6 +301,12 @@ def build_historical_feature_dataset(
                 opponent_offense_band=opponent_stats[5],
                 opponent_defense_band=opponent_stats[6],
                 opponent_pace_band=opponent_stats[7],
+                own_team_pace=own_pace[0],
+                own_team_pace_sample_size=own_pace[1],
+                own_team_pace_fallback=own_pace[2],
+                expected_matchup_pace=expected_pace,
+                baseline_exposure_pace=exposure_pace,
+                pace_factor=pace_factor,
                 prior_venue_id=travel.prior_venue_id,
                 destination_venue_id=travel.destination_venue_id,
                 travel_distance_miles=travel.distance_miles,
@@ -488,7 +530,7 @@ def _opponent_stats(
     league_defenses = tuple(
         record.opponent_points / record.estimated_possessions * 100 for record in prior
     )
-    league_paces = tuple(record.estimated_possessions for record in prior)
+    league_paces = tuple(record.pace_48 for record in prior)
     league_offense = _mean(league_offenses)
     league_defense = _mean(league_defenses)
     league_pace = _mean(league_paces)
@@ -509,7 +551,7 @@ def _opponent_stats(
     defense = _mean(
         record.opponent_points / record.estimated_possessions * 100 for record in opponent_prior
     )
-    pace = _mean(record.estimated_possessions for record in opponent_prior)
+    pace = _mean(record.pace_48 for record in opponent_prior)
     fallback = (
         OpponentStatsFallback.OBSERVED
         if sample_size >= lookback_games
@@ -528,6 +570,78 @@ def _opponent_stats(
         _value_band(adjusted_defense, league_defenses),
         _value_band(adjusted_pace, league_paces),
     )
+
+
+def _team_pace(
+    game: ScheduledGame,
+    *,
+    team_id: str,
+    team_box_scores: tuple[TeamBoxScore, ...],
+    lookback_games: int = 10,
+    shrinkage_games: float = 10.0,
+) -> tuple[float | None, int, PaceStatsFallback]:
+    prior = tuple(
+        record
+        for record in team_box_scores
+        if record.team_id == team_id and record.played_at < game.start_time and record.pace_48 > 0
+    )
+    same_season = tuple(
+        record for record in prior if _season_key(record.played_at) == _season_key(game.start_time)
+    )
+    league_prior = tuple(
+        record
+        for record in team_box_scores
+        if record.played_at < game.start_time and record.pace_48 > 0
+    )
+    if not league_prior:
+        return None, 0, PaceStatsFallback.MISSING
+    league_mean = _mean(record.pace_48 for record in league_prior)
+    if not same_season:
+        prior_season = prior[-lookback_games:]
+        if not prior_season:
+            return round(league_mean, 6), 0, PaceStatsFallback.LEAGUE_AVERAGE
+        return (
+            round(_mean(record.pace_48 for record in prior_season), 6),
+            0,
+            PaceStatsFallback.PRIOR_SEASON,
+        )
+    observed = same_season[-lookback_games:]
+    observed_mean = _mean(record.pace_48 for record in observed)
+    weight = len(observed) / (len(observed) + shrinkage_games)
+    fallback = (
+        PaceStatsFallback.OBSERVED if len(observed) >= lookback_games else PaceStatsFallback.SHRUNK
+    )
+    return round(league_mean + weight * (observed_mean - league_mean), 6), len(observed), fallback
+
+
+def _expected_matchup_pace(
+    own_team_pace: float | None, opponent_pace: float | None
+) -> float | None:
+    if own_team_pace is None or opponent_pace is None:
+        return None
+    return round((own_team_pace + opponent_pace) / 2, 6)
+
+
+def _baseline_exposure_pace(
+    prior_player_games: Iterable[PlayerBoxScore],
+    *,
+    team_id: str,
+    team_box_scores: tuple[TeamBoxScore, ...],
+    target_start: datetime,
+) -> float | None:
+    paces_by_game = {
+        record.game_id: record.pace_48
+        for record in team_box_scores
+        if record.team_id == team_id and record.played_at < target_start and record.pace_48 > 0
+    }
+    values = tuple(
+        paces_by_game[record.game_id]
+        for record in prior_player_games
+        if record.game_id in paces_by_game
+        and record.played_at is not None
+        and record.played_at < target_start
+    )
+    return round(_mean(values), 6) if values else None
 
 
 def _mean(values: Iterable[float]) -> float:

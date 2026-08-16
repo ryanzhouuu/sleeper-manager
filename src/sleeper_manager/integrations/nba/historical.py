@@ -50,7 +50,7 @@ class RDSReader(Protocol):
 
 def _default_rds_reader(path: str) -> Mapping[str, Any]:
     try:
-        import pyreadr  # type: ignore[import-not-found]
+        import pyreadr  # type: ignore[import-untyped]
     except ImportError as error:
         raise SportsDataverseError(
             "SportsDataverse ingestion requires the pyreadr dependency"
@@ -122,6 +122,18 @@ def _bool_value(value: Any, default: bool = False) -> bool:
     if isinstance(value, bool):
         return value
     return str(value).casefold() in {"1", "true", "t", "yes", "y"}
+
+
+def _period_value(value: Any, default: int) -> int:
+    if isinstance(value, Mapping):
+        value = value.get("number", value.get("period", value.get("value")))
+    if value in (None, "", "NA"):
+        return default
+    try:
+        parsed = int(float(value))
+    except (TypeError, ValueError):
+        return default
+    return max(parsed, 0)
 
 
 def _optional_string(value: Any) -> str | None:
@@ -303,6 +315,12 @@ def parse_schedule_rows(
                 venue_city=_optional_string(_value(row, ("venue_address_city", "venue_city"))),
                 venue_state=_optional_string(_value(row, ("venue_address_state", "venue_state"))),
                 neutral_site=_bool_value(_value(row, ("neutral_site",)), False),
+                regulation_periods=_period_value(
+                    _value(row, ("format_regulation_periods", "regulation_periods")), 4
+                ),
+                completed_periods=_period_value(
+                    _value(row, ("status_period", "completed_periods", "period")), 4
+                ),
             )
         )
     records = tuple(result)
@@ -354,6 +372,12 @@ def parse_team_box_score_rows(
                 offensive_rebounds=_int_value(_value(row, ("offensive_rebounds", "oreb"))),
                 turnovers=_int_value(_value(row, ("total_turnovers", "turnovers", "to"))),
                 source=_source(f"{game_id}:{team_id}", retrieved_at),
+                regulation_periods=_period_value(
+                    _value(row, ("format_regulation_periods", "regulation_periods")), 4
+                ),
+                completed_periods=_period_value(
+                    _value(row, ("status_period", "completed_periods", "period")), 4
+                ),
             )
         )
     records = tuple(result)

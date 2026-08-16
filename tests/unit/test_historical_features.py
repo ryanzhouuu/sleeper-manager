@@ -292,7 +292,7 @@ def test_historical_features_use_prior_only_opponent_stats_and_travel() -> None:
 
     row = dataset.rows[-1]
     comparison = without_future.rows[-1]
-    assert dataset.feature_schema_version == "2"
+    assert dataset.feature_schema_version == "3"
     assert row.opponent_sample_size == 1
     assert row.opponent_stats_fallback is OpponentStatsFallback.SHRUNK
     assert row.opponent_offensive_rating == comparison.opponent_offensive_rating
@@ -307,6 +307,69 @@ def test_historical_features_use_prior_only_opponent_stats_and_travel() -> None:
     assert row.time_zone_change_hours == 1
     assert row.travel_direction == "east"
     assert row.travel_fallback == "observed"
+
+
+def test_historical_features_include_symmetric_overtime_normalized_pace_factor() -> None:
+    previous = game("game-1", "2025-01-01T01:00:00")
+    target = game("game-2", "2025-01-03T01:00:00")
+    own = TeamBoxScore(
+        "game-1",
+        "CHI",
+        "WAS",
+        previous.start_time,
+        110,
+        100,
+        90,
+        20,
+        10,
+        12,
+        SOURCE,
+        regulation_periods=4,
+        completed_periods=6,
+    )
+    opponent = TeamBoxScore(
+        "game-1",
+        "WAS",
+        "CHI",
+        previous.start_time,
+        100,
+        110,
+        88,
+        18,
+        8,
+        10,
+        SOURCE,
+        regulation_periods=4,
+        completed_periods=6,
+    )
+    dataset = build_historical_feature_dataset(
+        box_scores=[
+            box("game-1", "espn-1", "2025-01-01T01:00:00", 30, True),
+            box("game-2", "espn-1", "2025-01-03T01:00:00", 30, True),
+        ],
+        games=[previous, target],
+        teams=[team("CHI", "CHI"), team("WAS", "WAS")],
+        player_mappings=[],
+        injury_reports=[],
+        availability=[],
+        decision_cutoffs={
+            "game-1": datetime(2025, 1, 1, tzinfo=UTC),
+            "game-2": datetime(2025, 1, 3, tzinfo=UTC),
+        },
+        dataset_version="v3",
+        generated_at=NOW,
+        team_box_scores=[own, opponent],
+    )
+
+    row = dataset.rows[-1]
+    league_pace = (own.pace_48 + opponent.pace_48) / 2
+    expected_own = league_pace + (own.pace_48 - league_pace) / 11
+    expected_opponent = league_pace + (opponent.pace_48 - league_pace) / 6
+    assert row.own_team_pace == pytest.approx(expected_own)
+    assert row.opponent_pace == pytest.approx(expected_opponent)
+    assert row.expected_matchup_pace == pytest.approx((expected_own + expected_opponent) / 2)
+    assert row.baseline_exposure_pace == pytest.approx(own.pace_48)
+    assert row.pace_factor == pytest.approx(row.expected_matchup_pace / own.pace_48)
 
 
 def test_player_history_resets_at_season_boundary() -> None:

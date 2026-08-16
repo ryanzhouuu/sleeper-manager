@@ -76,6 +76,14 @@ class ScheduledGame:
     venue_city: str | None = None
     venue_state: str | None = None
     neutral_site: bool = False
+    regulation_periods: int = 4
+    completed_periods: int = 4
+
+    @property
+    def duration_minutes(self) -> int:
+        return 12 * self.regulation_periods + 5 * max(
+            self.completed_periods - self.regulation_periods, 0
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +121,8 @@ class TeamBoxScore:
     offensive_rebounds: int
     turnovers: int
     source: SourceMetadata
+    regulation_periods: int = 4
+    completed_periods: int = 4
 
     @property
     def estimated_possessions(self) -> float:
@@ -122,6 +132,19 @@ class TeamBoxScore:
             - self.offensive_rebounds
             + self.turnovers
         )
+
+    @property
+    def duration_minutes(self) -> int:
+        return 12 * self.regulation_periods + 5 * max(
+            self.completed_periods - self.regulation_periods, 0
+        )
+
+    @property
+    def pace_48(self) -> float:
+        duration = self.duration_minutes
+        if duration <= 0:
+            raise ValueError("Team box-score duration must be positive")
+        return self.estimated_possessions * 48 / duration
 
 
 @dataclass(frozen=True, slots=True)
