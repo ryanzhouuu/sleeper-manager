@@ -8,6 +8,7 @@ from math import isfinite, sqrt
 from random import Random
 
 from sleeper_manager.backtesting.models import (
+    BacktestComparison,
     BacktestConfig,
     BacktestModel,
     BacktestObservation,
@@ -15,7 +16,11 @@ from sleeper_manager.backtesting.models import (
     CohortDiagnostics,
     ParticipationCalibrationBin,
 )
-from sleeper_manager.backtesting.runner import run_backtest
+from sleeper_manager.backtesting.runner import (
+    cohort_matches,
+    compare_observation_sets,
+    run_backtest,
+)
 from sleeper_manager.domain.scoring import ScoringPolicy
 from sleeper_manager.integrations.nba.historical_features import (
     HistoricalFeatureDataset,
@@ -262,6 +267,41 @@ def run_validation_folds(
             ),
         )
         for fold in folds
+    )
+
+
+def cohort_comparison_across_folds(
+    fold_results: Iterable[FoldResult],
+    *,
+    reference_model: str,
+    candidate_model: str,
+    cohort: str,
+    config: BacktestConfig,
+) -> BacktestComparison:
+    """Compare two models on their common successful observations within one cohort, pooled
+    across every given fold. Folds are time-disjoint, so a (player_id, game_id) key can appear
+    in at most one fold -- pooling never double-counts or collides across folds."""
+    reference_observations: list[BacktestObservation] = []
+    candidate_observations: list[BacktestObservation] = []
+    for fold_result in fold_results:
+        reference_result = fold_result.report.result_for(reference_model)
+        candidate_result = fold_result.report.result_for(candidate_model)
+        reference_observations.extend(
+            observation
+            for observation in reference_result.observations
+            if cohort_matches(observation.cohort, cohort)
+        )
+        candidate_observations.extend(
+            observation
+            for observation in candidate_result.observations
+            if cohort_matches(observation.cohort, cohort)
+        )
+    return compare_observation_sets(
+        reference_model=reference_model,
+        candidate_model=candidate_model,
+        reference_observations=tuple(reference_observations),
+        candidate_observations=tuple(candidate_observations),
+        config=config,
     )
 
 

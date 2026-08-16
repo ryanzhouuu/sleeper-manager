@@ -296,7 +296,7 @@ def _weighted_mean(values: Iterable[tuple[float, float]]) -> float:
     return sum(value * weight for value, weight in records) / total if total else 0.0
 
 
-def _cohort_key(cohort: CohortAssignment, name: str) -> bool:
+def cohort_matches(cohort: CohortAssignment, name: str) -> bool:
     if name == "top_180":
         return cohort.top_180
     return cohort.tier == name
@@ -310,11 +310,11 @@ def _cohort_diagnostics(
 ) -> tuple[CohortDiagnostics, ...]:
     diagnostics: list[CohortDiagnostics] = []
     for name in COHORT_NAMES:
-        target_count = sum(1 for cohort in target_cohorts.values() if _cohort_key(cohort, name))
+        target_count = sum(1 for cohort in target_cohorts.values() if cohort_matches(cohort, name))
         cohort_observations = tuple(
-            observation for observation in observations if _cohort_key(observation.cohort, name)
+            observation for observation in observations if cohort_matches(observation.cohort, name)
         )
-        cohort_skips = tuple(skip for skip in skips if _cohort_key(skip.cohort, name))
+        cohort_skips = tuple(skip for skip in skips if cohort_matches(skip.cohort, name))
         participation_brier, participation_sample, calibration = _participation_diagnostics(
             cohort_observations
         )
@@ -512,14 +512,14 @@ def cohort_comparison(
     reference_observations = tuple(
         observation
         for observation in reference.observations
-        if _cohort_key(observation.cohort, cohort)
+        if cohort_matches(observation.cohort, cohort)
     )
     candidate_observations = tuple(
         observation
         for observation in candidate.observations
-        if _cohort_key(observation.cohort, cohort)
+        if cohort_matches(observation.cohort, cohort)
     )
-    return _compare_observation_sets(
+    return compare_observation_sets(
         reference_model=reference.model.name,
         candidate_model=candidate.model.name,
         reference_observations=reference_observations,
@@ -756,7 +756,7 @@ def _compare_results(
 ) -> BacktestComparison:
     reference = next(result for result in results if result.model.name == reference_model)
     candidate = next(result for result in results if result.model.name == candidate_model)
-    return _compare_observation_sets(
+    return compare_observation_sets(
         reference_model=reference_model,
         candidate_model=candidate_model,
         reference_observations=reference.observations,
@@ -765,7 +765,7 @@ def _compare_results(
     )
 
 
-def _compare_observation_sets(
+def compare_observation_sets(
     *,
     reference_model: str,
     candidate_model: str,

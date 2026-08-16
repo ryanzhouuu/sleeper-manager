@@ -7,7 +7,11 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from sleeper_manager import __version__
-from sleeper_manager.backtesting.experiment import run_model_feature_validation
+from sleeper_manager.backtesting.experiment import (
+    Phase4ValidationError,
+    run_model_feature_validation,
+    run_phase4_validation_experiment,
+)
 from sleeper_manager.backtesting.lock_in_experiment import (
     LockInExperimentError,
     run_lock_in_policy_validation,
@@ -60,6 +64,32 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("tests/fixtures/sleeper/current_league.json"),
         help="Sleeper league payload providing the scoring_settings object",
+    )
+    phase4 = subcommands.add_parser(
+        "validate-phase4",
+        help="Run the frozen interpretable-opportunity-model validation-closure experiment",
+    )
+    phase4.add_argument(
+        "--workspace",
+        type=Path,
+        default=Path(".local/model-validation"),
+        help="Ignored local directory containing raw sources, injury cache, and reports",
+    )
+    phase4.add_argument(
+        "--league-fixture",
+        type=Path,
+        default=Path("tests/fixtures/sleeper/current_league.json"),
+        help="Sleeper league payload providing the scoring_settings object",
+    )
+    phase4.add_argument(
+        "--mode",
+        choices=("development", "locked_retrospective"),
+        default="development",
+        help=(
+            "development freezes the manifest and runs development folds only; "
+            "locked_retrospective refuses on a missing/mismatched manifest and writes the "
+            "complete report"
+        ),
     )
     lock_in = subcommands.add_parser(
         "validate-lock-in-policy",
@@ -275,6 +305,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Frozen manifest: {output.frozen_manifest_path}")
         print(f"JSON report: {output.report_json_path}")
         print(f"Markdown report: {output.report_markdown_path}")
+        return 0
+    if args.command == "validate-phase4":
+        try:
+            phase4_output = run_phase4_validation_experiment(
+                args.workspace,
+                league_fixture=args.league_fixture,
+                mode=args.mode,
+            )
+        except (Phase4ValidationError, OSError, ValueError) as error:
+            print(f"Phase 4 validation experiment failed: {error}", file=sys.stderr)
+            return 2
+        print(f"Mode: {phase4_output.mode}")
+        print(f"Dataset: {phase4_output.dataset_version}")
+        print(f"Frozen manifest: {phase4_output.manifest_path}")
+        if phase4_output.report_json_path is not None:
+            print(f"JSON report: {phase4_output.report_json_path}")
+            print(f"Markdown report: {phase4_output.report_markdown_path}")
+            print(f"Selected baseline: {phase4_output.selected_model}")
         return 0
     if args.command == "validate-lock-in-policy":
         try:

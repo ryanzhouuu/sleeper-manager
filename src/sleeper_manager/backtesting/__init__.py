@@ -68,7 +68,12 @@ from sleeper_manager.backtesting.replay_validation import (
     paired_policy_delta,
     summarize_team_weeks,
 )
-from sleeper_manager.backtesting.runner import cohort_comparison, run_backtest
+from sleeper_manager.backtesting.runner import (
+    cohort_comparison,
+    cohort_matches,
+    compare_observation_sets,
+    run_backtest,
+)
 from sleeper_manager.backtesting.validation import (
     BootstrapInterval,
     ChronologicalFold,
@@ -80,6 +85,7 @@ from sleeper_manager.backtesting.validation import (
     PromotionGateConfig,
     SegmentComparison,
     block_bootstrap_mae_delta,
+    cohort_comparison_across_folds,
     evaluate_component_gates,
     evaluate_development_candidate,
     evaluate_promotion,
@@ -111,6 +117,8 @@ __all__ = (
     "ProjectionModel",
     "TargetSkip",
     "cohort_comparison",
+    "cohort_matches",
+    "compare_observation_sets",
     "run_backtest",
     "CohortConfig",
     "CohortRankingError",
@@ -155,6 +163,7 @@ __all__ = (
     "PromotionGateConfig",
     "SegmentComparison",
     "block_bootstrap_mae_delta",
+    "cohort_comparison_across_folds",
     "evaluate_component_gates",
     "evaluate_promotion",
     "evaluate_development_candidate",
