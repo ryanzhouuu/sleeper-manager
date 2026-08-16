@@ -37,6 +37,8 @@ class OpportunityModelConfig:
     production_shrinkage_minutes: float = 120.0
     pace_clip: tuple[float, float] = (0.92, 1.08)
     percentiles: tuple[int, ...] = (10, 25, 50, 75, 90)
+    disable_pace: bool = False
+    disable_defense: bool = False
 
     def __post_init__(self) -> None:
         if not isfinite(self.recency_half_life_days) or self.recency_half_life_days <= 0:
@@ -58,6 +60,8 @@ class OpportunityModelConfig:
             "production_shrinkage_minutes": self.production_shrinkage_minutes,
             "pace_clip": self.pace_clip,
             "percentiles": self.percentiles,
+            "disable_pace": self.disable_pace,
+            "disable_defense": self.disable_defense,
         }
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
         return f"opportunity-v3-{digest}"
@@ -278,10 +282,28 @@ class EnvironmentModel:
         self.config = config
 
     def estimate(self, target: HistoricalFeatureRow) -> tuple[_Estimate, ...]:
-        pace = target.pace_factor or 1.0
-        pace = min(max(pace, self.config.pace_clip[0]), self.config.pace_clip[1])
-        defense = 1.0
-        if (
+        if self.config.disable_pace:
+            pace = 1.0
+            pace_fallback = ProjectionFallback.MISSING
+            pace_message = "Pace ablation is enabled; the pace multiplier is neutralized to 1.0."
+            pace_sample = 0.0
+        else:
+            pace = target.pace_factor or 1.0
+            pace = min(max(pace, self.config.pace_clip[0]), self.config.pace_clip[1])
+            pace_fallback = (
+                ProjectionFallback.OBSERVED
+                if target.pace_factor is not None
+                else ProjectionFallback.MISSING
+            )
+            pace_message = "Scaled opportunity by the continuous relative matchup pace factor."
+            pace_sample = float(target.opponent_sample_size)
+        if self.config.disable_defense:
+            defense = 1.0
+            defense_fallback = ProjectionFallback.MISSING
+            defense_message = (
+                "Defense ablation is enabled; the defense multiplier is neutralized to 1.0."
+            )
+        elif (
             target.opponent_defensive_rating is not None
             and target.league_defensive_rating is not None
             and target.league_defensive_rating > 0
@@ -300,6 +322,7 @@ class EnvironmentModel:
                 f"baseline {target.league_defensive_rating:.2f}."
             )
         else:
+            defense = 1.0
             defense_fallback = ProjectionFallback.MISSING
             defense_message = (
                 "Opponent defense was unavailable or had a non-positive league baseline; "
@@ -317,11 +340,9 @@ class EnvironmentModel:
                 1.0,
                 pace - 1.0,
                 ProjectionAdjustmentKind.MULTIPLICATIVE,
-                float(target.opponent_sample_size),
-                ProjectionFallback.OBSERVED
-                if target.pace_factor is not None
-                else ProjectionFallback.MISSING,
-                "Scaled opportunity by the continuous relative matchup pace factor.",
+                pace_sample,
+                pace_fallback,
+                pace_message,
             ),
             _Estimate(
                 defense,
@@ -490,6 +511,10 @@ class InterpretableOpportunityModel:
         self.environment = EnvironmentModel(self.config)
         self._index: _HistoricalIndex | None = None
 
+    @property
+    def model_version(self) -> str:
+        return self.config.model_version
+
     def _history(self, dataset_version: str, scoring_policy_version: str) -> _HistoricalIndex:
         index = self._index
         if index is None or not index.matches(dataset_version, scoring_policy_version):
@@ -580,6 +605,7 @@ class InterpretableOpportunityModel:
                 player_prior_rows,
                 league_prior_rows,
                 scoring_policy,
+                self.config,
             ),
             scoring_policy_version=scoring_policy.version,
             distribution=distribution,
@@ -678,10 +704,12 @@ def _input_version(
     prior_rows: Sequence[HistoricalFeatureRow],
     league_prior_rows: Sequence[HistoricalFeatureRow],
     scoring_policy: ScoringPolicy,
+    config: OpportunityModelConfig,
 ) -> str:
     payload = {
         "dataset": dataset.dataset_version,
         "feature_schema": dataset.feature_schema_version,
+        "model_config": config.model_version,
         "target": (target.player_id, target.game_id, target.available_as_of.isoformat()),
         "target_environment": (
             target.pace_factor,

@@ -3,12 +3,13 @@ from __future__ import annotations
 import json
 from collections import Counter
 from collections.abc import Iterable, Mapping
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import asdict, dataclass, is_dataclass, replace
 from datetime import UTC, date, datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from sleeper_manager.backtesting.cohorts import CohortConfig
 from sleeper_manager.backtesting.controls import CalibratedProjectionModel, NaiveProjectionBaseline
 from sleeper_manager.backtesting.experiment_data import (
     HistoricalExperimentInputs,
@@ -24,6 +25,7 @@ from sleeper_manager.backtesting.experiment_injuries import (
 )
 from sleeper_manager.backtesting.models import BacktestConfig, BacktestModel, ProjectionModel
 from sleeper_manager.backtesting.validation import (
+    ComponentGateConfig,
     DevelopmentDecision,
     FoldResult,
     PromotionDecision,
@@ -44,6 +46,10 @@ from sleeper_manager.integrations.nba.mapping import normalize_team
 from sleeper_manager.integrations.nba.official_injury_mapping import InjuryMappingDiagnostic
 from sleeper_manager.integrations.nba.official_injury_report import EASTERN_TIME
 from sleeper_manager.projections.direct_baseline import DirectFantasyPointBaseline
+from sleeper_manager.projections.opportunity_model import (
+    InterpretableOpportunityModel,
+    OpportunityModelConfig,
+)
 from sleeper_manager.projections.residual_candidates import (
     CachingProjectionModel,
     ResidualCandidateConfig,
@@ -293,8 +299,7 @@ def _historical_player_ids_by_date_team(
         team.provider_id: normalize_team(team.abbreviation) for team in inputs.teams
     }
     game_dates = {
-        game.provider_id: game.start_time.astimezone(EASTERN_TIME).date()
-        for game in inputs.games
+        game.provider_id: game.start_time.astimezone(EASTERN_TIME).date() for game in inputs.games
     }
     index: dict[tuple[date, str], set[str]] = {}
     for box_score in inputs.player_box_scores:
@@ -780,3 +785,153 @@ def _json_value(value: Any) -> Any:
     if isinstance(value, Enum):
         return value.value
     return value
+
+
+# --- Phase 4 validation closure ---------------------------------------------------------
+#
+# A frozen, interpretable-opportunity-model-centered comparison, separate from the older
+# residual-feature-selection experiment above. That older experiment (and its
+# `frozen-development-manifest.json` / `model-feature-validation-report.json` artifacts) remain
+# available as historical evidence but are not the Phase 4 selection report.
+
+PHASE4_DIRECT_BASELINE = "direct_baseline"
+PHASE4_SEASON_AVERAGE = "season_average"
+PHASE4_LAST_GAME = "last_game"
+PHASE4_OPPORTUNITY_FULL = "opportunity_full"
+PHASE4_OPPORTUNITY_NO_PACE = "opportunity_no_pace"
+PHASE4_OPPORTUNITY_NO_DEFENSE = "opportunity_no_defense"
+PHASE4_RAW_SUITE_NAMES: tuple[str, ...] = (
+    PHASE4_DIRECT_BASELINE,
+    PHASE4_SEASON_AVERAGE,
+    PHASE4_LAST_GAME,
+    PHASE4_OPPORTUNITY_FULL,
+    PHASE4_OPPORTUNITY_NO_PACE,
+    PHASE4_OPPORTUNITY_NO_DEFENSE,
+)
+PHASE4_CALIBRATED_DIRECT = "direct_baseline_calibrated"
+PHASE4_CALIBRATED_OPPORTUNITY = "opportunity_full_calibrated"
+PHASE4_SECONDARY_SUITE_NAMES: tuple[str, ...] = (
+    PHASE4_CALIBRATED_DIRECT,
+    PHASE4_CALIBRATED_OPPORTUNITY,
+)
+PHASE4_SELECTION_COHORT = "top_108"
+PHASE4_MAX_SELECTION_MAE_DELTA = 0.0
+PHASE4_MIN_TOP_180_COVERAGE = 0.98
+PHASE4_INTERVAL_TOLERANCE = 0.05
+
+
+class Phase4ValidationError(RuntimeError):
+    pass
+
+
+def phase4_raw_suite(
+    *, opportunity_config: OpportunityModelConfig | None = None
+) -> tuple[BacktestModel, ...]:
+    """The frozen raw comparison. Names and order are deterministic and never reused for a
+    different candidate roster -- ablations exist to explain the selected model, not to reopen
+    feature search."""
+    base_config = opportunity_config or OpportunityModelConfig()
+    no_pace_config = replace(base_config, disable_pace=True)
+    no_defense_config = replace(base_config, disable_defense=True)
+    return (
+        BacktestModel(PHASE4_DIRECT_BASELINE, DirectFantasyPointBaseline()),
+        BacktestModel(PHASE4_SEASON_AVERAGE, NaiveProjectionBaseline("season_average")),
+        BacktestModel(PHASE4_LAST_GAME, NaiveProjectionBaseline("last_game")),
+        BacktestModel(PHASE4_OPPORTUNITY_FULL, InterpretableOpportunityModel(base_config)),
+        BacktestModel(PHASE4_OPPORTUNITY_NO_PACE, InterpretableOpportunityModel(no_pace_config)),
+        BacktestModel(
+            PHASE4_OPPORTUNITY_NO_DEFENSE, InterpretableOpportunityModel(no_defense_config)
+        ),
+    )
+
+
+def phase4_secondary_calibrated_suite(
+    *, opportunity_config: OpportunityModelConfig | None = None
+) -> tuple[BacktestModel, ...]:
+    """Identically-configured rolling residual-calibrated variants of the direct baseline and
+    the full opportunity model, as secondary diagnostics only. No calibrated ablations -- a
+    calibrated result can never override a failed raw-distribution gate."""
+    base_config = opportunity_config or OpportunityModelConfig()
+    return (
+        BacktestModel(
+            PHASE4_CALIBRATED_DIRECT,
+            CachingProjectionModel(
+                CalibratedProjectionModel(DirectFantasyPointBaseline()), max_entries=4096
+            ),
+        ),
+        BacktestModel(
+            PHASE4_CALIBRATED_OPPORTUNITY,
+            CachingProjectionModel(
+                CalibratedProjectionModel(InterpretableOpportunityModel(base_config)),
+                max_entries=4096,
+            ),
+        ),
+    )
+
+
+def phase4_frozen_manifest(
+    *,
+    dataset: HistoricalFeatureDataset,
+    scoring_policy: ScoringPolicy,
+    cohort_config: CohortConfig,
+    backtest_config: BacktestConfig,
+    component_gate: ComponentGateConfig,
+    raw_suite: tuple[BacktestModel, ...],
+    secondary_suite: tuple[BacktestModel, ...],
+) -> dict[str, Any]:
+    """Freeze candidate, cohort, metric, gate, and index configuration together.
+
+    The dataset/scoring-policy/cohort-config/backtest-config versions and each model's own
+    version already fully determine the deterministic index behavior in
+    `opportunity_model.py` and `cohorts.py` -- no separate free-standing "index config" exists.
+    """
+    return {
+        "manifest_version": "phase4-validation-closure-v1",
+        "dataset_version": dataset.dataset_version,
+        "feature_schema_version": dataset.feature_schema_version,
+        "scoring_policy_version": scoring_policy.version,
+        "cohort_config_version": cohort_config.version,
+        "backtest_config_version": backtest_config.version,
+        "component_gate": {
+            "max_regression_fraction": component_gate.max_regression_fraction,
+            "min_calibration_bin_size": component_gate.min_calibration_bin_size,
+            "calibration_tolerance": component_gate.calibration_tolerance,
+        },
+        "raw_suite": tuple((model.name, _model_version(model)) for model in raw_suite),
+        "secondary_suite": tuple((model.name, _model_version(model)) for model in secondary_suite),
+        "selection_rule": {
+            "reference_model": PHASE4_DIRECT_BASELINE,
+            "candidate_model": PHASE4_OPPORTUNITY_FULL,
+            "selection_cohort": PHASE4_SELECTION_COHORT,
+            "max_mae_delta": PHASE4_MAX_SELECTION_MAE_DELTA,
+            "min_top_180_coverage": PHASE4_MIN_TOP_180_COVERAGE,
+            "interval_tolerance": PHASE4_INTERVAL_TOLERANCE,
+        },
+    }
+
+
+def _model_version(model: BacktestModel) -> str:
+    return str(getattr(model.projector, "model_version", type(model.projector).__name__))
+
+
+def freeze_phase4_manifest(path: Path, manifest: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _write_json(path, manifest)
+
+
+def assert_phase4_manifest_frozen(path: Path, expected: Mapping[str, Any]) -> None:
+    """Refuse locked-retrospective evaluation on a missing or mismatched frozen manifest."""
+    if not path.exists():
+        raise Phase4ValidationError(
+            f"Locked retrospective evaluation requires a frozen manifest at {path!s}, "
+            "but none has been written"
+        )
+    try:
+        actual = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise Phase4ValidationError(f"Frozen Phase 4 manifest at {path!s} is unreadable") from error
+    if actual != _json_value(expected):
+        raise Phase4ValidationError(
+            "Frozen Phase 4 manifest does not match the current source revision and "
+            "configuration; locked retrospective evaluation is refused"
+        )

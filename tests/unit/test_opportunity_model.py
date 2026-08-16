@@ -18,6 +18,7 @@ from sleeper_manager.integrations.nba.historical_features import (
 from sleeper_manager.projections.opportunity_model import (
     EnvironmentModel,
     InterpretableOpportunityModel,
+    OpportunityModelConfig,
     OpportunityModelError,
 )
 
@@ -622,3 +623,86 @@ def test_chronological_regression_in_growing_prefix_raises_explicitly() -> None:
             game_id="g2",
             scoring_policy=policy,
         )
+
+
+def _ablation_fixture() -> tuple[HistoricalFeatureDataset, ScoringPolicy]:
+    prior = row("game-1", NOW - timedelta(days=3), did_play=True, minutes=30, points=20)
+    target = row(
+        "target",
+        NOW,
+        did_play=False,
+        minutes=None,
+        points=0,
+        pace_factor=1.05,
+        opponent_defensive_rating=95,
+        league_defensive_rating=100,
+    )
+    return HistoricalFeatureDataset("fixture", "3", NOW, (), (prior, target)), ScoringPolicy(
+        points=1
+    )
+
+
+def test_pace_ablation_neutralizes_only_the_pace_component() -> None:
+    dataset, policy = _ablation_fixture()
+
+    full = InterpretableOpportunityModel().project(
+        dataset, player_id="player-1", game_id="target", scoring_policy=policy
+    )
+    no_pace = InterpretableOpportunityModel(OpportunityModelConfig(disable_pace=True)).project(
+        dataset, player_id="player-1", game_id="target", scoring_policy=policy
+    )
+
+    full_components = {component.code: component for component in full.components}
+    no_pace_components = {component.code: component for component in no_pace.components}
+
+    assert full_components["pace"].estimate != 1.0
+    assert no_pace_components["pace"].estimate == 1.0
+    assert no_pace_components["pace"].adjustment == 0.0
+    for code in (
+        "opponent_defense",
+        "rest",
+        "travel",
+        "availability",
+        "minutes",
+        "production_rate",
+    ):
+        assert full_components[code] == no_pace_components[code]
+
+
+def test_defense_ablation_neutralizes_only_the_defense_component() -> None:
+    dataset, policy = _ablation_fixture()
+
+    full = InterpretableOpportunityModel().project(
+        dataset, player_id="player-1", game_id="target", scoring_policy=policy
+    )
+    no_defense = InterpretableOpportunityModel(
+        OpportunityModelConfig(disable_defense=True)
+    ).project(dataset, player_id="player-1", game_id="target", scoring_policy=policy)
+
+    full_components = {component.code: component for component in full.components}
+    no_defense_components = {component.code: component for component in no_defense.components}
+
+    assert full_components["opponent_defense"].estimate != 1.0
+    assert no_defense_components["opponent_defense"].estimate == 1.0
+    assert no_defense_components["opponent_defense"].adjustment == 0.0
+    for code in ("pace", "rest", "travel", "availability", "minutes", "production_rate"):
+        assert full_components[code] == no_defense_components[code]
+
+
+def test_ablation_semantics_change_model_and_input_version() -> None:
+    dataset, policy = _ablation_fixture()
+
+    full = InterpretableOpportunityModel().project(
+        dataset, player_id="player-1", game_id="target", scoring_policy=policy
+    )
+    no_pace = InterpretableOpportunityModel(OpportunityModelConfig(disable_pace=True)).project(
+        dataset, player_id="player-1", game_id="target", scoring_policy=policy
+    )
+    no_defense = InterpretableOpportunityModel(
+        OpportunityModelConfig(disable_defense=True)
+    ).project(dataset, player_id="player-1", game_id="target", scoring_policy=policy)
+
+    model_versions = {full.model_version, no_pace.model_version, no_defense.model_version}
+    input_versions = {full.input_version, no_pace.input_version, no_defense.input_version}
+    assert len(model_versions) == 3
+    assert len(input_versions) == 3
