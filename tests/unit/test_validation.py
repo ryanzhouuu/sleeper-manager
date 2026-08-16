@@ -1,10 +1,14 @@
 from datetime import UTC, datetime, timedelta
 
 from sleeper_manager.backtesting import (
+    BacktestMetrics,
     BacktestModel,
     ChronologicalFold,
+    CohortDiagnostics,
+    ParticipationCalibrationBin,
     PromotionGateConfig,
     block_bootstrap_mae_delta,
+    evaluate_component_gates,
     evaluate_development_candidate,
     evaluate_promotion,
     regular_season_folds,
@@ -219,3 +223,78 @@ def test_opponent_identity_cannot_be_promoted() -> None:
 
     assert decision.recommendation == "retain_experimental"
     assert not decision.gates[-1].passed
+
+
+def _cohort_diagnostics(
+    *,
+    minutes_mae: float | None = 1.0,
+    control_minutes_mae: float | None = 1.0,
+    rate_mae: float | None = 1.0,
+    control_rate_mae: float | None = 1.0,
+    participation_brier: float | None = 0.1,
+    control_participation_brier: float | None = 0.1,
+    participation_calibration: tuple[ParticipationCalibrationBin, ...] = (),
+) -> CohortDiagnostics:
+    empty_metrics = BacktestMetrics(
+        target_count=0,
+        sample_count=0,
+        coverage=0.0,
+        mae=None,
+        rmse=None,
+        median_absolute_error=None,
+        intervals=(),
+        brier_scores=(),
+    )
+    return CohortDiagnostics(
+        cohort="top_180",
+        target_count=0,
+        successful_count=0,
+        coverage=0.0,
+        skip_reasons={},
+        full_mixture=empty_metrics,
+        participation_brier=participation_brier,
+        participation_sample_count=0,
+        participation_calibration=participation_calibration,
+        minutes_mae=minutes_mae,
+        minutes_rmse=None,
+        minutes_sample_count=0,
+        rate_mae=rate_mae,
+        rate_rmse=None,
+        rate_sample_count=0,
+        control_participation_brier=control_participation_brier,
+        control_minutes_mae=control_minutes_mae,
+        control_rate_mae=control_rate_mae,
+    )
+
+
+def test_component_gate_passes_within_frozen_two_percent_regression() -> None:
+    diagnostics = _cohort_diagnostics(minutes_mae=1.015, control_minutes_mae=1.0)
+    gates = {gate.name: gate for gate in evaluate_component_gates(diagnostics)}
+    assert gates["minutes_non_regression"].passed
+
+
+def test_component_gate_fails_beyond_frozen_two_percent_regression() -> None:
+    diagnostics = _cohort_diagnostics(minutes_mae=1.05, control_minutes_mae=1.0)
+    gates = {gate.name: gate for gate in evaluate_component_gates(diagnostics)}
+    assert not gates["minutes_non_regression"].passed
+
+
+def test_component_gate_hard_fails_on_missing_or_non_finite_candidate_output() -> None:
+    diagnostics = _cohort_diagnostics(minutes_mae=None, control_minutes_mae=1.0)
+    gates = {gate.name: gate for gate in evaluate_component_gates(diagnostics)}
+    assert not gates["minutes_non_regression"].passed
+    assert not gates["component_output_present"].passed
+
+
+def test_participation_calibration_ignores_undersized_bins() -> None:
+    undersized_and_miscalibrated = ParticipationCalibrationBin(0.8, 0.9, 50, 0.85, 0.10)
+    diagnostics = _cohort_diagnostics(participation_calibration=(undersized_and_miscalibrated,))
+    gates = {gate.name: gate for gate in evaluate_component_gates(diagnostics)}
+    assert gates["participation_calibration"].passed
+
+
+def test_participation_calibration_enforces_qualifying_bins() -> None:
+    qualifying_and_miscalibrated = ParticipationCalibrationBin(0.8, 0.9, 150, 0.85, 0.10)
+    diagnostics = _cohort_diagnostics(participation_calibration=(qualifying_and_miscalibrated,))
+    gates = {gate.name: gate for gate in evaluate_component_gates(diagnostics)}
+    assert not gates["participation_calibration"].passed

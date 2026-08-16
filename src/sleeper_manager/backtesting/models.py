@@ -112,6 +112,19 @@ class PredictedComponentDiagnostic:
 
 
 @dataclass(frozen=True, slots=True)
+class ComponentControlEstimate:
+    """A frozen, prior-only, candidate-independent estimate of the same three components.
+
+    Built purely from a player's own realized history before the decision timestamp -- never
+    from any candidate model's output. Any component with no prior evidence is ``None``.
+    """
+
+    participation: float | None
+    minutes: float | None
+    rate: float | None
+
+
+@dataclass(frozen=True, slots=True)
 class BacktestObservation:
     player_id: str
     game_id: str
@@ -131,6 +144,7 @@ class BacktestObservation:
     predicted_component: PredictedComponentDiagnostic = PredictedComponentDiagnostic(
         None, None, None
     )
+    component_control: ComponentControlEstimate = ComponentControlEstimate(None, None, None)
 
     @property
     def absolute_error(self) -> float:
@@ -187,12 +201,58 @@ class BacktestMetrics:
     brier_scores: tuple[tuple[float, float | None], ...]
 
 
+COHORT_NAMES: tuple[str, ...] = ("top_108", "ranks_109_180", "top_180", "below_180")
+
+
+@dataclass(frozen=True, slots=True)
+class ParticipationCalibrationBin:
+    lower: float
+    upper: float
+    observation_count: int
+    predicted_mean: float | None
+    observed_frequency: float | None
+
+    @property
+    def qualifies(self) -> bool:
+        return self.observation_count >= 100
+
+
+@dataclass(frozen=True, slots=True)
+class CohortDiagnostics:
+    """One report cohort's full diagnostic slate for a single model.
+
+    ``target_count`` and ``skip_reasons`` reflect this cohort's pre-skip denominator -- every
+    eligible target assigned to this cohort, regardless of whether this particular model
+    produced a successful observation for it.
+    """
+
+    cohort: str
+    target_count: int
+    successful_count: int
+    coverage: float
+    skip_reasons: dict[str, int]
+    full_mixture: BacktestMetrics
+    participation_brier: float | None
+    participation_sample_count: int
+    participation_calibration: tuple[ParticipationCalibrationBin, ...]
+    minutes_mae: float | None
+    minutes_rmse: float | None
+    minutes_sample_count: int
+    rate_mae: float | None
+    rate_rmse: float | None
+    rate_sample_count: int
+    control_participation_brier: float | None
+    control_minutes_mae: float | None
+    control_rate_mae: float | None
+
+
 @dataclass(frozen=True, slots=True)
 class BacktestModelResult:
     model: BacktestModel
     observations: tuple[BacktestObservation, ...]
     skips: tuple[BacktestSkip, ...]
     metrics: BacktestMetrics
+    cohort_diagnostics: tuple[CohortDiagnostics, ...]
 
 
 @dataclass(frozen=True, slots=True)

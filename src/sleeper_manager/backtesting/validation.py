@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from math import sqrt
+from math import isfinite, sqrt
 from random import Random
 
 from sleeper_manager.backtesting.models import (
@@ -12,6 +12,8 @@ from sleeper_manager.backtesting.models import (
     BacktestModel,
     BacktestObservation,
     BacktestReport,
+    CohortDiagnostics,
+    ParticipationCalibrationBin,
 )
 from sleeper_manager.backtesting.runner import run_backtest
 from sleeper_manager.domain.scoring import ScoringPolicy
@@ -83,6 +85,87 @@ class GateResult:
     name: str
     passed: bool
     evidence: str
+
+
+@dataclass(frozen=True, slots=True)
+class ComponentGateConfig:
+    max_regression_fraction: float = 0.02
+    min_calibration_bin_size: int = 100
+    calibration_tolerance: float = 0.05
+
+
+def evaluate_component_gates(
+    diagnostics: CohortDiagnostics,
+    *,
+    config: ComponentGateConfig | None = None,
+) -> tuple[GateResult, ...]:
+    """Gate one cohort's component decomposition against its frozen prior-only control.
+
+    A missing or non-finite candidate component is a hard failure, independent of the
+    regression comparison -- it is never imputed or silently skipped.
+    """
+    gate = config or ComponentGateConfig()
+    return (
+        GateResult(
+            "component_output_present",
+            diagnostics.minutes_mae is not None
+            and diagnostics.rate_mae is not None
+            and diagnostics.participation_brier is not None,
+            f"minutes={diagnostics.minutes_mae}; rate={diagnostics.rate_mae}; "
+            f"participation={diagnostics.participation_brier}",
+        ),
+        _component_non_regression_gate(
+            "minutes_non_regression", diagnostics.minutes_mae, diagnostics.control_minutes_mae, gate
+        ),
+        _component_non_regression_gate(
+            "rate_non_regression", diagnostics.rate_mae, diagnostics.control_rate_mae, gate
+        ),
+        _participation_calibration_gate(diagnostics.participation_calibration, gate),
+    )
+
+
+def _component_non_regression_gate(
+    name: str,
+    candidate_mae: float | None,
+    control_mae: float | None,
+    gate: ComponentGateConfig,
+) -> GateResult:
+    if candidate_mae is None or not isfinite(candidate_mae):
+        return GateResult(name, False, "candidate component output is missing or non-finite")
+    if control_mae is None or not isfinite(control_mae):
+        return GateResult(name, False, "control component output is missing or non-finite")
+    passed = (
+        candidate_mae == 0
+        if control_mae == 0
+        else (candidate_mae - control_mae) / control_mae <= gate.max_regression_fraction
+    )
+    return GateResult(name, passed, f"candidate={candidate_mae}; control={control_mae}")
+
+
+def _participation_calibration_gate(
+    bins: Sequence[ParticipationCalibrationBin], gate: ComponentGateConfig
+) -> GateResult:
+    qualifying = tuple(
+        bin_ for bin_ in bins if bin_.observation_count >= gate.min_calibration_bin_size
+    )
+    if not qualifying:
+        return GateResult(
+            "participation_calibration",
+            True,
+            "no bin reached the minimum observation count; gate is vacuously satisfied",
+        )
+    failures = tuple(
+        bin_
+        for bin_ in qualifying
+        if bin_.observed_frequency is None
+        or bin_.predicted_mean is None
+        or abs(bin_.observed_frequency - bin_.predicted_mean) > gate.calibration_tolerance
+    )
+    return GateResult(
+        "participation_calibration",
+        not failures,
+        f"qualifying_bins={len(qualifying)}; failures={len(failures)}",
+    )
 
 
 @dataclass(frozen=True, slots=True)

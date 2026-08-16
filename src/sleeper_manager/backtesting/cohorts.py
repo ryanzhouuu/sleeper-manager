@@ -146,6 +146,13 @@ class IndependentCohortRanker:
             self._cache[as_of] = dict(ranks)
         return ranks
 
+    def prior_rows(self, player_id: str) -> tuple[HistoricalFeatureRow, ...]:
+        """This player's rows strictly before the most recently ranked timestamp.
+
+        Reuses the same incrementally accumulated index used for ranking, at no extra cost.
+        """
+        return tuple(self._by_player.get(player_id, ()))
+
     def _rebuild(
         self, rows: Sequence[HistoricalFeatureRow], version_key: tuple[str, str, str]
     ) -> None:
