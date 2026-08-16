@@ -24,12 +24,13 @@ def row(
     minutes: float | None,
     points: int,
     pace_factor: float | None = None,
+    player_id: str = "player-1",
 ) -> HistoricalFeatureRow:
     return HistoricalFeatureRow(
         dataset_version="fixture",
         available_as_of=game_start - timedelta(minutes=30),
-        player_id="player-1",
-        sleeper_id="sleeper-1",
+        player_id=player_id,
+        sleeper_id=player_id,
         game_id=game_id,
         game_start=game_start,
         team_id="team-1",
@@ -111,3 +112,173 @@ def test_missing_history_uses_explicit_fallback_and_zero_outcome() -> None:
     assert snapshot.distribution.expected_value == 0
     assert snapshot.distribution.weighted_observations == ((0.0, 1.0),)
     assert snapshot.components[1].fallback is ProjectionFallback.LEAGUE_AVERAGE
+
+
+def test_sparse_high_rate_player_shrinks_toward_lower_independent_league_rate() -> None:
+    prior = row("player-prior", NOW - timedelta(days=1), did_play=True, minutes=30, points=30)
+    league = row(
+        "league-prior",
+        NOW - timedelta(days=1),
+        did_play=True,
+        minutes=30,
+        points=15,
+        player_id="player-2",
+    )
+    target = row("target", NOW, did_play=False, minutes=None, points=0)
+
+    snapshot = InterpretableOpportunityModel().project(
+        HistoricalFeatureDataset("fixture", "4", NOW, (), (prior, league, target)),
+        player_id="player-1",
+        game_id="target",
+        scoring_policy=ScoringPolicy(points=1),
+    )
+
+    component = next(
+        component for component in snapshot.components if component.code == "production_rate"
+    )
+    assert component.baseline == pytest.approx(1.0)
+    shrinkage = component.effective_sample / (component.effective_sample + 120)
+    assert component.estimate == pytest.approx(shrinkage + 0.5 * (1 - shrinkage))
+    assert 0.5 < component.estimate < component.baseline
+    assert component.adjustment == pytest.approx(component.estimate - component.baseline)
+    assert component.fallback is ProjectionFallback.SHRUNK
+    assert "independent league" in component.message
+
+
+def test_sparse_low_rate_player_shrinks_toward_higher_independent_league_rate() -> None:
+    prior = row("player-prior", NOW - timedelta(days=1), did_play=True, minutes=30, points=15)
+    league = row(
+        "league-prior",
+        NOW - timedelta(days=1),
+        did_play=True,
+        minutes=30,
+        points=30,
+        player_id="player-2",
+    )
+    target = row("target", NOW, did_play=False, minutes=None, points=0)
+
+    snapshot = InterpretableOpportunityModel().project(
+        HistoricalFeatureDataset("fixture", "4", NOW, (), (prior, league, target)),
+        player_id="player-1",
+        game_id="target",
+        scoring_policy=ScoringPolicy(points=1),
+    )
+
+    component = next(
+        component for component in snapshot.components if component.code == "production_rate"
+    )
+    assert component.baseline == pytest.approx(0.5)
+    shrinkage = component.effective_sample / (component.effective_sample + 120)
+    assert component.estimate == pytest.approx(0.5 * shrinkage + 1.0 * (1 - shrinkage))
+    assert component.estimate > component.baseline
+
+
+def test_more_player_minutes_reduce_production_shrinkage() -> None:
+    league = row(
+        "league-prior",
+        NOW - timedelta(days=1),
+        did_play=True,
+        minutes=30,
+        points=15,
+        player_id="player-2",
+    )
+    target = row("target", NOW, did_play=False, minutes=None, points=0)
+
+    def estimate(minutes: float, game_id: str) -> float:
+        prior = row(
+            game_id,
+            NOW - timedelta(days=2),
+            did_play=True,
+            minutes=minutes,
+            points=int(minutes),
+        )
+        snapshot = InterpretableOpportunityModel().project(
+            HistoricalFeatureDataset("fixture", "4", NOW, (), (prior, league, target)),
+            player_id="player-1",
+            game_id="target",
+            scoring_policy=ScoringPolicy(points=1),
+        )
+        return next(
+            component.estimate
+            for component in snapshot.components
+            if component.code == "production_rate"
+        )
+
+    low_minutes = estimate(20, "low-minutes")
+    high_minutes = estimate(120, "high-minutes")
+    assert abs(high_minutes - 1.0) < abs(low_minutes - 1.0)
+
+
+def test_prior_league_outcome_changes_projection_and_input_version_but_future_does_not() -> None:
+    player_prior = row(
+        "player-prior", NOW - timedelta(days=2), did_play=True, minutes=30, points=20
+    )
+    other_prior = row(
+        "other-prior",
+        NOW - timedelta(days=2),
+        did_play=True,
+        minutes=30,
+        points=10,
+        player_id="player-2",
+    )
+    target = row("target", NOW, did_play=False, minutes=None, points=0)
+
+    def project(other_rows: tuple[HistoricalFeatureRow, ...], *, future_points: int = 100):
+        future = row(
+            "other-future",
+            NOW + timedelta(days=1),
+            did_play=True,
+            minutes=30,
+            points=future_points,
+            player_id="player-2",
+        )
+        return InterpretableOpportunityModel().project(
+            HistoricalFeatureDataset(
+                "fixture", "4", NOW, (), (player_prior, *other_rows, target, future)
+            ),
+            player_id="player-1",
+            game_id="target",
+            scoring_policy=ScoringPolicy(points=1),
+        )
+
+    baseline = project((other_prior,))
+    changed_prior = project(
+        (
+            row(
+                "other-prior",
+                NOW - timedelta(days=2),
+                did_play=True,
+                minutes=30,
+                points=30,
+                player_id="player-2",
+            ),
+        )
+    )
+    changed_future = project((other_prior,), future_points=5)
+
+    baseline_component = next(
+        component for component in baseline.components if component.code == "production_rate"
+    )
+    changed_component = next(
+        component for component in changed_prior.components if component.code == "production_rate"
+    )
+    assert changed_component.estimate != baseline_component.estimate
+    assert changed_prior.input_version != baseline.input_version
+    assert changed_future.input_version == baseline.input_version
+
+
+def test_no_league_prior_keeps_player_rate_without_claiming_shrinkage() -> None:
+    prior = row("player-prior", NOW - timedelta(days=1), did_play=True, minutes=30, points=30)
+    target = row("target", NOW, did_play=False, minutes=None, points=0)
+    model = InterpretableOpportunityModel()
+
+    estimate = model.production_rate.estimate(
+        target,
+        (prior,),
+        ScoringPolicy(points=1),
+        league_prior_rows=(),
+    )
+
+    assert estimate.value == pytest.approx(1.0)
+    assert estimate.fallback is ProjectionFallback.MISSING
+    assert "without shrinkage" in estimate.message

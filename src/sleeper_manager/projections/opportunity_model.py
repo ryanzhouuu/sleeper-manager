@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
+from dataclasses import astuple, dataclass
 from math import exp, isfinite, log
 
 from sleeper_manager.domain.nba import AvailabilityStatus
@@ -57,7 +57,7 @@ class OpportunityModelConfig:
             "percentiles": self.percentiles,
         }
         digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
-        return f"opportunity-v1-{digest}"
+        return f"opportunity-v2-{digest}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,6 +177,8 @@ class ProductionRateModel:
         target: HistoricalFeatureRow,
         prior_rows: Sequence[HistoricalFeatureRow],
         scoring_policy: ScoringPolicy,
+        *,
+        league_prior_rows: Sequence[HistoricalFeatureRow] = (),
     ) -> _Estimate:
         observations = tuple(
             (row, weight)
@@ -195,41 +197,76 @@ class ProductionRateModel:
                 ProjectionFallback.LEAGUE_AVERAGE,
                 "No conditional production history was available; used a zero-rate fallback.",
             )
-        rates = tuple(
-            (
-                calculate_fantasy_points(row.target_box_score, scoring_policy)
-                / (row.target_minutes or 1.0),
-                weight * (row.target_minutes or 1.0),
-            )
-            for row, weight in observations
-        )
+        rates = _production_rates(observations, scoring_policy)
         player_rate = _weighted_mean(rates)
-        prior_rate = _weighted_mean(
-            (
-                calculate_fantasy_points(row.target_box_score, scoring_policy)
-                / (row.target_minutes or 1.0),
-                weight * (row.target_minutes or 1.0),
-            )
+        effective_minutes = sum(weight for _, weight in rates)
+        independent_prior_rows = tuple(
+            row for row in league_prior_rows if row.player_id != target.player_id
+        )
+        independent_observations = tuple(
+            (row, weight)
             for row, weight in _weighted_rows(
-                target, prior_rows, self.config.recency_half_life_days
+                target, independent_prior_rows, self.config.recency_half_life_days
             )
             if row.target_did_play and row.target_minutes is not None and row.target_minutes > 0
         )
-        effective_minutes = sum(weight for _, weight in rates)
+        if independent_observations:
+            league_rate = _weighted_mean(
+                _production_rates(independent_observations, scoring_policy)
+            )
+            prior_source = "independent league prior"
+        else:
+            shared_observations = tuple(
+                (row, weight)
+                for row, weight in _weighted_rows(
+                    target, league_prior_rows, self.config.recency_half_life_days
+                )
+                if row.target_did_play and row.target_minutes is not None and row.target_minutes > 0
+            )
+            if shared_observations:
+                league_rate = _weighted_mean(_production_rates(shared_observations, scoring_policy))
+                prior_source = "shared player-history fallback"
+            else:
+                return _Estimate(
+                    value=player_rate,
+                    baseline=player_rate,
+                    adjustment=0.0,
+                    kind=ProjectionAdjustmentKind.ADDITIVE,
+                    effective_sample=effective_minutes,
+                    fallback=ProjectionFallback.MISSING,
+                    message=(
+                        "No league production prior was available; retained the player-only "
+                        "rate without shrinkage."
+                    ),
+                )
         shrinkage = effective_minutes / (
             effective_minutes + self.config.production_shrinkage_minutes
         )
-        estimate = player_rate * shrinkage + prior_rate * (1 - shrinkage)
+        estimate = player_rate * shrinkage + league_rate * (1 - shrinkage)
+        if prior_source == "shared player-history fallback":
+            fallback = ProjectionFallback.OBSERVED
+            message = (
+                "No independent player evidence was available for the league prior; used a "
+                f"shared player-history fallback with {effective_minutes:.1f} weighted minutes."
+            )
+        else:
+            fallback = (
+                ProjectionFallback.OBSERVED
+                if effective_minutes >= 120
+                else ProjectionFallback.SHRUNK
+            )
+            message = (
+                f"Applied an independent league FPPM prior with {effective_minutes:.1f} "
+                f"weighted player minutes and {shrinkage:.1%} player weight."
+            )
         return _Estimate(
             value=estimate,
             baseline=player_rate,
             adjustment=estimate - player_rate,
             kind=ProjectionAdjustmentKind.ADDITIVE,
             effective_sample=effective_minutes,
-            fallback=ProjectionFallback.OBSERVED
-            if effective_minutes >= 120
-            else ProjectionFallback.SHRUNK,
-            message=f"Shrank the conditional rate using {effective_minutes:.1f} weighted minutes.",
+            fallback=fallback,
+            message=message,
         )
 
 
@@ -315,14 +352,27 @@ class InterpretableOpportunityModel:
         exceed_score: float | None = None,
     ) -> ProjectionSnapshot:
         target = _find_target(dataset.rows, player_id, game_id)
-        prior_rows = tuple(
+        player_prior_rows = tuple(
             row
             for row in dataset.rows
             if row.player_id == player_id and row.game_start < target.game_start
         )
-        availability = self.availability.estimate(target, prior_rows)
-        minutes = self.minutes.estimate(target, prior_rows)
-        rate = self.production_rate.estimate(target, prior_rows, scoring_policy)
+        league_prior_rows = tuple(
+            row
+            for row in dataset.rows
+            if row.game_start < target.game_start
+            and row.target_did_play
+            and row.target_minutes is not None
+            and row.target_minutes > 0
+        )
+        availability = self.availability.estimate(target, player_prior_rows)
+        minutes = self.minutes.estimate(target, player_prior_rows)
+        rate = self.production_rate.estimate(
+            target,
+            player_prior_rows,
+            scoring_policy,
+            league_prior_rows=league_prior_rows,
+        )
         environments = self.environment.estimate(target)
         environment_multiplier = 1.0
         for environment in environments:
@@ -330,7 +380,7 @@ class InterpretableOpportunityModel:
         conditional_expected = minutes.value * rate.value * environment_multiplier
         conditional_observations = _conditional_observations(
             target,
-            prior_rows,
+            player_prior_rows,
             scoring_policy,
             conditional_expected,
             self.config,
@@ -379,7 +429,13 @@ class InterpretableOpportunityModel:
             game_id=game_id,
             available_as_of=target.available_as_of,
             model_version=self.config.model_version,
-            input_version=_input_version(dataset, target, prior_rows, scoring_policy),
+            input_version=_input_version(
+                dataset,
+                target,
+                player_prior_rows,
+                league_prior_rows,
+                scoring_policy,
+            ),
             scoring_policy_version=scoring_policy.version,
             distribution=distribution,
             reasons=reasons,
@@ -424,6 +480,20 @@ def _weighted_mean(values: Iterable[tuple[float, float]]) -> float:
     return sum(value * weight for value, weight in records) / total_weight
 
 
+def _production_rates(
+    observations: Sequence[tuple[HistoricalFeatureRow, float]],
+    scoring_policy: ScoringPolicy,
+) -> tuple[tuple[float, float], ...]:
+    return tuple(
+        (
+            calculate_fantasy_points(row.target_box_score, scoring_policy)
+            / (row.target_minutes or 1.0),
+            weight * (row.target_minutes or 1.0),
+        )
+        for row, weight in observations
+    )
+
+
 def _conditional_observations(
     target: HistoricalFeatureRow,
     rows: Sequence[HistoricalFeatureRow],
@@ -463,18 +533,29 @@ def _input_version(
     dataset: HistoricalFeatureDataset,
     target: HistoricalFeatureRow,
     prior_rows: Sequence[HistoricalFeatureRow],
+    league_prior_rows: Sequence[HistoricalFeatureRow],
     scoring_policy: ScoringPolicy,
 ) -> str:
     payload = {
         "dataset": dataset.dataset_version,
         "feature_schema": dataset.feature_schema_version,
         "target": (target.player_id, target.game_id, target.available_as_of.isoformat()),
-        "prior": tuple(
-            (row.player_id, row.game_id, row.game_start.isoformat()) for row in prior_rows
-        ),
+        "player_prior": tuple(_input_row(row) for row in prior_rows),
+        "league_prior": tuple(_input_row(row) for row in league_prior_rows),
         "scoring": scoring_policy.version,
     }
     return "inputs-" + hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
+
+
+def _input_row(row: HistoricalFeatureRow) -> tuple[object, ...]:
+    return (
+        row.player_id,
+        row.game_id,
+        row.game_start.isoformat(),
+        row.target_did_play,
+        row.target_minutes,
+        astuple(row.target_box_score),
+    )
 
 
 __all__ = (
