@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from bisect import bisect_left
-from collections.abc import Iterable, Iterator, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime
 from itertools import islice
@@ -9,6 +9,11 @@ from math import sqrt
 from statistics import median
 from typing import overload
 
+from sleeper_manager.backtesting.cohorts import (
+    CohortConfig,
+    IndependentCohortRanker,
+    cohort_for_rank,
+)
 from sleeper_manager.backtesting.models import (
     BacktestComparison,
     BacktestConfig,
@@ -19,16 +24,22 @@ from sleeper_manager.backtesting.models import (
     BacktestObservation,
     BacktestReport,
     BacktestSkip,
+    CohortAssignment,
     IntervalMetric,
+    PredictedComponentDiagnostic,
     TargetSkip,
     model_names,
 )
-from sleeper_manager.domain.projection import ProjectionSnapshot
+from sleeper_manager.domain.projection import ProjectionComponent, ProjectionSnapshot
 from sleeper_manager.domain.scoring import BoxScoreLine, ScoringPolicy, calculate_fantasy_points
 from sleeper_manager.integrations.nba.historical_features import (
     HistoricalFeatureDataset,
     HistoricalFeatureRow,
 )
+
+_PARTICIPATION_COMPONENT_CODE = "availability"
+_MINUTES_COMPONENT_CODE = "minutes"
+_RATE_COMPONENT_CODE = "production_rate"
 
 
 def run_backtest(
@@ -38,6 +49,7 @@ def run_backtest(
     models: Iterable[BacktestModel],
     config: BacktestConfig | None = None,
     reference_model: str | None = None,
+    cohort_config: CohortConfig | None = None,
 ) -> BacktestReport:
     config = config or BacktestConfig()
     model_records = tuple(models)
@@ -57,8 +69,29 @@ def run_backtest(
         model.name: [] for model in model_records
     }
     skips_by_model: dict[str, list[BacktestSkip]] = {model.name: [] for model in model_records}
+    batch_player_ids: dict[datetime, list[str]] = {}
+    for target in targets:
+        batch_player_ids.setdefault(target.game_start, []).append(target.player_id)
+    ranker = IndependentCohortRanker(cohort_config)
+    current_batch_game_start: datetime | None = None
+    current_rank_map: dict[str, int] = {}
 
     for target in targets:
+        if target.game_start != current_batch_game_start:
+            current_rank_map = ranker.rank_players_as_of(
+                chronological_rows,
+                target.game_start,
+                scoring_policy=scoring_policy,
+                dataset_version=dataset.dataset_version,
+                player_ids=batch_player_ids[target.game_start],
+            )
+            current_batch_game_start = target.game_start
+        rank = current_rank_map.get(target.player_id)
+        if rank is None:
+            raise BacktestError(
+                f"Target player {target.player_id!r} at {target.game_start!r} has no cohort rank"
+            )
+        cohort = CohortAssignment(rank=rank, tier=cohort_for_rank(rank), top_180=rank <= 180)
         point_in_time_dataset = _point_in_time_dataset(
             dataset,
             chronological_rows,
@@ -66,6 +99,13 @@ def run_backtest(
             target,
         )
         actual_score = calculate_fantasy_points(target.target_box_score, scoring_policy)
+        realized_participation = target.target_did_play
+        realized_minutes = target.target_minutes if target.target_did_play else None
+        realized_rate = (
+            actual_score / target.target_minutes
+            if target.target_did_play and target.target_minutes
+            else None
+        )
         for model in model_records:
             try:
                 snapshot = model.projector.project(
@@ -82,6 +122,7 @@ def run_backtest(
                         game_id=target.game_id,
                         game_start=target.game_start,
                         reason=_error_reason(error),
+                        cohort=cohort,
                     )
                 )
                 continue
@@ -104,6 +145,12 @@ def run_backtest(
                         )
                         for threshold in config.thresholds
                     ),
+                    cohort=cohort,
+                    realized_participation=realized_participation,
+                    realized_minutes=realized_minutes,
+                    realized_rate=realized_rate,
+                    components=snapshot.components,
+                    predicted_component=_predicted_component(snapshot.components),
                 )
             )
 
@@ -140,6 +187,36 @@ def run_backtest(
         model_results=results,
         comparisons=comparisons,
     )
+
+
+def _predicted_component(
+    components: tuple[ProjectionComponent, ...],
+) -> PredictedComponentDiagnostic:
+    by_code = {component.code: component for component in components}
+    missing: list[str] = []
+    participation = _component_value(
+        by_code, _PARTICIPATION_COMPONENT_CODE, missing, "missing_availability_component"
+    )
+    minutes = _component_value(
+        by_code, _MINUTES_COMPONENT_CODE, missing, "missing_minutes_component"
+    )
+    rate = _component_value(
+        by_code, _RATE_COMPONENT_CODE, missing, "missing_production_rate_component"
+    )
+    return PredictedComponentDiagnostic(participation, minutes, rate, tuple(missing))
+
+
+def _component_value(
+    by_code: Mapping[str, ProjectionComponent],
+    code: str,
+    missing: list[str],
+    reason: str,
+) -> float | None:
+    component = by_code.get(code)
+    if component is None:
+        missing.append(reason)
+        return None
+    return component.estimate
 
 
 def _validate_dataset(dataset: HistoricalFeatureDataset) -> None:

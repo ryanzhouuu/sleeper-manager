@@ -8,9 +8,11 @@ from datetime import datetime
 from math import isfinite
 from typing import Protocol
 
-from sleeper_manager.domain.projection import ProjectionSnapshot
+from sleeper_manager.domain.projection import ProjectionComponent, ProjectionSnapshot
 from sleeper_manager.domain.scoring import ScoringPolicy
 from sleeper_manager.integrations.nba.historical_features import HistoricalFeatureDataset
+
+_EXCLUSIVE_TIERS = frozenset({"top_108", "ranks_109_180", "below_180"})
 
 
 class BacktestError(ValueError):
@@ -79,6 +81,37 @@ class BacktestConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class CohortAssignment:
+    """The frozen, model-independent cohort membership for one target player-game."""
+
+    rank: int
+    tier: str
+    top_180: bool
+
+    def __post_init__(self) -> None:
+        if self.rank <= 0:
+            raise BacktestError("Cohort rank must be positive")
+        if self.tier not in _EXCLUSIVE_TIERS:
+            raise BacktestError(f"Unknown cohort tier: {self.tier!r}")
+        if self.top_180 != (self.rank <= 180):
+            raise BacktestError("Cohort top_180 flag must match rank <= 180")
+
+
+@dataclass(frozen=True, slots=True)
+class PredictedComponentDiagnostic:
+    """A model's own predicted participation, conditional minutes, and conditional rate.
+
+    Any component a model does not expose is ``None`` with an explicit reason recorded in
+    ``missing_reasons`` -- never imputed.
+    """
+
+    participation: float | None
+    minutes: float | None
+    rate: float | None
+    missing_reasons: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class BacktestObservation:
     player_id: str
     game_id: str
@@ -90,6 +123,14 @@ class BacktestObservation:
     expected_value: float
     percentiles: tuple[tuple[int, float], ...]
     exceedance_probabilities: tuple[tuple[float, float], ...]
+    cohort: CohortAssignment
+    realized_participation: bool = False
+    realized_minutes: float | None = None
+    realized_rate: float | None = None
+    components: tuple[ProjectionComponent, ...] = ()
+    predicted_component: PredictedComponentDiagnostic = PredictedComponentDiagnostic(
+        None, None, None
+    )
 
     @property
     def absolute_error(self) -> float:
@@ -122,6 +163,7 @@ class BacktestSkip:
     game_id: str
     game_start: datetime
     reason: str
+    cohort: CohortAssignment
 
 
 @dataclass(frozen=True, slots=True)
