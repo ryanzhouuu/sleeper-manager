@@ -3,8 +3,10 @@ from sleeper_manager.backtesting.cohorts import (
     CohortRankingError,
     IndependentCohortRanker,
     RankedPlayer,
+    cohort_counts,
     cohort_for_rank,
     rank_players_as_of,
+    ranked_players_as_of,
 )
 from sleeper_manager.backtesting.controls import (
     CalibratedProjectionModel,
@@ -99,8 +101,10 @@ __all__ = (
     "CohortRankingError",
     "IndependentCohortRanker",
     "RankedPlayer",
+    "cohort_counts",
     "cohort_for_rank",
     "rank_players_as_of",
+    "ranked_players_as_of",
     "HistoricalLeagueArchive",
     "HistoricalTransaction",
     "LeagueArchiveError",
