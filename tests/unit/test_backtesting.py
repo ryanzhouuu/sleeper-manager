@@ -13,17 +13,20 @@ from sleeper_manager.backtesting import (
     NaiveProjectionBaseline,
     run_backtest,
 )
+from sleeper_manager.backtesting.backtest_metrics import _validate_cohort_invariants
 from sleeper_manager.backtesting.controls import CalibratedProjectionModel
-from sleeper_manager.backtesting.experiment import _injury_mapping_diagnostics, _isolated_suite
-from sleeper_manager.backtesting.runner import _validate_cohort_invariants
+from sleeper_manager.backtesting.feature_validation import (
+    _injury_mapping_diagnostics,
+    _isolated_suite,
+)
 from sleeper_manager.domain.nba import AvailabilityStatus, SourceMetadata
 from sleeper_manager.domain.projection import ProjectionDistribution, ProjectionSnapshot
 from sleeper_manager.domain.scoring import BoxScoreLine, ScoringPolicy, calculate_fantasy_points
-from sleeper_manager.integrations.nba.historical_features import (
-    AvailabilityObservation,
+from sleeper_manager.integrations.nba.historical_feature_dataset import (
     HistoricalFeatureDataset,
     HistoricalFeatureRow,
 )
+from sleeper_manager.integrations.nba.historical_feature_models import AvailabilityObservation
 from sleeper_manager.integrations.nba.official_injury_mapping import (
     InjuryMappingCategory,
     InjuryMappingDiagnostic,

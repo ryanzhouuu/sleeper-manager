@@ -7,14 +7,14 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from sleeper_manager import __version__
-from sleeper_manager.backtesting.experiment import (
-    Phase4ValidationError,
-    run_model_feature_validation,
-    run_phase4_validation_experiment,
-)
+from sleeper_manager.backtesting.feature_validation import run_model_feature_validation
 from sleeper_manager.backtesting.lock_in_experiment import (
     LockInExperimentError,
     run_lock_in_policy_validation,
+)
+from sleeper_manager.backtesting.projection_evaluation import (
+    ProjectionEvaluationError,
+    run_projection_evaluation,
 )
 from sleeper_manager.config import Settings
 from sleeper_manager.domain.league import LeagueProfile
@@ -65,23 +65,23 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("tests/fixtures/sleeper/current_league.json"),
         help="Sleeper league payload providing the scoring_settings object",
     )
-    phase4 = subcommands.add_parser(
-        "validate-phase4",
-        help="Run the frozen interpretable-opportunity-model validation-closure experiment",
+    evaluation_parser = subcommands.add_parser(
+        "evaluate-projections",
+        help="Evaluate the frozen interpretable-opportunity projection models",
     )
-    phase4.add_argument(
+    evaluation_parser.add_argument(
         "--workspace",
         type=Path,
         default=Path(".local/model-validation"),
         help="Ignored local directory containing raw sources, injury cache, and reports",
     )
-    phase4.add_argument(
+    evaluation_parser.add_argument(
         "--league-fixture",
         type=Path,
         default=Path("tests/fixtures/sleeper/current_league.json"),
         help="Sleeper league payload providing the scoring_settings object",
     )
-    phase4.add_argument(
+    evaluation_parser.add_argument(
         "--mode",
         choices=("development", "locked_retrospective"),
         default="development",
@@ -306,24 +306,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"JSON report: {output.report_json_path}")
         print(f"Markdown report: {output.report_markdown_path}")
         return 0
-    if args.command == "validate-phase4":
+    if args.command == "evaluate-projections":
         try:
-            phase4_output = run_phase4_validation_experiment(
+            evaluation_output = run_projection_evaluation(
                 args.workspace,
                 league_fixture=args.league_fixture,
                 mode=args.mode,
             )
-        except (Phase4ValidationError, OSError, ValueError) as error:
-            print(f"Phase 4 validation experiment failed: {error}", file=sys.stderr)
+        except (ProjectionEvaluationError, OSError, ValueError) as error:
+            print(f"Projection evaluation failed: {error}", file=sys.stderr)
             return 2
-        print(f"Mode: {phase4_output.mode}")
-        print(f"Dataset: {phase4_output.dataset_version}")
-        print(f"Frozen manifest: {phase4_output.manifest_path}")
-        print(f"Development report: {phase4_output.development_report_path}")
-        if phase4_output.report_json_path is not None:
-            print(f"JSON report: {phase4_output.report_json_path}")
-            print(f"Markdown report: {phase4_output.report_markdown_path}")
-            print(f"Selected baseline: {phase4_output.selected_model}")
+        print(f"Mode: {evaluation_output.mode}")
+        print(f"Dataset: {evaluation_output.dataset_version}")
+        print(f"Frozen manifest: {evaluation_output.manifest_path}")
+        print(f"Development report: {evaluation_output.development_report_path}")
+        if evaluation_output.report_json_path is not None:
+            print(f"JSON report: {evaluation_output.report_json_path}")
+            print(f"Markdown report: {evaluation_output.report_markdown_path}")
+            print(f"Selected baseline: {evaluation_output.selected_model}")
         return 0
     if args.command == "validate-lock-in-policy":
         try:

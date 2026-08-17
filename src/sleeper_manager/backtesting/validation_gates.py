@@ -1,102 +1,28 @@
 from __future__ import annotations
 
-from collections import defaultdict
-from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
-from datetime import UTC, datetime, timedelta
+from collections.abc import Iterable, Sequence
 from math import isfinite, sqrt
-from random import Random
 
 from sleeper_manager.backtesting.models import (
-    BacktestComparison,
-    BacktestConfig,
-    BacktestModel,
     BacktestObservation,
-    BacktestReport,
     CohortDiagnostics,
     ParticipationCalibrationBin,
 )
-from sleeper_manager.backtesting.runner import (
-    cohort_matches,
-    compare_observation_sets,
-    run_backtest,
+from sleeper_manager.backtesting.validation_metrics import (
+    _observation_index,
+    block_bootstrap_mae_delta,
+    segment_comparisons,
 )
-from sleeper_manager.domain.scoring import ScoringPolicy
-from sleeper_manager.integrations.nba.historical_features import (
-    HistoricalFeatureDataset,
-    HistoricalFeatureRow,
+from sleeper_manager.backtesting.validation_models import (
+    ComponentGateConfig,
+    DevelopmentDecision,
+    FoldResult,
+    GateResult,
+    PromotionDecision,
+    PromotionGateConfig,
+    _AggregateMetrics,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class ChronologicalFold:
-    name: str
-    season_start: int
-    phase: str
-    start_at: datetime
-    end_at: datetime
-    holdout: bool = False
-
-
-@dataclass(frozen=True, slots=True)
-class FoldResult:
-    fold: ChronologicalFold
-    report: BacktestReport
-
-
-@dataclass(frozen=True, slots=True)
-class BootstrapInterval:
-    metric: str
-    candidate_model: str
-    reference_model: str
-    sample_count: int
-    seed: int
-    lower: float | None
-    upper: float | None
-
-
-@dataclass(frozen=True, slots=True)
-class SegmentComparison:
-    segment: str
-    value: str
-    candidate_model: str
-    reference_model: str
-    player_game_count: int
-    game_count: int
-    conclusive: bool
-    reference_mae: float | None
-    candidate_mae: float | None
-    mae_delta: float | None
-
-
-@dataclass(frozen=True, slots=True)
-class PromotionGateConfig:
-    min_mae_points: float = 0.25
-    min_mae_fraction: float = 0.01
-    max_rmse_points: float = 0.25
-    max_rmse_fraction: float = 0.01
-    max_segment_mae_points: float = 0.5
-    max_segment_mae_fraction: float = 0.02
-    interval_coverage_tolerance: float = 0.05
-    max_interval_width_fraction: float = 0.05
-    max_brier_delta: float = 0.005
-    min_coverage_ratio: float = 0.95
-    intervals: tuple[tuple[int, int], ...] = ((10, 90), (25, 75))
-    thresholds: tuple[float, ...] = (20.0, 30.0, 40.0, 50.0, 60.0)
-
-
-@dataclass(frozen=True, slots=True)
-class GateResult:
-    name: str
-    passed: bool
-    evidence: str
-
-
-@dataclass(frozen=True, slots=True)
-class ComponentGateConfig:
-    max_regression_fraction: float = 0.02
-    min_calibration_bin_size: int = 100
-    calibration_tolerance: float = 0.05
+from sleeper_manager.integrations.nba.historical_feature_models import HistoricalFeatureDataset
 
 
 def evaluate_component_gates(
@@ -171,243 +97,6 @@ def _participation_calibration_gate(
         not failures,
         f"qualifying_bins={len(qualifying)}; failures={len(failures)}",
     )
-
-
-@dataclass(frozen=True, slots=True)
-class PromotionDecision:
-    candidate_model: str
-    recommendation: str
-    promotable: bool
-    gates: tuple[GateResult, ...]
-
-
-@dataclass(frozen=True, slots=True)
-class DevelopmentDecision:
-    candidate_model: str
-    selected: bool
-    promotion_eligible: bool
-    improved_folds: int
-    fold_count: int
-    bootstrap: BootstrapInterval
-    evidence: str
-
-
-@dataclass(frozen=True, slots=True)
-class _AggregateMetrics:
-    sample_count: int
-    mae: float | None
-    rmse: float | None
-    interval_coverage: tuple[tuple[tuple[int, int], float | None], ...]
-    interval_width: tuple[tuple[tuple[int, int], float | None], ...]
-    brier_scores: tuple[tuple[float, float | None], ...]
-
-
-def regular_season_folds(
-    *,
-    development_seasons: tuple[int, ...] = (2022, 2023, 2024),
-    holdout_season: int = 2025,
-) -> tuple[ChronologicalFold, ...]:
-    folds: list[ChronologicalFold] = []
-    for season_start in development_seasons + (holdout_season,):
-        holdout = season_start == holdout_season
-        windows = (
-            (
-                "early",
-                datetime(season_start, 10, 1, tzinfo=UTC),
-                datetime(season_start + 1, 1, 1, tzinfo=UTC),
-            ),
-            (
-                "middle",
-                datetime(season_start + 1, 1, 1, tzinfo=UTC),
-                datetime(season_start + 1, 3, 1, tzinfo=UTC),
-            ),
-            (
-                "late",
-                datetime(season_start + 1, 3, 1, tzinfo=UTC),
-                datetime(season_start + 1, 5, 1, tzinfo=UTC),
-            ),
-        )
-        for phase, start_at, next_start in windows:
-            folds.append(
-                ChronologicalFold(
-                    name=f"{season_start}-{str(season_start + 1)[-2:]}-{phase}",
-                    season_start=season_start,
-                    phase=phase,
-                    start_at=start_at,
-                    end_at=next_start - timedelta(microseconds=1),
-                    holdout=holdout,
-                )
-            )
-    return tuple(folds)
-
-
-def run_validation_folds(
-    dataset: HistoricalFeatureDataset,
-    *,
-    scoring_policy: ScoringPolicy,
-    models: Iterable[BacktestModel],
-    folds: Iterable[ChronologicalFold],
-    config: BacktestConfig | None = None,
-    reference_model: str | None = None,
-) -> tuple[FoldResult, ...]:
-    base = config or BacktestConfig(
-        thresholds=(20.0, 30.0, 40.0, 50.0, 60.0),
-        intervals=((10, 90), (25, 75)),
-    )
-    records = tuple(models)
-    return tuple(
-        FoldResult(
-            fold,
-            run_backtest(
-                dataset,
-                scoring_policy=scoring_policy,
-                models=records,
-                config=replace(base, start_at=fold.start_at, end_at=fold.end_at),
-                reference_model=reference_model,
-            ),
-        )
-        for fold in folds
-    )
-
-
-def cohort_comparison_across_folds(
-    fold_results: Iterable[FoldResult],
-    *,
-    reference_model: str,
-    candidate_model: str,
-    cohort: str,
-    config: BacktestConfig,
-) -> BacktestComparison:
-    """Compare two models on their common successful observations within one cohort, pooled
-    across every given fold. Folds are time-disjoint, so a (player_id, game_id) key can appear
-    in at most one fold -- pooling never double-counts or collides across folds."""
-    reference_observations: list[BacktestObservation] = []
-    candidate_observations: list[BacktestObservation] = []
-    for fold_result in fold_results:
-        reference_result = fold_result.report.result_for(reference_model)
-        candidate_result = fold_result.report.result_for(candidate_model)
-        reference_observations.extend(
-            observation
-            for observation in reference_result.observations
-            if cohort_matches(observation.cohort, cohort)
-        )
-        candidate_observations.extend(
-            observation
-            for observation in candidate_result.observations
-            if cohort_matches(observation.cohort, cohort)
-        )
-    return compare_observation_sets(
-        reference_model=reference_model,
-        candidate_model=candidate_model,
-        reference_observations=tuple(reference_observations),
-        candidate_observations=tuple(candidate_observations),
-        config=config,
-    )
-
-
-def block_bootstrap_mae_delta(
-    fold_results: Iterable[FoldResult],
-    *,
-    reference_model: str,
-    candidate_model: str,
-    samples: int = 2000,
-    seed: int = 20260813,
-) -> BootstrapInterval:
-    if samples <= 0:
-        raise ValueError("Bootstrap sample count must be positive")
-    blocks = _paired_error_blocks(
-        fold_results,
-        reference_model=reference_model,
-        candidate_model=candidate_model,
-    )
-    if not blocks:
-        return BootstrapInterval(
-            "mae_delta",
-            candidate_model,
-            reference_model,
-            samples,
-            seed,
-            None,
-            None,
-        )
-    by_fold: dict[str, list[tuple[float, float, int]]] = defaultdict(list)
-    for (fold_name, _), errors in blocks.items():
-        by_fold[fold_name].append(
-            (
-                sum(reference for reference, _ in errors),
-                sum(candidate for _, candidate in errors),
-                len(errors),
-            )
-        )
-    random = Random(seed)
-    deltas: list[float] = []
-    for _ in range(samples):
-        reference_total = 0.0
-        candidate_total = 0.0
-        observation_count = 0
-        for fold_blocks in by_fold.values():
-            for _ in range(len(fold_blocks)):
-                sampled = fold_blocks[random.randrange(len(fold_blocks))]
-                reference_total += sampled[0]
-                candidate_total += sampled[1]
-                observation_count += sampled[2]
-        deltas.append(candidate_total / observation_count - reference_total / observation_count)
-    ordered = tuple(sorted(deltas))
-    return BootstrapInterval(
-        "mae_delta",
-        candidate_model,
-        reference_model,
-        samples,
-        seed,
-        round(_quantile(ordered, 0.025), 6),
-        round(_quantile(ordered, 0.975), 6),
-    )
-
-
-def segment_comparisons(
-    fold_results: Iterable[FoldResult],
-    *,
-    dataset: HistoricalFeatureDataset,
-    reference_model: str,
-    candidate_model: str,
-    min_player_games: int = 200,
-    min_games: int = 30,
-) -> tuple[SegmentComparison, ...]:
-    rows = {(row.player_id, row.game_id): row for row in dataset.rows}
-    grouped: dict[tuple[str, str], list[tuple[str, float, float]]] = defaultdict(list)
-    for fold_result in fold_results:
-        reference = _observation_index(fold_result.report, reference_model)
-        candidate = _observation_index(fold_result.report, candidate_model)
-        for key in reference.keys() & candidate.keys():
-            row = rows[key]
-            tags = _segment_tags(row, fold_result.fold)
-            pair = (
-                row.game_id,
-                reference[key].absolute_error,
-                candidate[key].absolute_error,
-            )
-            for tag in tags:
-                grouped[tag].append(pair)
-    result: list[SegmentComparison] = []
-    for (segment, value), records in sorted(grouped.items()):
-        reference_mae = sum(record[1] for record in records) / len(records)
-        candidate_mae = sum(record[2] for record in records) / len(records)
-        game_count = len({record[0] for record in records})
-        result.append(
-            SegmentComparison(
-                segment,
-                value,
-                candidate_model,
-                reference_model,
-                len(records),
-                game_count,
-                len(records) >= min_player_games and game_count >= min_games,
-                round(reference_mae, 6),
-                round(candidate_mae, 6),
-                round(candidate_mae - reference_mae, 6),
-            )
-        )
-    return tuple(result)
 
 
 def evaluate_promotion(
@@ -593,64 +282,6 @@ def evaluate_development_candidate(
         bootstrap,
         evidence,
     )
-
-
-def _paired_error_blocks(
-    fold_results: Iterable[FoldResult],
-    *,
-    reference_model: str,
-    candidate_model: str,
-) -> Mapping[tuple[str, str], tuple[tuple[float, float], ...]]:
-    blocks: dict[tuple[str, str], list[tuple[float, float]]] = defaultdict(list)
-    for fold_result in fold_results:
-        reference = _observation_index(fold_result.report, reference_model)
-        candidate = _observation_index(fold_result.report, candidate_model)
-        for key in reference.keys() & candidate.keys():
-            game_id = key[1]
-            blocks[(fold_result.fold.name, game_id)].append(
-                (reference[key].absolute_error, candidate[key].absolute_error)
-            )
-    return {key: tuple(values) for key, values in blocks.items()}
-
-
-def _observation_index(
-    report: BacktestReport, model_name: str
-) -> dict[tuple[str, str], BacktestObservation]:
-    return {
-        (observation.player_id, observation.game_id): observation
-        for observation in report.result_for(model_name).observations
-    }
-
-
-def _segment_tags(
-    row: HistoricalFeatureRow, fold: ChronologicalFold
-) -> tuple[tuple[str, str], ...]:
-    role = "starter" if row.target_started else "bench_or_low_minutes"
-    if row.target_minutes is not None and row.target_minutes < 20:
-        role = "bench_or_low_minutes"
-    return (
-        ("role", role),
-        ("same_season_history", "present" if row.prior_games else "missing"),
-        ("venue", "home" if row.is_home else "away"),
-        (
-            "back_to_back",
-            "unknown" if row.is_back_to_back is None else str(row.is_back_to_back).casefold(),
-        ),
-        ("injury_observation", row.availability_observation.value),
-        ("opponent_pace", row.opponent_pace_band),
-        ("fold", fold.name),
-        ("season", f"{fold.season_start}-{str(fold.season_start + 1)[-2:]}"),
-    )
-
-
-def _quantile(values: tuple[float, ...], fraction: float) -> float:
-    if not values:
-        raise ValueError("Quantile requires observations")
-    position = fraction * (len(values) - 1)
-    lower = int(position)
-    upper = min(lower + 1, len(values) - 1)
-    weight = position - lower
-    return values[lower] * (1 - weight) + values[upper] * weight
 
 
 def _aggregate_common_metrics(
