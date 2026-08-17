@@ -251,8 +251,7 @@ def map_official_injury_report(
                     method=MappingMethod.NORMALIZED_SUBSET_NAME_TEAM,
                     confidence=MappingConfidence.LOW,
                     reason=(
-                        "Matched by unique normalized report-name token subset and "
-                        "official team"
+                        "Matched by unique normalized report-name token subset and official team"
                     ),
                     candidate_ids=subset_ids,
                 )

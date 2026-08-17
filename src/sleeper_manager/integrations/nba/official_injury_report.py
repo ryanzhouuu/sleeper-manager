@@ -629,9 +629,7 @@ def _tokenized_player_name_start(tokens: list[str], index: int, status_index: in
     if suffix_positions:
         return suffix_positions[-1] - 1
     comma_positions = [
-        position
-        for position in range(index + 1, status_index)
-        if tokens[position].endswith(",")
+        position for position in range(index + 1, status_index) if tokens[position].endswith(",")
     ]
     return comma_positions[-1] if comma_positions else index
 

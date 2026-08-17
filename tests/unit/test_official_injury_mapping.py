@@ -157,9 +157,7 @@ def test_official_injury_mapping_uses_unique_historical_candidate() -> None:
             provider("espn-schroder", "Dennis Schroder", "BKN"),
             provider("espn-smith", "Dennis Smith Jr.", "BKN"),
         ],
-        historical_player_ids_by_date_team={
-            (date(2025, 1, 1), "bkn"): frozenset({"espn-smith"})
-        },
+        historical_player_ids_by_date_team={(date(2025, 1, 1), "bkn"): frozenset({"espn-smith"})},
     )
 
     mapping = result.mappings[0]
