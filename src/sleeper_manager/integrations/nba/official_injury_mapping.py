@@ -11,7 +11,7 @@ from sleeper_manager.integrations.nba.mapping import (
     normalize_report_player_name,
     normalize_team,
 )
-from sleeper_manager.integrations.nba.official_injury_report import (
+from sleeper_manager.integrations.nba.official_injury_models import (
     OfficialInjuryReportEntry,
     OfficialInjuryReportSnapshot,
 )

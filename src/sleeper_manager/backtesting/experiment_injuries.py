@@ -19,16 +19,18 @@ from sleeper_manager.integrations.nba.official_injury_mapping import (
     InjuryMappingDiagnostic,
     map_official_injury_report,
 )
-from sleeper_manager.integrations.nba.official_injury_report import (
+from sleeper_manager.integrations.nba.official_injury_models import (
     EASTERN_TIME,
     PARSED_REPORT_CACHE_SCHEMA_VERSION,
     REPORT_SCHEMA_VERSION,
     OfficialInjuryReportSnapshot,
     deserialize_official_injury_report_snapshot,
+    serialize_official_injury_report_snapshot,
+)
+from sleeper_manager.integrations.nba.official_injury_parser import (
     extract_official_injury_report_text,
     official_injury_report_urls,
     parse_official_injury_report_text,
-    serialize_official_injury_report_snapshot,
 )
 
 

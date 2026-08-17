@@ -6,15 +6,17 @@ from textwrap import dedent
 import httpx
 
 from sleeper_manager.domain.nba import AvailabilityStatus, SourceMetadata
-from sleeper_manager.integrations.nba.official_injury_report import (
-    OfficialInjuryReportClient,
+from sleeper_manager.integrations.nba.official_injury_client import OfficialInjuryReportClient
+from sleeper_manager.integrations.nba.official_injury_models import (
     ReportSubmissionStatus,
-    assess_official_report_coverage,
     deserialize_official_injury_report_snapshot,
+    serialize_official_injury_report_snapshot,
+)
+from sleeper_manager.integrations.nba.official_injury_parser import (
+    assess_official_report_coverage,
     official_injury_report_url,
     official_injury_report_urls,
     parse_official_injury_report_text,
-    serialize_official_injury_report_snapshot,
 )
 
 FIXTURE = Path(__file__).parents[1] / "fixtures" / "nba" / "official_injury_report.txt"

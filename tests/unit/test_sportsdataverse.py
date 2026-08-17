@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from sleeper_manager.integrations.nba.historical import (
+from sleeper_manager.integrations.nba.sportsdataverse import (
     SportsDataverseClient,
     SportsDataverseError,
     apply_player_game_fouls,

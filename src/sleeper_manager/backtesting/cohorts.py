@@ -10,7 +10,7 @@ from math import exp, log
 
 from sleeper_manager.domain.nba import AvailabilityStatus
 from sleeper_manager.domain.scoring import ScoringPolicy, calculate_fantasy_points
-from sleeper_manager.integrations.nba.historical_features import HistoricalFeatureRow
+from sleeper_manager.integrations.nba.historical_feature_models import HistoricalFeatureRow
 
 
 class CohortRankingError(ValueError):

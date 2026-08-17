@@ -15,9 +15,11 @@ from sleeper_manager.domain.nba import (
     SourceMetadata,
 )
 from sleeper_manager.integrations.nba.official_injury_mapping import InjuryMappingCategory
-from sleeper_manager.integrations.nba.official_injury_report import (
+from sleeper_manager.integrations.nba.official_injury_models import (
     OfficialInjuryReportEntry,
     OfficialInjuryReportSnapshot,
+)
+from sleeper_manager.integrations.nba.official_injury_parser import (
     official_injury_report_minute_url,
 )
 

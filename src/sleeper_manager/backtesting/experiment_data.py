@@ -19,7 +19,9 @@ from sleeper_manager.domain.nba import (
     TeamBoxScore,
 )
 from sleeper_manager.domain.scoring import ScoringPolicy
-from sleeper_manager.integrations.nba.historical import (
+from sleeper_manager.integrations.nba.historical_feature_models import FEATURE_SCHEMA_VERSION
+from sleeper_manager.integrations.nba.mapping import normalize_team
+from sleeper_manager.integrations.nba.sportsdataverse import (
     apply_player_game_fouls,
     parse_play_by_play_foul_rows,
     parse_player_box_score_rows,
@@ -30,8 +32,6 @@ from sleeper_manager.integrations.nba.historical import (
     schedule_url,
     team_box_score_url,
 )
-from sleeper_manager.integrations.nba.historical_features import FEATURE_SCHEMA_VERSION
-from sleeper_manager.integrations.nba.mapping import normalize_team
 
 
 class ExperimentDataError(RuntimeError):

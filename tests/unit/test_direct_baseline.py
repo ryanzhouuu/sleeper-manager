@@ -4,11 +4,11 @@ import pytest
 
 from sleeper_manager.domain.nba import AvailabilityStatus, SourceMetadata
 from sleeper_manager.domain.scoring import BoxScoreLine, ScoringPolicy
-from sleeper_manager.integrations.nba.historical_features import (
-    AvailabilityObservation,
+from sleeper_manager.integrations.nba.historical_feature_dataset import (
     HistoricalFeatureDataset,
     HistoricalFeatureRow,
 )
+from sleeper_manager.integrations.nba.historical_feature_models import AvailabilityObservation
 from sleeper_manager.projections.direct_baseline import (
     DirectFantasyPointBaseline,
     ProjectionBaselineConfig,

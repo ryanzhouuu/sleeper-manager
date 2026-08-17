@@ -14,7 +14,7 @@ from sleeper_manager.domain.projection import (
     ProjectionSnapshot,
 )
 from sleeper_manager.domain.scoring import ScoringPolicy, calculate_fantasy_points
-from sleeper_manager.integrations.nba.historical_features import (
+from sleeper_manager.integrations.nba.historical_feature_models import (
     HistoricalFeatureDataset,
     HistoricalFeatureRow,
 )

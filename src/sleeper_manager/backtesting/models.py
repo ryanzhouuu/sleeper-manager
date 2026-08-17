@@ -10,7 +10,7 @@ from typing import Protocol
 
 from sleeper_manager.domain.projection import ProjectionComponent, ProjectionSnapshot
 from sleeper_manager.domain.scoring import ScoringPolicy
-from sleeper_manager.integrations.nba.historical_features import HistoricalFeatureDataset
+from sleeper_manager.integrations.nba.historical_feature_models import HistoricalFeatureDataset
 
 _EXCLUSIVE_TIERS = frozenset({"top_108", "ranks_109_180", "below_180"})
 

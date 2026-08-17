@@ -13,11 +13,13 @@ from sleeper_manager.domain.nba import (
     Team,
     TeamBoxScore,
 )
-from sleeper_manager.integrations.nba.historical_features import (
+from sleeper_manager.integrations.nba.historical_feature_dataset import (
+    build_historical_feature_dataset,
+)
+from sleeper_manager.integrations.nba.historical_feature_models import (
     AvailabilityObservation,
     HistoricalFeatureDatasetError,
     OpponentStatsFallback,
-    build_historical_feature_dataset,
 )
 from sleeper_manager.integrations.nba.identity import (
     MappingConfidence,
@@ -25,7 +27,7 @@ from sleeper_manager.integrations.nba.identity import (
     PlayerMapping,
 )
 from sleeper_manager.integrations.nba.official_injury_mapping import HistoricalPlayerAvailability
-from sleeper_manager.integrations.nba.official_injury_report import (
+from sleeper_manager.integrations.nba.official_injury_parser import (
     parse_official_injury_report_text,
 )
 

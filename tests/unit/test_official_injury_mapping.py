@@ -8,7 +8,7 @@ from sleeper_manager.integrations.nba.official_injury_mapping import (
     InjuryMappingCategory,
     map_official_injury_report,
 )
-from sleeper_manager.integrations.nba.official_injury_report import (
+from sleeper_manager.integrations.nba.official_injury_parser import (
     parse_official_injury_report_text,
 )
 

@@ -8,10 +8,8 @@ from sleeper_manager.backtesting.cohorts import (
 )
 from sleeper_manager.domain.nba import AvailabilityStatus
 from sleeper_manager.domain.scoring import BoxScoreLine, ScoringPolicy
-from sleeper_manager.integrations.nba.historical_features import (
-    AvailabilityObservation,
-    HistoricalFeatureRow,
-)
+from sleeper_manager.integrations.nba.historical_feature_dataset import HistoricalFeatureRow
+from sleeper_manager.integrations.nba.historical_feature_models import AvailabilityObservation
 
 POINTS_POLICY = ScoringPolicy(points=1)
 REBOUNDS_POLICY = ScoringPolicy(rebounds=1)
