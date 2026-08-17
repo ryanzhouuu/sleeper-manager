@@ -3,14 +3,16 @@ from sleeper_manager.projections.direct_baseline import (
     ProjectionBaselineConfig,
     ProjectionBaselineError,
 )
-from sleeper_manager.projections.opportunity_model import (
+from sleeper_manager.projections.opportunity_components import (
     AvailabilityModel,
     EnvironmentModel,
-    InterpretableOpportunityModel,
     MinutesModel,
+    ProductionRateModel,
+)
+from sleeper_manager.projections.opportunity_model import InterpretableOpportunityModel
+from sleeper_manager.projections.opportunity_types import (
     OpportunityModelConfig,
     OpportunityModelError,
-    ProductionRateModel,
 )
 from sleeper_manager.projections.residual_candidates import (
     CachingProjectionModel,

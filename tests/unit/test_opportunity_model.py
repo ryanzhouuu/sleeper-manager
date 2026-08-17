@@ -8,16 +8,20 @@ import pytest
 from sleeper_manager.domain.nba import AvailabilityStatus
 from sleeper_manager.domain.projection import ProjectionFallback
 from sleeper_manager.domain.scoring import BoxScoreLine, ScoringPolicy
-from sleeper_manager.integrations.nba.historical_features import (
-    AvailabilityObservation,
+from sleeper_manager.integrations.nba.historical_feature_dataset import (
     HistoricalFeatureDataset,
     HistoricalFeatureRow,
+)
+from sleeper_manager.integrations.nba.historical_feature_models import (
+    AvailabilityObservation,
     OpponentStatsFallback,
     PaceStatsFallback,
 )
-from sleeper_manager.projections.opportunity_model import (
+from sleeper_manager.projections.opportunity_components import (
     EnvironmentModel,
-    InterpretableOpportunityModel,
+)
+from sleeper_manager.projections.opportunity_model import InterpretableOpportunityModel
+from sleeper_manager.projections.opportunity_types import (
     OpportunityModelConfig,
     OpportunityModelError,
 )
@@ -26,11 +30,11 @@ NOW = datetime(2026, 1, 10, 18, tzinfo=UTC)
 
 
 class _GrowingPrefix(Sequence[HistoricalFeatureRow]):
-    """Minimal stand-in for the backtest runner's point-in-time row prefix.
+    """Minimal stand-in for the backtest execution module's point-in-time row prefix.
 
     Wraps a fixed chronological tuple and exposes only the first ``prior_count`` rows
     plus one appended ``target`` row, mirroring ``_PointInTimeRows`` in
-    ``backtesting/runner.py`` closely enough to exercise the same duck-typed
+    ``backtesting/backtest_execution.py`` closely enough to exercise the same duck-typed
     ``prior_count`` contract the opportunity model's history index relies on, without
     depending on that private class directly.
     """
