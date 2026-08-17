@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass, is_dataclass, replace
@@ -885,6 +886,7 @@ def phase4_frozen_manifest(
     component_gate: ComponentGateConfig,
     raw_suite: tuple[BacktestModel, ...],
     secondary_suite: tuple[BacktestModel, ...],
+    source_revision: str,
 ) -> dict[str, Any]:
     """Freeze candidate, cohort, metric, gate, and index configuration together.
 
@@ -894,6 +896,7 @@ def phase4_frozen_manifest(
     """
     return {
         "manifest_version": "phase4-validation-closure-v1",
+        "source_revision": source_revision,
         "dataset_version": dataset.dataset_version,
         "feature_schema_version": dataset.feature_schema_version,
         "scoring_policy_version": scoring_policy.version,
@@ -1240,6 +1243,7 @@ def phase4_markdown_report(report: Mapping[str, Any]) -> str:
 @dataclass(frozen=True, slots=True)
 class Phase4ExperimentOutput:
     manifest_path: Path
+    development_report_path: Path
     report_json_path: Path | None
     report_markdown_path: Path | None
     dataset_version: str
@@ -1267,6 +1271,7 @@ def run_phase4_validation_experiment(
     generated_at = now or datetime.now(UTC)
     if generated_at.tzinfo is None:
         raise Phase4ValidationError("Experiment timestamp must be timezone-aware")
+    source_revision = _git_source_revision()
     raw_dir = workspace / "raw"
     reports_dir = workspace / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
@@ -1297,8 +1302,12 @@ def run_phase4_validation_experiment(
         component_gate=component_gate_config,
         raw_suite=raw_suite,
         secondary_suite=secondary_suite,
+        source_revision=source_revision,
     )
     manifest_path = reports_dir / "phase4-frozen-manifest.json"
+
+    if mode == "locked_retrospective":
+        assert_phase4_manifest_frozen(manifest_path, manifest)
 
     folds = regular_season_folds()
     development_folds = tuple(fold for fold in folds if not fold.holdout)
@@ -1310,11 +1319,34 @@ def run_phase4_validation_experiment(
         config=backtest_config,
         reference_model=PHASE4_DIRECT_BASELINE,
     )
+    development_report_path = reports_dir / "phase4-development-report.json"
+    _write_json(
+        development_report_path,
+        {
+            "report_version": "phase4-development-v1",
+            "generated_at": generated_at,
+            "modeled": {
+                "source_revision": source_revision,
+                "manifest_path": str(manifest_path),
+                "manifest": manifest,
+                "dataset": {
+                    "dataset_version": dataset.dataset_version,
+                    "feature_schema_version": dataset.feature_schema_version,
+                    "source_versions": dataset.source_versions,
+                },
+                "scoring_policy_version": scoring_policy.version,
+                "development_folds": tuple(
+                    _phase4_fold_summary(result) for result in development_results
+                ),
+            },
+        },
+    )
 
     if mode == "development":
         freeze_phase4_manifest(manifest_path, manifest)
         return Phase4ExperimentOutput(
             manifest_path=manifest_path,
+            development_report_path=development_report_path,
             report_json_path=None,
             report_markdown_path=None,
             dataset_version=dataset.dataset_version,
@@ -1322,7 +1354,6 @@ def run_phase4_validation_experiment(
             selected_model=None,
         )
 
-    assert_phase4_manifest_frozen(manifest_path, manifest)
     locked_retrospective_folds = tuple(fold for fold in folds if fold.holdout)
     locked_retrospective_results = run_validation_folds(
         dataset,
@@ -1350,9 +1381,38 @@ def run_phase4_validation_experiment(
     selection: Phase4SelectionDecision = report["modeled"]["selection"]
     return Phase4ExperimentOutput(
         manifest_path=manifest_path,
+        development_report_path=development_report_path,
         report_json_path=report_json_path,
         report_markdown_path=report_markdown_path,
         dataset_version=dataset.dataset_version,
         mode=mode,
         selected_model=selection.selected_model,
     )
+
+
+def _git_source_revision() -> str:
+    repository = Path(__file__).resolve().parents[3]
+    try:
+        status = subprocess.run(
+            ("git", "status", "--porcelain", "--untracked-files=no"),
+            cwd=repository,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        revision = subprocess.run(
+            ("git", "rev-parse", "HEAD"),
+            cwd=repository,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise Phase4ValidationError("Could not resolve the Phase 4 source revision") from error
+    if status.stdout.strip():
+        raise Phase4ValidationError(
+            "Phase 4 validation requires a clean tracked worktree so the source revision is exact"
+        )
+    if not revision:
+        raise Phase4ValidationError("Phase 4 source revision was empty")
+    return revision

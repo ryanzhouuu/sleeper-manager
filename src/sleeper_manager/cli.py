@@ -319,6 +319,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Mode: {phase4_output.mode}")
         print(f"Dataset: {phase4_output.dataset_version}")
         print(f"Frozen manifest: {phase4_output.manifest_path}")
+        print(f"Development report: {phase4_output.development_report_path}")
         if phase4_output.report_json_path is not None:
             print(f"JSON report: {phase4_output.report_json_path}")
             print(f"Markdown report: {phase4_output.report_markdown_path}")

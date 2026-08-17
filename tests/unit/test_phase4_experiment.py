@@ -140,8 +140,10 @@ def test_phase4_frozen_manifest_includes_candidate_cohort_metric_and_gate_config
         component_gate=ComponentGateConfig(),
         raw_suite=raw_suite,
         secondary_suite=secondary_suite,
+        source_revision="fixture-revision",
     )
 
+    assert manifest["source_revision"] == "fixture-revision"
     assert manifest["dataset_version"] == dataset.dataset_version
     assert manifest["scoring_policy_version"] == POLICY.version
     assert manifest["cohort_config_version"] == CohortConfig().version
@@ -181,6 +183,7 @@ def _build_report(dataset: HistoricalFeatureDataset, generated_at: datetime) -> 
         component_gate=ComponentGateConfig(),
         raw_suite=phase4_raw_suite(),
         secondary_suite=phase4_secondary_calibrated_suite(),
+        source_revision="fixture-revision",
     )
     return phase4_report(
         generated_at=generated_at,
