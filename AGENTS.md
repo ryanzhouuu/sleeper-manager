@@ -20,6 +20,7 @@
 - Do not create noisy checkpoint or broken WIP commits merely for frequency. Each commit should represent a meaningful completed step and pass the relevant formatting, linting, and tests.
 - Use short, one-line commit messages with no body unless the user explicitly requests otherwise.
 - Follow the concise `<type>: <imperative summary>` style, for example `chore: initialize sleeper manager` or `feat: sync league profile`.
+- Do not mention local roadmap, design, implementation, or validation phases—or untracked planning documents—in commit messages; those are not durable repository context for reviewers.
 - Make the subject describe the outcome of the commit, not the implementation process. Avoid vague messages such as `updates`, `changes`, or `fix stuff`.
 - Before every commit, inspect the working tree, staged diff, and staged file list. Stage only the intended coherent change and preserve unrelated user work.
 - Confirm that no design documents, planning files, secrets, private payloads, generated caches, or local configuration are staged.
