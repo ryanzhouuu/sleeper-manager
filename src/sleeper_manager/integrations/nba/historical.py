@@ -1,3 +1,4 @@
+import importlib
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import replace
 from datetime import UTC, date, datetime
@@ -50,7 +51,7 @@ class RDSReader(Protocol):
 
 def _default_rds_reader(path: str) -> Mapping[str, Any]:
     try:
-        import pyreadr  # type: ignore[import-untyped]
+        pyreadr = importlib.import_module("pyreadr")
     except ImportError as error:
         raise SportsDataverseError(
             "SportsDataverse ingestion requires the pyreadr dependency"
