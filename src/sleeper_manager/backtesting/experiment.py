@@ -1211,6 +1211,27 @@ def phase4_markdown_report(report: Mapping[str, Any]) -> str:
                 f"{diagnostic.successful_count} | {diagnostic.coverage} | "
                 f"{diagnostic.full_mixture.mae} |"
             )
+    lines.extend(
+        [
+            "",
+            "## Secondary calibrated diagnostics",
+            "",
+            "These diagnostics cannot override a failed raw-distribution selection gate.",
+            "",
+            "| Fold | Model | Cohort | Coverage | MAE |",
+            "| --- | --- | --- | ---: | ---: |",
+        ]
+    )
+    for fold_summary in modeled["locked_retrospective_folds"]:
+        for model_name in PHASE4_SECONDARY_SUITE_NAMES:
+            secondary = fold_summary["models"].get(model_name)
+            if secondary is None:
+                continue
+            for cohort_name, diagnostic in secondary["cohort_diagnostics"].items():
+                lines.append(
+                    f"| {fold_summary['fold_name']} | {model_name} | {cohort_name} | "
+                    f"{diagnostic.coverage} | {diagnostic.full_mixture.mae} |"
+                )
     lines.extend(["", "## Limitations", ""])
     lines.extend(f"- {limitation}" for limitation in modeled["limitations"])
     return "\n".join(lines) + "\n"
@@ -1267,6 +1288,7 @@ def run_phase4_validation_experiment(
     component_gate_config = ComponentGateConfig()
     raw_suite = phase4_raw_suite()
     secondary_suite = phase4_secondary_calibrated_suite()
+    comparison_suite = (*raw_suite, *secondary_suite)
     manifest = phase4_frozen_manifest(
         dataset=dataset,
         scoring_policy=scoring_policy,
@@ -1283,7 +1305,7 @@ def run_phase4_validation_experiment(
     development_results = run_validation_folds(
         dataset,
         scoring_policy=scoring_policy,
-        models=raw_suite,
+        models=comparison_suite,
         folds=development_folds,
         config=backtest_config,
         reference_model=PHASE4_DIRECT_BASELINE,
@@ -1305,7 +1327,7 @@ def run_phase4_validation_experiment(
     locked_retrospective_results = run_validation_folds(
         dataset,
         scoring_policy=scoring_policy,
-        models=raw_suite,
+        models=comparison_suite,
         folds=locked_retrospective_folds,
         config=backtest_config,
         reference_model=PHASE4_DIRECT_BASELINE,

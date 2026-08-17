@@ -164,7 +164,7 @@ def _locked_retrospective_fold_results(dataset: HistoricalFeatureDataset) -> tup
     return run_validation_folds(
         dataset,
         scoring_policy=POLICY,
-        models=phase4_raw_suite(),
+        models=(*phase4_raw_suite(), *phase4_secondary_calibrated_suite()),
         folds=(fold,),
         config=BacktestConfig(),
         reference_model=PHASE4_DIRECT_BASELINE,
@@ -226,6 +226,7 @@ def test_phase4_json_report_contains_every_required_field_and_cohort() -> None:
     assert fold_summary["evidence_label"] == "locked_retrospective"
     candidate_diagnostics = fold_summary["models"][PHASE4_OPPORTUNITY_FULL]["cohort_diagnostics"]
     assert tuple(candidate_diagnostics.keys()) == COHORT_NAMES
+    assert set(PHASE4_SECONDARY_SUITE_NAMES) <= set(fold_summary["models"])
     assert modeled["limitations"]
 
 
@@ -239,6 +240,9 @@ def test_phase4_markdown_report_renders_required_tables_and_selection_result() -
     assert "## Selection decision" in markdown
     assert "## Locked retrospective folds" in markdown
     assert "## Cohort coverage and full-mixture metrics" in markdown
+    assert "## Secondary calibrated diagnostics" in markdown
+    for model_name in PHASE4_SECONDARY_SUITE_NAMES:
+        assert model_name in markdown
     for cohort_name in COHORT_NAMES:
         assert cohort_name in markdown
     assert "## Limitations" in markdown
@@ -291,11 +295,14 @@ def test_phase4_small_fixture_runs_all_candidates_through_every_cohort_metric() 
     report = run_backtest(
         dataset,
         scoring_policy=POLICY,
-        models=phase4_raw_suite(),
+        models=(*phase4_raw_suite(), *phase4_secondary_calibrated_suite()),
         reference_model="direct_baseline",
     )
 
-    assert tuple(result.model.name for result in report.model_results) == PHASE4_RAW_SUITE_NAMES
+    assert tuple(result.model.name for result in report.model_results) == (
+        *PHASE4_RAW_SUITE_NAMES,
+        *PHASE4_SECONDARY_SUITE_NAMES,
+    )
     for result in report.model_results:
         cohorts_present = tuple(diagnostic.cohort for diagnostic in result.cohort_diagnostics)
         assert cohorts_present == COHORT_NAMES
