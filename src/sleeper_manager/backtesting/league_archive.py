@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import tempfile
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from sleeper_manager.backtesting.artifacts import atomic_write_json as _atomic_write_json
 from sleeper_manager.domain.scoring import ScoringPolicy
 from sleeper_manager.integrations.sleeper.schemas import (
     SleeperLeaguePayload,
@@ -201,22 +200,7 @@ def resolve_predecessor_chain(
 
 def atomic_write_json(path: Path, payload: Any) -> str:
     """Write a canonical archive payload and return its content hash."""
-
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        dir=path.parent, prefix=f".{path.name}.", delete=False
-    ) as temp:
-        temp.write(encoded)
-        temp.flush()
-        os.fsync(temp.fileno())
-        temporary_path = Path(temp.name)
-    try:
-        os.replace(temporary_path, path)
-    except Exception:
-        temporary_path.unlink(missing_ok=True)
-        raise
-    return hashlib.sha256(encoded).hexdigest()
+    return _atomic_write_json(path, payload)
 
 
 async def acquire_sleeper_archive(
