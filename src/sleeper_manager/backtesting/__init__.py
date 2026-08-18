@@ -46,6 +46,10 @@ from sleeper_manager.backtesting.models import (
     ProjectionModel,
     TargetSkip,
 )
+from sleeper_manager.backtesting.planning_adapter import (
+    PlanningAdapterError,
+    team_week_state_from_replay,
+)
 from sleeper_manager.backtesting.replay import (
     ReplayConfig,
     ReplayError,
@@ -153,6 +157,8 @@ __all__ = (
     "ReplayPlayerGame",
     "TeamWeekComparison",
     "TeamWeekReplayResult",
+    "PlanningAdapterError",
+    "team_week_state_from_replay",
     "ReplayBootstrapInterval",
     "PairedPolicyDelta",
     "PolicyScore",
