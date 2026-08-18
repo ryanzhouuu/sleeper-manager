@@ -1,5 +1,7 @@
 from sleeper_manager.projections.direct_baseline import (
+    MISSING_WARMUP_REASON,
     DirectFantasyPointBaseline,
+    PregameProjectionRequest,
     ProjectionBaselineConfig,
     ProjectionBaselineError,
 )
@@ -26,6 +28,8 @@ from sleeper_manager.projections.residual_candidates import (
 __all__ = (
     "CachingProjectionModel",
     "DirectFantasyPointBaseline",
+    "MISSING_WARMUP_REASON",
+    "PregameProjectionRequest",
     "ProjectionBaselineConfig",
     "ProjectionBaselineError",
     "ResidualCandidateConfig",

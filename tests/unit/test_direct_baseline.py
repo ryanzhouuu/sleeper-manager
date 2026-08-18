@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -10,7 +11,9 @@ from sleeper_manager.integrations.nba.historical_feature_dataset import (
 )
 from sleeper_manager.integrations.nba.historical_feature_models import AvailabilityObservation
 from sleeper_manager.projections.direct_baseline import (
+    MISSING_WARMUP_REASON,
     DirectFantasyPointBaseline,
+    PregameProjectionRequest,
     ProjectionBaselineConfig,
     ProjectionBaselineError,
 )
@@ -101,7 +104,7 @@ def test_direct_baseline_projects_sleeper_points_with_versions_reasons_and_excee
         snapshot.distribution.probability_of_exceeding(12)
     )
     assert snapshot.model_version.startswith("projection-baseline-v1-")
-    assert snapshot.input_version.startswith("projection-input-v2-")
+    assert snapshot.input_version.startswith("projection-input-v3-")
     assert snapshot.scoring_policy_version == POLICY.version
     assert any(reason.code == "minutes_role" for reason in snapshot.reasons)
     assert any(reason.code == "season_shrinkage" for reason in snapshot.reasons)
@@ -127,6 +130,80 @@ def test_direct_baseline_excludes_future_rows_from_projection() -> None:
     )
 
     assert with_future.distribution.expected_value == without_future.distribution.expected_value
+
+
+def test_legacy_target_outcomes_do_not_change_pregame_projection() -> None:
+    target = row("target", "player-1", datetime(2025, 1, 10, tzinfo=UTC), 0, 0)
+    prior = row("prior", "player-1", datetime(2025, 1, 9, tzinfo=UTC), 10, 10)
+    changed_target = replace(
+        target,
+        target_minutes=40,
+        target_did_play=True,
+        target_box_score=BoxScoreLine(points=100),
+        target_line_points=100,
+    )
+
+    baseline = DirectFantasyPointBaseline()
+    original = baseline.project(
+        dataset((prior, target)),
+        player_id="player-1",
+        game_id="target",
+        scoring_policy=POLICY,
+    )
+    changed = baseline.project(
+        dataset((prior, changed_target)),
+        player_id="player-1",
+        game_id="target",
+        scoring_policy=POLICY,
+    )
+
+    assert changed.distribution == original.distribution
+    assert changed.input_version == original.input_version
+
+
+def test_pregame_request_excludes_same_tipoff_and_future_outcomes() -> None:
+    prior = row("prior", "player-1", datetime(2025, 1, 9, tzinfo=UTC), 10, 10)
+    target_start = datetime(2025, 1, 10, 18, tzinfo=UTC)
+    same_tipoff = row("same", "player-2", target_start, 100, 40)
+    future = row("future", "player-1", datetime(2025, 1, 11, tzinfo=UTC), 100, 40)
+    request = PregameProjectionRequest(
+        dataset_version="features-v1",
+        feature_schema_version="1",
+        player_id="player-1",
+        game_id="target",
+        game_start=target_start,
+        available_as_of=datetime(2025, 1, 10, 12, tzinfo=UTC),
+        history=(prior, same_tipoff, future),
+    )
+
+    snapshot = DirectFantasyPointBaseline().project_pregame(
+        request,
+        scoring_policy=POLICY,
+    )
+    reference = DirectFantasyPointBaseline().project_pregame(
+        replace(request, history=(prior,)),
+        scoring_policy=POLICY,
+    )
+
+    assert snapshot.distribution == reference.distribution
+    assert snapshot.input_version == reference.input_version
+
+
+def test_pregame_projection_reports_stable_missing_warmup_reason() -> None:
+    request = PregameProjectionRequest(
+        dataset_version="features-v1",
+        feature_schema_version="1",
+        player_id="player-1",
+        game_id="target",
+        game_start=datetime(2025, 1, 10, 18, tzinfo=UTC),
+        available_as_of=datetime(2025, 1, 10, 12, tzinfo=UTC),
+        history=(),
+    )
+
+    with pytest.raises(ProjectionBaselineError) as error:
+        DirectFantasyPointBaseline().project_pregame(request, scoring_policy=POLICY)
+
+    assert error.value.reason_code == MISSING_WARMUP_REASON
 
 
 def test_direct_baseline_requires_prior_same_season_observations() -> None:
