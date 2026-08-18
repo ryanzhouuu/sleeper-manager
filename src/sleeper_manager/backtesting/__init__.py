@@ -19,13 +19,6 @@ from sleeper_manager.backtesting.controls import (
     NaiveProjectionBaseline,
     NaiveProjectionKind,
 )
-from sleeper_manager.backtesting.league_archive import (
-    HistoricalLeagueArchive,
-    HistoricalTransaction,
-    LeagueArchiveError,
-    PlayerEligibilitySnapshot,
-    parse_historical_league_archive,
-)
 from sleeper_manager.backtesting.models import (
     COHORT_NAMES,
     BacktestComparison,
@@ -46,10 +39,6 @@ from sleeper_manager.backtesting.models import (
     ProjectionModel,
     TargetSkip,
 )
-from sleeper_manager.backtesting.planning_adapter import (
-    PlanningAdapterError,
-    team_week_state_from_replay,
-)
 from sleeper_manager.backtesting.replay import (
     ReplayConfig,
     ReplayError,
@@ -58,7 +47,7 @@ from sleeper_manager.backtesting.replay import (
     optimize_oracle,
     oracle_team_week_result,
 )
-from sleeper_manager.backtesting.replay_inputs import (
+from sleeper_manager.backtesting.replay.inputs import (
     HistoricalReplayBuildInput,
     HistoricalTeamWeekInput,
     ReplayCoverageSummary,
@@ -72,7 +61,14 @@ from sleeper_manager.backtesting.replay_inputs import (
     source_fingerprint,
     write_replay_input_bundle,
 )
-from sleeper_manager.backtesting.replay_models import (
+from sleeper_manager.backtesting.replay.league_archive import (
+    HistoricalLeagueArchive,
+    HistoricalTransaction,
+    LeagueArchiveError,
+    PlayerEligibilitySnapshot,
+    parse_historical_league_archive,
+)
+from sleeper_manager.backtesting.replay.models import (
     LockCandidate,
     LockedSlot,
     ReplayDecision,
@@ -82,31 +78,35 @@ from sleeper_manager.backtesting.replay_models import (
     TeamWeekComparison,
     TeamWeekReplayResult,
 )
-from sleeper_manager.backtesting.replay_validation import (
+from sleeper_manager.backtesting.replay.planning_adapter import (
+    PlanningAdapterError,
+    team_week_state_from_replay,
+)
+from sleeper_manager.backtesting.replay.validation import (
     BootstrapInterval as ReplayBootstrapInterval,
 )
-from sleeper_manager.backtesting.replay_validation import (
+from sleeper_manager.backtesting.replay.validation import (
     PairedPolicyDelta,
     PolicyScore,
     ReplayMetricSummary,
     paired_policy_delta,
     summarize_team_weeks,
 )
-from sleeper_manager.backtesting.validation_folds import (
+from sleeper_manager.backtesting.validation.folds import (
     cohort_comparison_across_folds,
     regular_season_folds,
     run_validation_folds,
 )
-from sleeper_manager.backtesting.validation_gates import (
+from sleeper_manager.backtesting.validation.gates import (
     evaluate_component_gates,
     evaluate_development_candidate,
     evaluate_promotion,
 )
-from sleeper_manager.backtesting.validation_metrics import (
+from sleeper_manager.backtesting.validation.metrics import (
     block_bootstrap_mae_delta,
     segment_comparisons,
 )
-from sleeper_manager.backtesting.validation_models import (
+from sleeper_manager.backtesting.validation.models import (
     BootstrapInterval,
     ChronologicalFold,
     ComponentGateConfig,

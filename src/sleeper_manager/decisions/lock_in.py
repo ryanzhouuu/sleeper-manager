@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from sleeper_manager.backtesting.replay_models import LockedSlot, ReplayPlayerGame
+from sleeper_manager.backtesting.replay.models import LockedSlot, ReplayPlayerGame
 from sleeper_manager.decisions.lineup import AssignmentCandidate, AssignmentResult
 from sleeper_manager.decisions.simulation import (
     generate_scenarios,

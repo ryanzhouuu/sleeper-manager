@@ -6,7 +6,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from sleeper_manager.backtesting.replay_models import ReplayPlayerGame
+from sleeper_manager.backtesting.replay.models import ReplayPlayerGame
 from sleeper_manager.decisions.lineup import (
     AssignmentCandidate,
     AssignmentResult,

@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sleeper_manager.backtesting.replay_models import (
+from sleeper_manager.backtesting.replay.models import (
     LockedSlot,
     ReplayDecision,
     ReplayGame,
@@ -12,7 +12,7 @@ from sleeper_manager.backtesting.replay_models import (
     TeamWeekComparison,
     TeamWeekReplayResult,
 )
-from sleeper_manager.backtesting.replay_state import ReplayError, ReplayState
+from sleeper_manager.backtesting.replay.state import ReplayError, ReplayState
 from sleeper_manager.decisions.lineup import (
     AssignmentCandidate,
     AssignmentResult,

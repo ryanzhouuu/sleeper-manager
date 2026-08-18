@@ -7,12 +7,12 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from sleeper_manager import __version__
-from sleeper_manager.backtesting.feature_validation import run_model_feature_validation
-from sleeper_manager.backtesting.lock_in_experiment import (
+from sleeper_manager.backtesting.experiments.feature_validation import run_model_feature_validation
+from sleeper_manager.backtesting.experiments.lock_in import (
     LockInExperimentError,
     run_lock_in_policy_validation,
 )
-from sleeper_manager.backtesting.projection_evaluation import (
+from sleeper_manager.backtesting.experiments.projection_evaluation import (
     ProjectionEvaluationError,
     run_projection_evaluation,
 )
