@@ -342,3 +342,52 @@ def test_historical_join_respects_tipoff_membership_and_game_status() -> None:
     assert team_week.player_games[1].membership_segment == "tx-reacquire"
     assert team_week.games[2].status is ReplayGameStatus.POSTPONED
     assert team_week.games[3].status is ReplayGameStatus.CANCELED
+
+
+def test_unrelated_missing_schedule_does_not_exclude_another_week() -> None:
+    base = _historical_join_inputs()
+    boundaries = build_fantasy_week_boundaries(
+        {
+            1: datetime(2026, 1, 5, tzinfo=UTC).date(),
+            2: datetime(2026, 1, 12, tzinfo=UTC).date(),
+        }
+    )
+    timeline = replace(
+        base.roster_timeline,
+        week_boundaries=boundaries,
+        intervals=(
+            replace(
+                base.roster_timeline.intervals[0], ends_at=datetime(2026, 1, 6, 12, tzinfo=UTC)
+            ),
+            replace(base.roster_timeline.intervals[1], ends_at=datetime(2026, 1, 19, tzinfo=UTC)),
+        ),
+    )
+    orphan = PlayerBoxScore(
+        "missing-schedule",
+        "provider-p1",
+        "home",
+        datetime(2026, 1, 14, 22, tzinfo=UTC),
+        True,
+        True,
+        20,
+        BoxScoreLine(points=5),
+        _source("missing-schedule:provider-p1"),
+    )
+
+    result = assemble_historical_team_week_inputs(
+        replace(
+            base,
+            roster_timeline=timeline,
+            week_boundaries=boundaries,
+            box_scores=base.box_scores + (orphan,),
+        )
+    )
+
+    week_one = next(team_week for team_week in result if team_week.week == 1)
+    week_two = next(team_week for team_week in result if team_week.week == 2)
+    assert week_one.complete
+    assert not week_two.complete
+    assert any(
+        exclusion.reason is PlanningReasonCode.MISSING_GAME_SCHEDULE
+        for exclusion in week_two.exclusions
+    )
