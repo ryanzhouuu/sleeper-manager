@@ -1,6 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
-from sleeper_manager.backtesting.replay_models import ReplayPlayerGame
+from sleeper_manager.backtesting.replay.models import ReplayPlayerGame
 from sleeper_manager.decisions.lock_in import (
     LockInPolicyConfig,
     ScoreMaximizingLockInPolicy,

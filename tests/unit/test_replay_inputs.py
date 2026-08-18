@@ -4,12 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from sleeper_manager.backtesting.league_archive import (
-    ArchivedRoster,
-    HistoricalLeagueArchive,
-    PlayerEligibilitySnapshot,
-)
-from sleeper_manager.backtesting.replay_inputs import (
+from sleeper_manager.backtesting.replay.inputs import (
     HistoricalReplayBuildInput,
     HistoricalTeamWeekInput,
     ReplayCoverageSummary,
@@ -20,8 +15,13 @@ from sleeper_manager.backtesting.replay_inputs import (
     source_fingerprint,
     write_replay_input_bundle,
 )
-from sleeper_manager.backtesting.replay_models import ReplayGame, ReplayGameStatus, ReplayPlayerGame
-from sleeper_manager.backtesting.roster_timeline import (
+from sleeper_manager.backtesting.replay.league_archive import (
+    ArchivedRoster,
+    HistoricalLeagueArchive,
+    PlayerEligibilitySnapshot,
+)
+from sleeper_manager.backtesting.replay.models import ReplayGame, ReplayGameStatus, ReplayPlayerGame
+from sleeper_manager.backtesting.replay.roster_timeline import (
     RosterMembershipInterval,
     RosterTimeline,
     build_fantasy_week_boundaries,

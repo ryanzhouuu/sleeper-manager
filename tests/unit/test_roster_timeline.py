@@ -1,7 +1,7 @@
 from datetime import UTC, date, datetime
 
-from sleeper_manager.backtesting.league_archive import parse_historical_league_archive
-from sleeper_manager.backtesting.roster_timeline import (
+from sleeper_manager.backtesting.replay.league_archive import parse_historical_league_archive
+from sleeper_manager.backtesting.replay.roster_timeline import (
     assign_game_to_week,
     build_fantasy_week_boundaries,
     reconstruct_roster_timeline,

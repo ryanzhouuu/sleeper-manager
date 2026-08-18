@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from sleeper_manager.backtesting.league_archive import (
+from sleeper_manager.backtesting.replay.league_archive import (
     LeagueArchiveError,
     acquire_sleeper_archive,
     parse_historical_league_archive,

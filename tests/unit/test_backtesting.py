@@ -15,7 +15,7 @@ from sleeper_manager.backtesting import (
 )
 from sleeper_manager.backtesting.backtest_metrics import _validate_cohort_invariants
 from sleeper_manager.backtesting.controls import CalibratedProjectionModel
-from sleeper_manager.backtesting.feature_validation import (
+from sleeper_manager.backtesting.experiments.feature_validation import (
     _injury_mapping_diagnostics,
     _isolated_suite,
 )

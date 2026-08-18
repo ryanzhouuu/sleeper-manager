@@ -2,7 +2,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sleeper_manager.backtesting.experiment_injuries import (
+from sleeper_manager.backtesting.experiments.injuries import (
     acquire_injury_archive,
     latest_report_timestamp,
     requested_report_timestamps,
@@ -123,7 +123,7 @@ def test_archive_falls_back_and_reuses_cached_report(tmp_path: Path) -> None:
 
 
 def test_archive_reuses_versioned_parsed_snapshot_sidecar(tmp_path: Path, monkeypatch) -> None:
-    import sleeper_manager.backtesting.experiment_injuries as injuries_module
+    import sleeper_manager.backtesting.experiments.injuries as injuries_module
 
     def parsed_snapshot(_: bytes, source: SourceMetadata) -> OfficialInjuryReportSnapshot:
         assert source.source_updated_at is not None
@@ -167,7 +167,7 @@ def test_archive_reuses_versioned_parsed_snapshot_sidecar(tmp_path: Path, monkey
 
 
 def test_archive_reparses_stale_parsed_snapshot_sidecar(tmp_path: Path, monkeypatch) -> None:
-    import sleeper_manager.backtesting.experiment_injuries as injuries_module
+    import sleeper_manager.backtesting.experiments.injuries as injuries_module
 
     parse_count = 0
 

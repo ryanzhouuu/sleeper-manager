@@ -5,9 +5,8 @@ from pathlib import Path
 import pytest
 
 from sleeper_manager.backtesting import COHORT_NAMES, CohortConfig, run_backtest
-from sleeper_manager.backtesting.experiment_io import _json_value
-from sleeper_manager.backtesting.models import BacktestConfig
-from sleeper_manager.backtesting.projection_evaluation import (
+from sleeper_manager.backtesting.experiments.io import _json_value
+from sleeper_manager.backtesting.experiments.projection_evaluation import (
     DIRECT_BASELINE_MODEL,
     OPPORTUNITY_FULL_MODEL,
     RAW_SUITE_NAMES,
@@ -22,8 +21,9 @@ from sleeper_manager.backtesting.projection_evaluation import (
     report,
     secondary_calibrated_suite,
 )
-from sleeper_manager.backtesting.validation_folds import run_validation_folds
-from sleeper_manager.backtesting.validation_models import (
+from sleeper_manager.backtesting.models import BacktestConfig
+from sleeper_manager.backtesting.validation.folds import run_validation_folds
+from sleeper_manager.backtesting.validation.models import (
     ChronologicalFold,
     ComponentGateConfig,
 )

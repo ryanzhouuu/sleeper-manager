@@ -1,6 +1,6 @@
 import pytest
 
-from sleeper_manager.backtesting.replay_models import ReplayPlayerGame, TeamWeekComparison
+from sleeper_manager.backtesting.replay.models import ReplayPlayerGame, TeamWeekComparison
 
 
 def test_replay_player_game_rejects_nonfinite_scores() -> None:

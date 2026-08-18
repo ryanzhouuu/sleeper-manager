@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from sleeper_manager.backtesting.lock_in_experiment import (
+from sleeper_manager.backtesting.experiments.lock_in import (
     LockInExperimentError,
     _load_cached_archive,
     run_lock_in_policy_validation,

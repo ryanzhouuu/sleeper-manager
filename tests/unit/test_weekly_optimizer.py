@@ -5,7 +5,7 @@ from sleeper_manager.backtesting.replay import (
     compare_team_week,
     oracle_team_week_result,
 )
-from sleeper_manager.backtesting.replay_models import (
+from sleeper_manager.backtesting.replay.models import (
     ReplayGame,
     ReplayGameStatus,
     ReplayPlayerGame,

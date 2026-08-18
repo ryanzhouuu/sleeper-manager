@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
 from sleeper_manager.backtesting.replay import ReplayState
-from sleeper_manager.backtesting.replay_models import ReplayGame, ReplayGameStatus, ReplayPlayerGame
+from sleeper_manager.backtesting.replay.models import ReplayGame, ReplayGameStatus, ReplayPlayerGame
 
 
 def test_replay_state_enforces_next_game_deadline_and_permanent_slot_lock() -> None:

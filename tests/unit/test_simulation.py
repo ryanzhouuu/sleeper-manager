@@ -2,7 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from sleeper_manager.backtesting.replay_models import ReplayPlayerGame
+from sleeper_manager.backtesting.replay.models import ReplayPlayerGame
 from sleeper_manager.decisions.simulation import SimulationError, generate_scenarios
 from sleeper_manager.domain.projection import ProjectionDistribution, ProjectionSnapshot
 

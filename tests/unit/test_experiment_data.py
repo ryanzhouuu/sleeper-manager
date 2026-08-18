@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from sleeper_manager.backtesting.experiment_data import (
+from sleeper_manager.backtesting.experiments.data import (
     artifact_manifest,
     dataset_version_for,
     decision_cutoff,
