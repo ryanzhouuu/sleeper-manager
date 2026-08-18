@@ -36,8 +36,8 @@ class ReplayState:
         game = _game_for(self.games, player_game.game_id)
         if game is None or game.status.value != "final" or not player_game.rostered_at_tipoff:
             return None
-        final_time = game.final_time or game.start_time
-        if at < final_time:
+        final_time = game.finalized_at
+        if final_time is None or at < final_time:
             return None
         if any(slot.sleeper_id == player_game.sleeper_id for slot in self.locked_slots):
             return None

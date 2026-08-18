@@ -61,13 +61,19 @@ class RosterTimeline:
     exclusions: tuple[str, ...] = ()
 
     def membership_at(self, roster_id: int, player_id: str, at: datetime) -> bool:
+        return bool(self.membership_intervals_at(roster_id, player_id, at))
+
+    def membership_intervals_at(
+        self, roster_id: int, player_id: str, at: datetime
+    ) -> tuple[RosterMembershipInterval, ...]:
         if at.tzinfo is None:
             raise RosterTimelineError("Membership lookup requires a timezone-aware timestamp")
-        return any(
-            interval.roster_id == roster_id
+        return tuple(
+            interval
+            for interval in self.intervals
+            if interval.roster_id == roster_id
             and interval.sleeper_player_id == player_id
             and interval.starts_at <= at < interval.ends_at
-            for interval in self.intervals
         )
 
     def players_at(self, roster_id: int, at: datetime) -> tuple[str, ...]:
@@ -78,6 +84,25 @@ class RosterTimeline:
                     for interval in self.intervals
                     if interval.roster_id == roster_id
                     and interval.starts_at <= at < interval.ends_at
+                }
+            )
+        )
+
+    def players_overlapping(
+        self, roster_id: int, starts_at: datetime, ends_at: datetime
+    ) -> tuple[str, ...]:
+        if starts_at.tzinfo is None or ends_at.tzinfo is None:
+            raise RosterTimelineError("Membership range requires timezone-aware timestamps")
+        if starts_at >= ends_at:
+            raise RosterTimelineError("Membership range must be non-empty")
+        return tuple(
+            sorted(
+                {
+                    interval.sleeper_player_id
+                    for interval in self.intervals
+                    if interval.roster_id == roster_id
+                    and interval.starts_at < ends_at
+                    and interval.ends_at > starts_at
                 }
             )
         )

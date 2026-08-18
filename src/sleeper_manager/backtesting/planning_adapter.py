@@ -7,7 +7,6 @@ from sleeper_manager.backtesting.replay import ReplayConfig
 from sleeper_manager.backtesting.replay_models import (
     LockedSlot,
     ReplayGame,
-    ReplayGameStatus,
     ReplayPlayerGame,
 )
 from sleeper_manager.backtesting.replay_state import ReplayState
@@ -346,21 +345,20 @@ def _fixed_slot(
 
 
 def _finalized_at(game: ReplayGame, decision_time: datetime) -> datetime | None:
-    finalized_at = game.final_time or game.start_time
-    if game.status is not ReplayGameStatus.FINAL or finalized_at > decision_time:
+    finalized_at = game.finalized_at
+    if finalized_at is None or finalized_at > decision_time:
         return None
     return finalized_at
 
 
 def _planning_status_at(game: ReplayGame, decision_time: datetime) -> PlanningGameStatus:
-    if game.status is ReplayGameStatus.FINAL:
-        finalized_at = game.final_time or game.start_time
-        if finalized_at > decision_time:
-            return (
-                PlanningGameStatus.ACTIVE
-                if game.start_time <= decision_time
-                else PlanningGameStatus.SCHEDULED
-            )
+    finalized_at = game.finalized_at
+    if finalized_at is not None and finalized_at > decision_time:
+        return (
+            PlanningGameStatus.ACTIVE
+            if game.start_time <= decision_time
+            else PlanningGameStatus.SCHEDULED
+        )
     return PlanningGameStatus(game.status.value)
 
 

@@ -45,6 +45,16 @@ def test_timeline_reverse_reconstructs_initial_membership_and_replays_drop_add()
     assert timeline.exclusions == ()
 
 
+def test_timeline_exposes_membership_intervals_and_week_overlap() -> None:
+    weeks = build_fantasy_week_boundaries({1: date(2025, 10, 6), 2: date(2025, 10, 13)})
+    timeline = reconstruct_roster_timeline(_archive(), week_boundaries=weeks)
+
+    intervals = timeline.membership_intervals_at(1, "p1", datetime(2025, 10, 7, 14, tzinfo=UTC))
+
+    assert len(intervals) == 1
+    assert timeline.players_overlapping(1, weeks[0].utc_start, weeks[0].utc_end) == ("p1", "p2")
+
+
 def test_week_assignment_uses_eastern_monday_boundary_for_late_sunday() -> None:
     weeks = build_fantasy_week_boundaries({1: date(2025, 10, 6), 2: date(2025, 10, 13)})
     late_sunday = datetime(2025, 10, 13, 3, 30, tzinfo=UTC)

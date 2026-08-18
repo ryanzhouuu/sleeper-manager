@@ -24,6 +24,12 @@ class ReplayGame:
     team_ids: tuple[str, str]
     status: ReplayGameStatus
 
+    @property
+    def finalized_at(self) -> datetime | None:
+        if self.status is not ReplayGameStatus.FINAL:
+            return None
+        return self.final_time or self.start_time
+
 
 @dataclass(frozen=True, slots=True)
 class ReplayPlayerGame:
