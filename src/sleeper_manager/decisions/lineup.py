@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cache
 from math import isfinite
@@ -18,12 +19,18 @@ class AssignmentCandidate:
     score: float
     eligible_positions: tuple[str, ...]
     game_id: str | None = None
+    eligible_slot_indices: tuple[int, ...] | None = None
 
     def __post_init__(self) -> None:
         if not self.candidate_id.strip() or not self.player_id.strip():
             raise ValueError("Assignment candidates require stable IDs")
         if not isfinite(self.score):
             raise ValueError("Assignment candidate scores must be finite")
+        if self.eligible_slot_indices is not None:
+            if len(set(self.eligible_slot_indices)) != len(self.eligible_slot_indices):
+                raise ValueError("Candidate slot indices must be unique")
+            if any(index < 0 for index in self.eligible_slot_indices):
+                raise ValueError("Candidate slot indices must be non-negative")
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,11 +51,28 @@ class AssignmentResult(NamedTuple):
 def maximum_weight_assignment(
     candidates: tuple[AssignmentCandidate, ...] | list[AssignmentCandidate],
     slots: tuple[str, ...] | list[str],
+    *,
+    slot_indices: tuple[int, ...] | list[int] | None = None,
+    forbidden_edges: frozenset[tuple[int, str]] = frozenset(),
+    tie_break_key: Callable[[tuple[SlotAssignment, ...]], tuple[object, ...]] | None = None,
+    tie_tolerance: float = 1e-9,
 ) -> AssignmentResult:
     """Solve a small maximum-weight player/slot assignment without external solvers."""
 
     candidate_records = tuple(candidates)
     slot_records = tuple(slot.upper() for slot in slots)
+    if slot_indices is None:
+        slot_index_records = tuple(range(len(slot_records)))
+    else:
+        slot_index_records = tuple(slot_indices)
+        if len(slot_index_records) != len(slot_records):
+            raise ValueError("Slot indices must match the number of slots")
+        if len(set(slot_index_records)) != len(slot_index_records):
+            raise ValueError("Slot indices must be unique")
+        if any(index < 0 for index in slot_index_records):
+            raise ValueError("Slot indices must be non-negative")
+    if not isfinite(tie_tolerance) or tie_tolerance < 0:
+        raise ValueError("Assignment tie tolerance must be finite and non-negative")
     if not slot_records:
         return AssignmentResult(0.0, ())
     by_slot: tuple[tuple[AssignmentCandidate, ...], ...] = tuple(
@@ -58,11 +82,13 @@ def maximum_weight_assignment(
                     candidate
                     for candidate in candidate_records
                     if _eligible(candidate.eligible_positions, slot)
+                    and _eligible_for_index(candidate, slot_index_records[index])
+                    and (slot_index_records[index], candidate.candidate_id) not in forbidden_edges
                 ),
                 key=lambda candidate: candidate.candidate_id,
             )
         )
-        for slot in slot_records
+        for index, slot in enumerate(slot_records)
     )
     player_ids = {candidate.player_id for candidate in candidate_records}
     player_bits = {player_id: 1 << index for index, player_id in enumerate(sorted(player_ids))}
@@ -76,7 +102,7 @@ def maximum_weight_assignment(
             best.score,
             (
                 SlotAssignment(
-                    slot_index,
+                    slot_index_records[slot_index],
                     slot_records[slot_index],
                     None,
                     None,
@@ -95,7 +121,7 @@ def maximum_weight_assignment(
                 candidate.score + remainder.score,
                 (
                     SlotAssignment(
-                        slot_index,
+                        slot_index_records[slot_index],
                         slot_records[slot_index],
                         candidate.candidate_id,
                         candidate.player_id,
@@ -105,7 +131,7 @@ def maximum_weight_assignment(
                 )
                 + remainder.assignments,
             )
-            if _better_assignment(current, best):
+            if _better_assignment(current, best, tie_break_key, tie_tolerance):
                 best = current
         return best
 
@@ -119,14 +145,25 @@ def _eligible(positions: tuple[str, ...], slot: str) -> bool:
     return eligible_for_slot(positions, slot)
 
 
-def _better_assignment(candidate: AssignmentResult, incumbent: AssignmentResult) -> bool:
-    if candidate.score > incumbent.score + 1e-9:
+def _better_assignment(
+    candidate: AssignmentResult,
+    incumbent: AssignmentResult,
+    tie_break_key: Callable[[tuple[SlotAssignment, ...]], tuple[object, ...]] | None,
+    tie_tolerance: float,
+) -> bool:
+    if candidate.score > incumbent.score + tie_tolerance:
         return True
-    if abs(candidate.score - incumbent.score) > 1e-9:
+    if abs(candidate.score - incumbent.score) > tie_tolerance:
         return False
+    if tie_break_key is not None:
+        return tie_break_key(candidate.assignments) < tie_break_key(incumbent.assignments)
     candidate_key = tuple(assignment.candidate_id or "" for assignment in candidate.assignments)
     incumbent_key = tuple(assignment.candidate_id or "" for assignment in incumbent.assignments)
     return candidate_key < incumbent_key
+
+
+def _eligible_for_index(candidate: AssignmentCandidate, slot_index: int) -> bool:
+    return candidate.eligible_slot_indices is None or slot_index in candidate.eligible_slot_indices
 
 
 def projected_lineup_total(assignments: tuple[LineupAssignment, ...]) -> float:
