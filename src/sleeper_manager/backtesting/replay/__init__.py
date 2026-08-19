@@ -35,6 +35,17 @@ from sleeper_manager.backtesting.replay.planning_adapter import (
     team_week_state_from_replay,
 )
 from sleeper_manager.backtesting.replay.report import markdown_report, report_payload, write_report
+from sleeper_manager.backtesting.replay.runner import (
+    ChronologicalReplayRunner,
+    ReplayEvent,
+    ReplayEventKind,
+    ReplayPlanningSnapshot,
+    ReplayRunnerConfig,
+    ReplayRunnerError,
+    ReplayTrace,
+    ReplayTransaction,
+    build_chronological_events,
+)
 from sleeper_manager.backtesting.replay.validation import (
     BootstrapInterval,
     PairedPolicyDelta,
@@ -49,6 +60,7 @@ from sleeper_manager.backtesting.replay.validation import (
 
 __all__ = (
     "BootstrapInterval",
+    "ChronologicalReplayRunner",
     "HistoricalReplayBuildInput",
     "HistoricalTeamWeekInput",
     "LockCandidate",
@@ -59,15 +71,22 @@ __all__ = (
     "ReplayConfig",
     "ReplayDecision",
     "ReplayError",
+    "ReplayEvent",
+    "ReplayEventKind",
     "ReplayGame",
     "ReplayGameStatus",
     "ReplayInputError",
     "ReplayInputExclusion",
     "ReplayInputManifest",
+    "ReplayPlanningSnapshot",
     "ReplayMetricSummary",
     "ReplayPlayerGame",
     "ReplayState",
+    "ReplayRunnerConfig",
+    "ReplayRunnerError",
     "ReplayValidationError",
+    "ReplayTrace",
+    "ReplayTransaction",
     "ReplayCoverageSummary",
     "SourceFingerprint",
     "TeamWeekComparison",
@@ -75,6 +94,7 @@ __all__ = (
     "assemble_historical_team_week_inputs",
     "bootstrap_mean_interval",
     "build_replay_input_manifest",
+    "build_chronological_events",
     "compare_team_week",
     "markdown_report",
     "optimize_oracle",
