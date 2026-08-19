@@ -140,6 +140,34 @@ def test_equal_terminal_values_prefer_observed_placement_and_return_alternative(
     assert decision.selected.move_count == 0
 
 
+def test_lower_standalone_value_preserves_a_scarce_future_opportunity() -> None:
+    start = NOW + timedelta(hours=1)
+    later = NOW + timedelta(days=1)
+    state = _state(
+        (
+            _opportunity("p1", "g1", start, ("G",), ((10, 1),)),
+            _opportunity("p2", "g1", start, ("G",), ((8, 1),)),
+            _opportunity("p1", "g2", later, ("C",), ((50, 1),)),
+        )
+    )
+
+    decision = score_weekly_options(state, config=WeeklyPlanPolicyConfig(scenario_count=5))
+
+    assert decision.selected.assignments[0].player_id == "p2"
+    assert (
+        next(
+            item for item in decision.evaluations if item.player_id == "p1"
+        ).standalone_expected_value
+        == 10
+    )
+    assert (
+        next(
+            item for item in decision.evaluations if item.player_id == "p2"
+        ).standalone_expected_value
+        == 8
+    )
+
+
 def test_fixed_slots_and_passed_opportunities_constrain_terminal_options() -> None:
     start = NOW + timedelta(hours=1)
     later = NOW + timedelta(days=1)
