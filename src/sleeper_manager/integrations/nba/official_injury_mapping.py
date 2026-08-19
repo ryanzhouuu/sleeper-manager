@@ -5,6 +5,7 @@ from datetime import date, datetime, time
 from enum import StrEnum
 
 from sleeper_manager.domain.nba import AvailabilityStatus, ProviderPlayer, SourceMetadata
+from sleeper_manager.domain.nba_season import nba_season_start_year
 from sleeper_manager.integrations.nba.identity import MappingConfidence, MappingMethod
 from sleeper_manager.integrations.nba.mapping import (
     normalize_player_name,
@@ -127,7 +128,7 @@ def map_official_injury_report(
             diagnostics[
                 (
                     InjuryMappingCategory.RESOLVED,
-                    _season_start_year(entry.game_date),
+                    nba_season_start_year(entry.game_date),
                     team or entry.team_abbreviation.casefold(),
                     normalized_name,
                 )
@@ -180,7 +181,7 @@ def map_official_injury_report(
             diagnostics[
                 (
                     InjuryMappingCategory.RESOLVED_HISTORICAL_NAME_TEAM,
-                    _season_start_year(entry.game_date),
+                    nba_season_start_year(entry.game_date),
                     team or entry.team_abbreviation.casefold(),
                     normalized_name,
                 )
@@ -217,7 +218,7 @@ def map_official_injury_report(
             diagnostics[
                 (
                     InjuryMappingCategory.RESOLVED_PARTIAL_NAME_TEAM,
-                    _season_start_year(entry.game_date),
+                    nba_season_start_year(entry.game_date),
                     team or entry.team_abbreviation.casefold(),
                     normalized_name,
                 )
@@ -259,7 +260,7 @@ def map_official_injury_report(
             diagnostics[
                 (
                     InjuryMappingCategory.RESOLVED_SUBSET_NAME_TEAM,
-                    _season_start_year(entry.game_date),
+                    nba_season_start_year(entry.game_date),
                     team or entry.team_abbreviation.casefold(),
                     normalized_name,
                 )
@@ -298,7 +299,7 @@ def map_official_injury_report(
             diagnostics[
                 (
                     InjuryMappingCategory.RESOLVED_NAME_ONLY,
-                    _season_start_year(entry.game_date),
+                    nba_season_start_year(entry.game_date),
                     team or entry.team_abbreviation.casefold(),
                     normalized_name,
                 )
@@ -339,7 +340,7 @@ def map_official_injury_report(
         diagnostics[
             (
                 category,
-                _season_start_year(entry.game_date),
+                nba_season_start_year(entry.game_date),
                 team or entry.team_abbreviation.casefold(),
                 normalized_name,
             )
@@ -403,10 +404,6 @@ def map_official_injury_report(
             )
         ),
     )
-
-
-def _season_start_year(value: date) -> int:
-    return value.year if value.month >= 10 else value.year - 1
 
 
 def _name_tokens(name: str) -> tuple[str, ...]:

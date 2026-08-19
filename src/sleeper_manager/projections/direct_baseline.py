@@ -8,12 +8,14 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from math import exp, isfinite, log
 
+from sleeper_manager.domain.nba_season import nba_season_start_year
 from sleeper_manager.domain.projection import (
     ProjectionDistribution,
     ProjectionReason,
     ProjectionSnapshot,
 )
 from sleeper_manager.domain.scoring import ScoringPolicy, calculate_fantasy_points
+from sleeper_manager.domain.statistics import weighted_mean
 from sleeper_manager.integrations.nba.historical_feature_models import (
     DatasetSourceVersion,
     HistoricalFeatureDataset,
@@ -148,7 +150,7 @@ class DirectFantasyPointBaseline:
         exceed_score: float | None = None,
     ) -> ProjectionSnapshot:
         index = self._pregame_index(request, scoring_policy)
-        season = _season_key(request.game_start)
+        season = nba_season_start_year(request.game_start)
         prior_rows = index.player_rows_before(
             request.player_id,
             season,
@@ -281,7 +283,7 @@ class _HistoricalIndex:
                 raise ProjectionBaselineError("Historical rows must be evaluated chronologically")
             self.rows.append(row)
             self.starts.append(row.game_start)
-            season = _season_key(row.game_start)
+            season = nba_season_start_year(row.game_start)
             season_index = self.seasons.setdefault(season, _SeasonIndex(row.game_start))
             season_index.rows.append(row)
             season_index.starts.append(row.game_start)
@@ -366,10 +368,6 @@ def _validate_timestamp(value: datetime, field: str) -> None:
         raise ProjectionBaselineError(f"{field} must be timezone-aware")
 
 
-def _season_key(value: datetime) -> int:
-    return value.year if value.month >= 10 else value.year - 1
-
-
 def _weight(target_start: datetime, row: HistoricalFeatureRow, half_life: float) -> float:
     age_days = max((target_start - row.game_start).total_seconds() / 86400, 0.0)
     return exp(-log(2) * age_days / half_life)
@@ -428,7 +426,7 @@ def _weighted_mean(observations: Iterable[tuple[float, float]]) -> float:
     total_weight = sum(weight for _, weight in values)
     if not values or total_weight <= 0:
         raise ProjectionBaselineError("Weighted projection observations are empty")
-    return sum(value * weight for value, weight in values) / total_weight
+    return weighted_mean(values)
 
 
 def _reasons(

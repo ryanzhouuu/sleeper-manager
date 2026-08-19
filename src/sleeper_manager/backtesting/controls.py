@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Literal
 
 from sleeper_manager.backtesting.models import BacktestError, ProjectionModel
+from sleeper_manager.domain.nba_season import nba_season_start_year
 from sleeper_manager.domain.projection import (
     ProjectionDistribution,
     ProjectionReason,
@@ -65,7 +66,7 @@ class NaiveProjectionBaseline:
         index.extend(dataset.rows, prior_count)
         prior_rows = index.rows_before(
             player_id,
-            _season_key(target.game_start),
+            nba_season_start_year(target.game_start),
             target.game_start,
         )
         if not prior_rows:
@@ -272,7 +273,9 @@ class _NaiveHistoryIndex:
         if prior_count <= self.processed_count:
             return
         for row in rows[self.processed_count : prior_count]:
-            self.players.setdefault((row.player_id, _season_key(row.game_start)), []).append(row)
+            self.players.setdefault(
+                (row.player_id, nba_season_start_year(row.game_start)), []
+            ).append(row)
         self.processed_count = prior_count
 
     def rows_before(
@@ -297,10 +300,6 @@ def _find_target(
     if len(matches) != 1:
         raise BacktestError(f"Expected one feature row for player/game, found {len(matches)}")
     return matches[0]
-
-
-def _season_key(value: datetime) -> int:
-    return value.year if value.month >= 10 else value.year - 1
 
 
 def _input_version(

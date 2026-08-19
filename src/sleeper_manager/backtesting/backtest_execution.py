@@ -33,6 +33,7 @@ from sleeper_manager.backtesting.models import (
     TargetSkip,
     model_names,
 )
+from sleeper_manager.domain.nba_season import nba_season_start_year
 from sleeper_manager.domain.projection import ProjectionSnapshot
 from sleeper_manager.domain.scoring import BoxScoreLine, ScoringPolicy, calculate_fantasy_points
 from sleeper_manager.integrations.nba.historical_feature_models import (
@@ -236,7 +237,7 @@ def _eligible_targets(
                 prior_games_by_player_season[key] = prior_games_by_player_season.get(key, 0) + count
             pending_counts.clear()
         pending_game_time = row.game_start
-        player_season = row.player_id, _season_key(row.game_start)
+        player_season = row.player_id, nba_season_start_year(row.game_start)
         prior_games = prior_games_by_player_season.get(player_season, 0)
         pending_counts[player_season] = pending_counts.get(player_season, 0) + 1
         if config.start_at is not None and row.game_start < config.start_at:
@@ -349,7 +350,3 @@ def _validate_snapshot(
                 "Projection snapshot is missing configured interval percentiles "
                 f"{lower} and {upper}"
             )
-
-
-def _season_key(value: datetime) -> int:
-    return value.year if value.month >= 10 else value.year - 1

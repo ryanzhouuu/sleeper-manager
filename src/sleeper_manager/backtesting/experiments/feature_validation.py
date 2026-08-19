@@ -47,6 +47,7 @@ from sleeper_manager.backtesting.validation.models import (
     FoldResult,
     PromotionDecision,
 )
+from sleeper_manager.domain.nba_season import nba_season_start_year
 from sleeper_manager.domain.scoring import ScoringPolicy
 from sleeper_manager.integrations.nba.historical_feature_dataset import (
     build_historical_feature_dataset,
@@ -671,8 +672,7 @@ def _injury_mapping_diagnostics(
 
 
 def _season_label(value: datetime) -> str:
-    start_year = value.year if value.month >= 10 else value.year - 1
-    return _season_label_from_start_year(start_year)
+    return _season_label_from_start_year(nba_season_start_year(value))
 
 
 def _season_label_from_start_year(start_year: int) -> str:

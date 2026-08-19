@@ -9,7 +9,9 @@ from datetime import datetime, timedelta
 from math import exp, log
 
 from sleeper_manager.domain.nba import AvailabilityStatus
+from sleeper_manager.domain.nba_season import nba_season_start_year
 from sleeper_manager.domain.scoring import ScoringPolicy, calculate_fantasy_points
+from sleeper_manager.domain.statistics import weighted_mean
 from sleeper_manager.integrations.nba.historical_feature_models import HistoricalFeatureRow
 
 
@@ -176,11 +178,11 @@ def _rank_from_groups(
     config: CohortConfig,
     scoring_policy: ScoringPolicy,
 ) -> tuple[RankedPlayer, ...]:
-    current_season = _season_start_year(as_of)
+    current_season = nba_season_start_year(as_of)
     current_season_players = {
         player_id
         for player_id, player_rows in by_player.items()
-        if any(_season_start_year(row.game_start) == current_season for row in player_rows)
+        if any(nba_season_start_year(row.game_start) == current_season for row in player_rows)
     }
     all_players = player_ids | current_season_players
     scored = tuple(
@@ -233,12 +235,12 @@ def _baseline_score(
     if not rows:
         return 0.0
     ordered = tuple(sorted(rows, key=lambda row: row.game_start))
-    current_season = _season_start_year(as_of)
+    current_season = nba_season_start_year(as_of)
     current_rows = tuple(
-        row for row in ordered if _season_start_year(row.game_start) == current_season
+        row for row in ordered if nba_season_start_year(row.game_start) == current_season
     )
     prior_season_rows = tuple(
-        row for row in ordered if _season_start_year(row.game_start) == current_season - 1
+        row for row in ordered if nba_season_start_year(row.game_start) == current_season - 1
     )
     current_minutes, current_rate, current_effective = _weighted_playing_stats(
         current_rows, as_of, config, scoring_policy
@@ -286,16 +288,17 @@ def _weighted_playing_stats(
         )
     if not weighted_minutes:
         return 0.0, 0.0, 0.0
-    minutes = _weighted_mean(weighted_minutes)
-    rate = _weighted_mean(weighted_rates)
+    minutes = _weighted_mean_or_zero(weighted_minutes)
+    rate = _weighted_mean_or_zero(weighted_rates)
     effective = sum(weight for _, weight in weighted_minutes)
     return minutes, rate, effective
 
 
-def _weighted_mean(values: Iterable[tuple[float, float]]) -> float:
-    records = tuple(values)
-    total = sum(weight for _, weight in records)
-    return sum(value * weight for value, weight in records) / total if total else 0.0
+def _weighted_mean_or_zero(values: Iterable[tuple[float, float]]) -> float:
+    try:
+        return weighted_mean(values)
+    except ValueError:
+        return 0.0
 
 
 def _participation(rows: Sequence[HistoricalFeatureRow]) -> float:
@@ -311,10 +314,6 @@ def _status_probability(status: AvailabilityStatus) -> float:
         AvailabilityStatus.OUT: 0.02,
         AvailabilityStatus.UNKNOWN: 0.75,
     }[status]
-
-
-def _season_start_year(value: datetime) -> int:
-    return value.year if value.month >= 10 else value.year - 1
 
 
 __all__ = (

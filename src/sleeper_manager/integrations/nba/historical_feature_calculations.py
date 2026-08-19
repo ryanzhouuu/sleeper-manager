@@ -13,6 +13,7 @@ from sleeper_manager.domain.nba import (
     Team,
     TeamBoxScore,
 )
+from sleeper_manager.domain.nba_season import nba_season_start_year
 from sleeper_manager.integrations.nba.historical_feature_models import (
     AvailabilityObservation,
     DatasetSourceVersion,
@@ -222,7 +223,7 @@ def _opponent_stats(
         record
         for record in team_box_scores
         if record.played_at < game.start_time
-        and _season_key(record.played_at) == _season_key(game.start_time)
+        and nba_season_start_year(record.played_at) == nba_season_start_year(game.start_time)
         and record.estimated_possessions > 0
     )
     if not prior:
@@ -302,7 +303,9 @@ def _team_pace(
         if record.team_id == team_id and record.played_at < game.start_time and record.pace_48 > 0
     )
     same_season = tuple(
-        record for record in prior if _season_key(record.played_at) == _season_key(game.start_time)
+        record
+        for record in prior
+        if nba_season_start_year(record.played_at) == nba_season_start_year(game.start_time)
     )
     league_prior = tuple(
         record
@@ -370,10 +373,6 @@ def _value_band(value: float, population: tuple[float, ...]) -> str:
     if value < ordered[(2 * len(ordered)) // 3]:
         return "medium"
     return "high"
-
-
-def _season_key(value: datetime) -> int:
-    return value.year if value.month >= 10 else value.year - 1
 
 
 def _mean_minutes(records: tuple[PlayerBoxScore, ...]) -> float | None:

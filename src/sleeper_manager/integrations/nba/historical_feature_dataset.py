@@ -10,6 +10,7 @@ from sleeper_manager.domain.nba import (
     Team,
     TeamBoxScore,
 )
+from sleeper_manager.domain.nba_season import nba_season_start_year
 from sleeper_manager.integrations.nba.historical_feature_calculations import (
     _availability_at_cutoff,
     _baseline_exposure_pace,
@@ -29,7 +30,6 @@ from sleeper_manager.integrations.nba.historical_feature_calculations import (
     _opponent,
     _opponent_stats,
     _rest_features,
-    _season_key,
     _source_versions,
     _start_rate,
     _team_pace,
@@ -169,7 +169,7 @@ def build_historical_feature_dataset(
             for record in prior_by_player.get(box_score.player_id, ())
             if record.played_at is not None
             and record.played_at < game.start_time
-            and _season_key(record.played_at) == _season_key(game.start_time)
+            and nba_season_start_year(record.played_at) == nba_season_start_year(game.start_time)
         )
         latest_availability = _availability_at_cutoff(
             player_id=box_score.player_id,

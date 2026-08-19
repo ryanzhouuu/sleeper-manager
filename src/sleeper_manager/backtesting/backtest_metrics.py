@@ -24,6 +24,7 @@ from sleeper_manager.backtesting.models import (
 )
 from sleeper_manager.domain.projection import ProjectionComponent
 from sleeper_manager.domain.scoring import ScoringPolicy, calculate_fantasy_points
+from sleeper_manager.domain.statistics import weighted_mean
 from sleeper_manager.integrations.nba.historical_feature_models import HistoricalFeatureRow
 
 _PARTICIPATION_COMPONENT_CODE = "availability"
@@ -96,8 +97,8 @@ def _component_control(
                 weight * minutes,
             )
         )
-    minutes_estimate = _weighted_mean(weighted_minutes)
-    raw_rate = _weighted_mean(weighted_rates)
+    minutes_estimate = _weighted_mean_or_zero(weighted_minutes)
+    raw_rate = _weighted_mean_or_zero(weighted_rates)
     effective = sum(weight for _, weight in weighted_minutes)
     shrinkage = effective / (effective + _CONTROL_SHRINKAGE_MINUTES)
     rate_estimate = _CONTROL_RATE_PRIOR + shrinkage * (raw_rate - _CONTROL_RATE_PRIOR)
@@ -106,10 +107,11 @@ def _component_control(
     )
 
 
-def _weighted_mean(values: Iterable[tuple[float, float]]) -> float:
-    records = tuple(values)
-    total = sum(weight for _, weight in records)
-    return sum(value * weight for value, weight in records) / total if total else 0.0
+def _weighted_mean_or_zero(values: Iterable[tuple[float, float]]) -> float:
+    try:
+        return weighted_mean(values)
+    except ValueError:
+        return 0.0
 
 
 def cohort_matches(cohort: CohortAssignment, name: str) -> bool:

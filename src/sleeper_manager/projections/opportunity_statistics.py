@@ -6,6 +6,7 @@ from math import exp, log
 from sleeper_manager.domain.nba import AvailabilityStatus
 from sleeper_manager.domain.projection import ProjectionAdjustmentKind, ProjectionFallback
 from sleeper_manager.domain.scoring import ScoringPolicy, calculate_fantasy_points
+from sleeper_manager.domain.statistics import weighted_mean
 from sleeper_manager.integrations.nba.historical_feature_models import (
     HistoricalFeatureRow,
     OpponentStatsFallback,
@@ -71,7 +72,7 @@ def _weighted_mean(values: Iterable[tuple[float, float]]) -> float:
     total_weight = sum(weight for _, weight in records)
     if not records or total_weight <= 0:
         raise OpportunityModelError("Cannot calculate a weighted mean without observations")
-    return sum(value * weight for value, weight in records) / total_weight
+    return weighted_mean(records)
 
 
 def _production_rates(
