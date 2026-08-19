@@ -54,6 +54,7 @@ def maximum_weight_assignment(
     *,
     slot_indices: tuple[int, ...] | list[int] | None = None,
     forbidden_edges: frozenset[tuple[int, str]] = frozenset(),
+    required_edges: frozenset[tuple[int, str]] = frozenset(),
     tie_break_key: Callable[[tuple[SlotAssignment, ...]], tuple[object, ...]] | None = None,
     tie_tolerance: float = 1e-9,
 ) -> AssignmentResult:
@@ -73,6 +74,11 @@ def maximum_weight_assignment(
             raise ValueError("Slot indices must be non-negative")
     if not isfinite(tie_tolerance) or tie_tolerance < 0:
         raise ValueError("Assignment tie tolerance must be finite and non-negative")
+    required_by_slot = dict(required_edges)
+    if len(required_by_slot) != len(required_edges):
+        raise ValueError("Required assignment edges cannot reuse a slot")
+    if required_edges & forbidden_edges:
+        raise ValueError("An assignment edge cannot be required and forbidden")
     if not slot_records:
         return AssignmentResult(0.0, ())
     by_slot: tuple[tuple[AssignmentCandidate, ...], ...] = tuple(
@@ -83,6 +89,10 @@ def maximum_weight_assignment(
                     for candidate in candidate_records
                     if _eligible(candidate.eligible_positions, slot)
                     and _eligible_for_index(candidate, slot_index_records[index])
+                    and (
+                        slot_index_records[index] not in required_by_slot
+                        or required_by_slot[slot_index_records[index]] == candidate.candidate_id
+                    )
                     and (slot_index_records[index], candidate.candidate_id) not in forbidden_edges
                 ),
                 key=lambda candidate: candidate.candidate_id,
