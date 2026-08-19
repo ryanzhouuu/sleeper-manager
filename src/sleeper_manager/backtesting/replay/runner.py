@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
 
 from sleeper_manager.backtesting.artifacts import canonical_json, canonicalize, sha256_text
 from sleeper_manager.backtesting.replay.engine import ReplayConfig
-from sleeper_manager.backtesting.replay.models import ReplayGame, ReplayGameStatus
+from sleeper_manager.backtesting.replay.models import ReplayGame, ReplayGameStatus, ReplayPlayerGame
+from sleeper_manager.backtesting.replay.planning_adapter import team_week_state_from_replay
 from sleeper_manager.backtesting.replay.state import ReplayState
 from sleeper_manager.domain.league import LeagueProfile
 from sleeper_manager.domain.planning import PlanningReasonCode, TeamWeekState
@@ -169,6 +170,98 @@ class ChronologicalReplayRunner:
     def events(self) -> tuple[ReplayEvent, ...]:
         return self._events
 
+    def run(self) -> ReplayTrace:
+        roster = set(self._initial_roster())
+        snapshots: list[ReplayPlanningSnapshot] = []
+        for event in self._events:
+            if event.kind is ReplayEventKind.TRANSACTION_EFFECT:
+                assert event.transaction is not None
+                if event.transaction.roster_id == self.config.roster_id:
+                    _apply_transaction(roster, event.transaction)
+                continue
+            if event.kind is not ReplayEventKind.PLANNING_CUTOFF:
+                continue
+            state = team_week_state_from_replay(
+                self._state_visible_at(event.at, roster),
+                config=self.config,
+                decision_time=event.at,
+                league_profile=self.league_profile,
+                observed_starter_ids=self.observed_starter_ids,
+                roster_player_ids=tuple(sorted(roster)),
+                player_positions_by_id=self.player_positions_by_id,
+                manager_policy_version=self.manager_policy_version,
+                input_version=self.input_version,
+            )
+            snapshots.append(ReplayPlanningSnapshot(event.event_id, event.at, state))
+        return ReplayTrace(self._events, tuple(snapshots))
+
+    def _initial_roster(self) -> tuple[str, ...]:
+        if self.initial_roster_player_ids is not None:
+            return self.initial_roster_player_ids
+        roster = {
+            player_game.sleeper_id
+            for player_game in self.replay_state.player_games
+            if player_game.fantasy_team_id == self.config.roster_id
+            and player_game.rostered_at_tipoff
+        }
+        relevant_transactions = tuple(
+            transaction
+            for transaction in self.transactions
+            if transaction.roster_id == self.config.roster_id
+        )
+        for transaction in sorted(relevant_transactions, key=_transaction_sort_key, reverse=True):
+            roster.difference_update(transaction.adds)
+            roster.update(transaction.drops)
+        return tuple(sorted(roster))
+
+    def _state_visible_at(self, at: datetime, roster: set[str]) -> ReplayState:
+        games = {game.game_id: game for game in self.replay_state.games}
+        player_games = tuple(
+            _player_game_visible_at(player_game, games, at, roster)
+            for player_game in self.replay_state.player_games
+        )
+        return replace(
+            self.replay_state,
+            player_games=player_games,
+            locked_slots=tuple(
+                locked for locked in self.replay_state.locked_slots if locked.locked_at <= at
+            ),
+            decisions=tuple(
+                decision for decision in self.replay_state.decisions if decision.decision_time <= at
+            ),
+        )
+
+
+def run_chronological_replay(
+    replay_state: ReplayState,
+    *,
+    config: ReplayConfig,
+    transactions: Iterable[ReplayTransaction] = (),
+    planning_cutoffs: Iterable[datetime] | None = None,
+    runner_config: ReplayRunnerConfig | None = None,
+    initial_roster_player_ids: Iterable[str] | None = None,
+    observed_starter_ids: Iterable[str] = (),
+    league_profile: LeagueProfile | None = None,
+    player_positions_by_id: Mapping[str, Iterable[str]] | None = None,
+    manager_policy_version: str = "replay-policy-v1",
+    input_version: str = "replay-inputs-v1",
+    week_end: datetime | None = None,
+) -> ReplayTrace:
+    return ChronologicalReplayRunner(
+        replay_state,
+        config=config,
+        transactions=transactions,
+        planning_cutoffs=planning_cutoffs,
+        runner_config=runner_config,
+        initial_roster_player_ids=initial_roster_player_ids,
+        observed_starter_ids=observed_starter_ids,
+        league_profile=league_profile,
+        player_positions_by_id=player_positions_by_id,
+        manager_policy_version=manager_policy_version,
+        input_version=input_version,
+        week_end=week_end,
+    ).run()
+
 
 def build_chronological_events(
     replay_state: ReplayState,
@@ -300,6 +393,40 @@ def _validate_transactions(transactions: tuple[ReplayTransaction, ...]) -> None:
                     )
 
 
+def _apply_transaction(roster: set[str], transaction: ReplayTransaction) -> None:
+    missing_drops = set(transaction.drops) - roster
+    duplicate_adds = set(transaction.adds) & roster
+    if missing_drops or duplicate_adds:
+        details = []
+        if missing_drops:
+            details.append(f"missing drops={','.join(sorted(missing_drops))}")
+        if duplicate_adds:
+            details.append(f"duplicate adds={','.join(sorted(duplicate_adds))}")
+        raise ReplayRunnerError(
+            f"Replay transaction {transaction.transaction_id!r} cannot be applied: "
+            + "; ".join(details),
+            reason=PlanningReasonCode.ROSTER_STATE_MISMATCH,
+        )
+    roster.difference_update(transaction.drops)
+    roster.update(transaction.adds)
+
+
+def _player_game_visible_at(
+    player_game: ReplayPlayerGame,
+    games: Mapping[str, ReplayGame],
+    at: datetime,
+    roster: set[str],
+) -> ReplayPlayerGame:
+    game = games.get(player_game.game_id)
+    if game is None or game.start_time < at:
+        return player_game
+    return replace(
+        player_game,
+        rostered_at_tipoff=player_game.sleeper_id in roster,
+        membership_segment=None,
+    )
+
+
 def _event_sort_key(event: ReplayEvent) -> tuple[datetime, int, str]:
     precedence = {
         ReplayEventKind.TRANSACTION_EFFECT: 10,
@@ -309,6 +436,10 @@ def _event_sort_key(event: ReplayEvent) -> tuple[datetime, int, str]:
         ReplayEventKind.WEEK_END: 50,
     }[event.kind]
     return event.at, precedence, event.event_id
+
+
+def _transaction_sort_key(transaction: ReplayTransaction) -> tuple[datetime, str]:
+    return transaction.effective_at, transaction.transaction_id
 
 
 def _validate_unique_event_ids(events: Iterable[ReplayEvent]) -> None:
@@ -345,4 +476,5 @@ __all__ = (
     "ReplayTrace",
     "ReplayTransaction",
     "build_chronological_events",
+    "run_chronological_replay",
 )

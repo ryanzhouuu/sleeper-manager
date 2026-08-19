@@ -45,6 +45,7 @@ from sleeper_manager.backtesting.replay.runner import (
     ReplayTrace,
     ReplayTransaction,
     build_chronological_events,
+    run_chronological_replay,
 )
 from sleeper_manager.backtesting.replay.validation import (
     BootstrapInterval,
@@ -107,5 +108,6 @@ __all__ = (
     "team_week_state_from_replay",
     "report_payload",
     "write_report",
+    "run_chronological_replay",
     "write_replay_input_bundle",
 )
