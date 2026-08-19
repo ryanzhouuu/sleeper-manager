@@ -1,7 +1,11 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from sleeper_manager.backtesting.replay import ReplayConfig, ReplayState
+from sleeper_manager.backtesting.replay.models import ReplayGame, ReplayGameStatus, ReplayPlayerGame
+from sleeper_manager.backtesting.replay.planning_adapter import team_week_state_from_replay
 from sleeper_manager.decisions.weekly_plan import (
     TerminalValueApproximation,
     WeeklyPlanError,
@@ -198,3 +202,48 @@ def test_blocked_state_fails_closed_with_reason() -> None:
 
     with pytest.raises(WeeklyPlanError, match="missing_projection"):
         score_weekly_options(state)
+
+
+def test_future_realized_outcomes_do_not_change_an_earlier_policy() -> None:
+    current_start = NOW + timedelta(hours=1)
+    future_start = NOW + timedelta(days=1)
+    games = (
+        ReplayGame(
+            "g1",
+            current_start,
+            current_start + timedelta(hours=2),
+            1,
+            ("home", "away"),
+            ReplayGameStatus.FINAL,
+        ),
+        ReplayGame(
+            "g2",
+            future_start,
+            future_start + timedelta(hours=2),
+            1,
+            ("home", "away"),
+            ReplayGameStatus.FINAL,
+        ),
+    )
+    projection_1 = _projection("p1", "g1", ((10, 1),))
+    projection_2 = _projection("p2", "g2", ((12, 1),))
+    player_games = (
+        ReplayPlayerGame("p1", "provider-p1", "g1", 1, True, ("PG",), 10, projection_1),
+        ReplayPlayerGame("p2", "provider-p2", "g2", 1, True, ("PG",), 12, projection_2),
+    )
+    changed_player_games = replace(player_games[1], actual_score=900)
+    config = ReplayConfig(starter_slots=("G",), league_id="league-1", week=1, roster_id=1)
+    first_state = team_week_state_from_replay(
+        ReplayState(("G",), games, player_games),
+        config=config,
+        decision_time=NOW,
+    )
+    second_state = team_week_state_from_replay(
+        ReplayState(("G",), games, (player_games[0], changed_player_games)),
+        config=config,
+        decision_time=NOW,
+    )
+
+    assert score_weekly_options(first_state, config=WeeklyPlanPolicyConfig(scenario_count=5)) == (
+        score_weekly_options(second_state, config=WeeklyPlanPolicyConfig(scenario_count=5))
+    )
