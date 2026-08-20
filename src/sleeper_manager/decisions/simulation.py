@@ -155,11 +155,33 @@ def rollout_scenario_terminal_score(
     excluded_candidate_ids: frozenset[str] = frozenset(),
 ) -> float:
     remaining = tuple(remaining_inputs)
-    if not scenarios:
-        raise SimulationError("Terminal-score rollout requires scenarios")
-    scores: list[float] = []
-    fixed_players = {candidate.player_id for candidate in fixed_assignments}
     fixed_score = sum(candidate.score for candidate in fixed_assignments)
+    results = rollout_scenario_assignments(
+        fixed_assignments=fixed_assignments,
+        remaining_inputs=remaining,
+        open_slots=open_slots,
+        scenarios=scenarios,
+        slot_indices=slot_indices,
+        excluded_candidate_ids=excluded_candidate_ids,
+    )
+    scores = tuple(fixed_score + result.score for result in results)
+    return round(sum(scores) / len(scores), 6)
+
+
+def rollout_scenario_assignments(
+    *,
+    fixed_assignments: tuple[AssignmentCandidate, ...],
+    remaining_inputs: Iterable[ScenarioInput],
+    open_slots: tuple[str, ...],
+    scenarios: Sequence[Scenario],
+    slot_indices: tuple[int, ...] | None = None,
+    excluded_candidate_ids: frozenset[str] = frozenset(),
+) -> tuple[AssignmentResult, ...]:
+    remaining = tuple(remaining_inputs)
+    if not scenarios:
+        raise SimulationError("Scenario assignment rollout requires scenarios")
+    results: list[AssignmentResult] = []
+    fixed_players = {candidate.player_id for candidate in fixed_assignments}
     for scenario in scenarios:
         candidates: list[AssignmentCandidate] = []
         for record in remaining:
@@ -177,9 +199,8 @@ def rollout_scenario_terminal_score(
                     eligible_slot_indices=record.eligible_slot_indices,
                 )
             )
-        result = maximum_weight_assignment(candidates, open_slots, slot_indices=slot_indices)
-        scores.append(fixed_score + result.score)
-    return round(sum(scores) / len(scores), 6)
+        results.append(maximum_weight_assignment(candidates, open_slots, slot_indices=slot_indices))
+    return tuple(results)
 
 
 def pregame_assignment(
@@ -250,6 +271,7 @@ __all__ = (
     "generate_scenarios",
     "generate_projection_scenarios",
     "pregame_assignment",
+    "rollout_scenario_assignments",
     "rollout_terminal_score",
     "rollout_scenario_terminal_score",
     "stable_scenario_seed",
