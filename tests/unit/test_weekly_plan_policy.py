@@ -166,6 +166,31 @@ def test_lower_standalone_value_preserves_a_scarce_future_opportunity() -> None:
         ).standalone_expected_value
         == 8
     )
+    assert decision.selected.expected_terminal_value <= decision.perfect_information_bound
+
+
+def test_continuation_value_is_allocated_once_across_selected_assignment() -> None:
+    start = NOW + timedelta(hours=1)
+    later = NOW + timedelta(days=1)
+    state = _state(
+        (
+            _opportunity("p1", "g1", start, ("PG",), ((10, 1),)),
+            _opportunity("p2", "g2", start, ("C",), ((10, 1),)),
+            _opportunity("p3", "g3", later, ("PG",), ((30, 1),)),
+        )
+    )
+
+    decision = score_weekly_options(state, config=WeeklyPlanPolicyConfig(scenario_count=5))
+
+    assert decision.baseline_terminal_value == 30
+    assert decision.selected.expected_terminal_value == 40
+    assert decision.perfect_information_bound == 40
+    assert decision.selected.expected_terminal_value <= decision.perfect_information_bound
+    assert tuple(item.player_id for item in decision.selected.assignments) == ("p1", None)
+    assert {
+        (evaluation.player_id, evaluation.slot_index, evaluation.marginal_terminal_value)
+        for evaluation in decision.evaluations
+    } == {("p1", 0, 10), ("p1", 1, -20), ("p2", 1, -20)}
 
 
 def test_fixed_slots_and_passed_opportunities_constrain_terminal_options() -> None:
