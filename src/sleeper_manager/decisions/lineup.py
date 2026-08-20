@@ -87,8 +87,11 @@ def maximum_weight_assignment(
                 (
                     candidate
                     for candidate in candidate_records
-                    if _eligible(candidate.eligible_positions, slot)
-                    and _eligible_for_index(candidate, slot_index_records[index])
+                    if candidate_eligible_for_slot(
+                        candidate,
+                        slot_index=slot_index_records[index],
+                        slot_position=slot,
+                    )
                     and (
                         slot_index_records[index] not in required_by_slot
                         or required_by_slot[slot_index_records[index]] == candidate.candidate_id
@@ -100,33 +103,49 @@ def maximum_weight_assignment(
         )
         for index, slot in enumerate(slot_records)
     )
+    for index, slot_index in enumerate(slot_index_records):
+        if slot_index in required_by_slot and not by_slot[index]:
+            raise ValueError(f"Required assignment edge is not feasible for slot {slot_index}")
+    required_players = {
+        candidate.player_id
+        for slot_index, candidate_id in required_edges
+        for candidate in candidate_records
+        if candidate.candidate_id == candidate_id and slot_index in required_by_slot
+    }
+    if len(required_players) != len(required_edges):
+        raise ValueError("Required assignment edges cannot reuse a player")
     player_ids = {candidate.player_id for candidate in candidate_records}
     player_bits = {player_id: 1 << index for index, player_id in enumerate(sorted(player_ids))}
 
     @cache
-    def solve(slot_index: int, used_players: int) -> AssignmentResult:
+    def solve(slot_index: int, used_players: int) -> AssignmentResult | None:
         if slot_index == len(slot_records):
             return AssignmentResult(0.0, ())
-        best = solve(slot_index + 1, used_players)
-        best = AssignmentResult(
-            best.score,
-            (
-                SlotAssignment(
-                    slot_index_records[slot_index],
-                    slot_records[slot_index],
-                    None,
-                    None,
-                    None,
-                    0.0,
-                ),
-            )
-            + best.assignments,
-        )
+        best: AssignmentResult | None = None
+        if slot_index_records[slot_index] not in required_by_slot:
+            remainder = solve(slot_index + 1, used_players)
+            if remainder is not None:
+                best = AssignmentResult(
+                    remainder.score,
+                    (
+                        SlotAssignment(
+                            slot_index_records[slot_index],
+                            slot_records[slot_index],
+                            None,
+                            None,
+                            None,
+                            0.0,
+                        ),
+                    )
+                    + remainder.assignments,
+                )
         for candidate in by_slot[slot_index]:
             bit = player_bits[candidate.player_id]
             if used_players & bit:
                 continue
             remainder = solve(slot_index + 1, used_players | bit)
+            if remainder is None:
+                continue
             current = AssignmentResult(
                 candidate.score + remainder.score,
                 (
@@ -141,12 +160,25 @@ def maximum_weight_assignment(
                 )
                 + remainder.assignments,
             )
-            if _better_assignment(current, best, tie_break_key, tie_tolerance):
+            if best is None or _better_assignment(current, best, tie_break_key, tie_tolerance):
                 best = current
         return best
 
     result = solve(0, 0)
+    if result is None:
+        raise ValueError("Required assignment edges cannot be satisfied together")
     return AssignmentResult(round(result.score, 6), result.assignments)
+
+
+def candidate_eligible_for_slot(
+    candidate: AssignmentCandidate,
+    *,
+    slot_index: int,
+    slot_position: str,
+) -> bool:
+    return _eligible(candidate.eligible_positions, slot_position.upper()) and _eligible_for_index(
+        candidate, slot_index
+    )
 
 
 def _eligible(positions: tuple[str, ...], slot: str) -> bool:
