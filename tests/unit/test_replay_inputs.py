@@ -33,6 +33,7 @@ from sleeper_manager.domain.nba import (
     SourceMetadata,
 )
 from sleeper_manager.domain.planning import PlanningQuality, PlanningReasonCode
+from sleeper_manager.domain.projection import ProjectionDistribution, ProjectionSnapshot
 from sleeper_manager.domain.scoring import BoxScoreLine, ScoringPolicy
 from sleeper_manager.integrations.nba.identity import (
     MappingConfidence,
@@ -90,10 +91,14 @@ def test_manifest_hash_is_stable_for_identical_inputs() -> None:
     )
 
 
-def test_changed_scoring_timeline_or_source_changes_manifest() -> None:
+def test_changed_scoring_timeline_source_or_projections_changes_manifest() -> None:
     baseline = build_replay_input_manifest(_inputs())
     changed_scoring = build_replay_input_manifest(_inputs(scoring=ScoringPolicy(points=2)))
     changed_source = build_replay_input_manifest(_inputs(source_bytes=b"schedule-v2"))
+    projection = _projection("p1", "g1", ScoringPolicy(points=1))
+    changed_projections = build_replay_input_manifest(
+        replace(_inputs(), projection_snapshots=(projection,))
+    )
     interval = RosterMembershipInterval(
         "league-1", 1, "p1", NOW - timedelta(days=1), NOW + timedelta(days=2), ()
     )
@@ -109,6 +114,7 @@ def test_changed_scoring_timeline_or_source_changes_manifest() -> None:
 
     assert baseline.manifest_id != changed_scoring.manifest_id
     assert baseline.manifest_id != changed_source.manifest_id
+    assert baseline.manifest_id != changed_projections.manifest_id
     assert baseline.manifest_id != changed_timeline.manifest_id
 
 
@@ -202,6 +208,19 @@ def test_archive_scoring_mismatch_fails_closed() -> None:
 
 def _source(provider_id: str) -> SourceMetadata:
     return SourceMetadata("fixture", provider_id, NOW)
+
+
+def _projection(player_id: str, game_id: str, policy: ScoringPolicy) -> ProjectionSnapshot:
+    return ProjectionSnapshot(
+        player_id=player_id,
+        game_id=game_id,
+        available_as_of=NOW,
+        model_version="fixture-model",
+        input_version="fixture-inputs",
+        scoring_policy_version=policy.version,
+        distribution=ProjectionDistribution.from_weighted_observations(((10, 1),)),
+        reasons=(),
+    )
 
 
 def _historical_join_inputs() -> HistoricalReplayBuildInput:
@@ -317,6 +336,10 @@ def _historical_join_inputs() -> HistoricalReplayBuildInput:
                 "p1", ("G",), datetime(2026, 1, 1, tzinfo=UTC), "fixture", "exact"
             ),
         ),
+        projection_snapshots=(
+            _projection("p1", "g-before-drop", policy),
+            _projection("p1", "g-after-reacquisition", policy),
+        ),
     )
 
 
@@ -327,6 +350,7 @@ def test_historical_join_respects_tipoff_membership_and_game_status() -> None:
     team_week = result[0]
     assert team_week.complete
     assert team_week.eligibility_quality is PlanningQuality.EXACT
+    assert team_week.coverage.projected_player_games == 2
     assert [game.game_id for game in team_week.games] == [
         "g-before-drop",
         "g-after-reacquisition",
@@ -342,6 +366,20 @@ def test_historical_join_respects_tipoff_membership_and_game_status() -> None:
     assert team_week.player_games[1].membership_segment == "tx-reacquire"
     assert team_week.games[2].status is ReplayGameStatus.POSTPONED
     assert team_week.games[3].status is ReplayGameStatus.CANCELED
+
+
+def test_historical_join_blocks_player_games_without_projection_snapshots() -> None:
+    result = assemble_historical_team_week_inputs(
+        replace(_historical_join_inputs(), projection_snapshots=())
+    )
+
+    team_week = result[0]
+    assert not team_week.complete
+    assert team_week.coverage.projected_player_games == 0
+    assert all(player_game.projection is None for player_game in team_week.player_games)
+    assert team_week.coverage.missing_evidence == (
+        (PlanningReasonCode.MISSING_PROJECTION, 2),
+    )
 
 
 def test_unrelated_missing_schedule_does_not_exclude_another_week() -> None:

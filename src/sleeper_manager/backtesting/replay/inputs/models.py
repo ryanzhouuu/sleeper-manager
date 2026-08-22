@@ -15,6 +15,7 @@ from sleeper_manager.backtesting.replay.roster_timeline import (
 )
 from sleeper_manager.domain.nba import PlayerBoxScore, ScheduledGame
 from sleeper_manager.domain.planning import PlanningQuality, PlanningReasonCode
+from sleeper_manager.domain.projection import ProjectionSnapshot
 from sleeper_manager.domain.scoring import ScoringPolicy
 from sleeper_manager.integrations.nba.identity import PlayerMapping
 
@@ -48,6 +49,7 @@ class HistoricalReplayBuildInput:
     player_mappings: tuple[PlayerMapping, ...]
     scoring_policy: ScoringPolicy
     eligibility_evidence: tuple[PlayerEligibilitySnapshot, ...] = ()
+    projection_snapshots: tuple[ProjectionSnapshot, ...] = ()
     source_fingerprints: tuple[SourceFingerprint, ...] = ()
     eligibility_policy_version: str = "eligibility-v1"
     projection_config_version: str = "projection-unconfigured"
@@ -67,6 +69,11 @@ class HistoricalReplayBuildInput:
         ):
             if not value.strip():
                 raise ReplayInputError(f"{label} must be non-empty")
+        projection_keys = tuple(
+            (snapshot.player_id, snapshot.game_id) for snapshot in self.projection_snapshots
+        )
+        if len(set(projection_keys)) != len(projection_keys):
+            raise ReplayInputError("Projection snapshots cannot duplicate a player-game")
         _unique_source_names(self.source_fingerprints)
 
 
@@ -117,6 +124,7 @@ class ReplayCoverageSummary:
     best_known_eligibility: int
     scored_player_games: int
     missing_evidence: tuple[tuple[PlanningReasonCode, int], ...] = ()
+    projected_player_games: int = 0
 
     def __post_init__(self) -> None:
         for label, value in (
@@ -126,6 +134,7 @@ class ReplayCoverageSummary:
             ("exact eligibility", self.exact_eligibility),
             ("best-known eligibility", self.best_known_eligibility),
             ("scored player-games", self.scored_player_games),
+            ("projected player-games", self.projected_player_games),
         ):
             if value < 0:
                 raise ReplayInputError(f"{label} counts must be non-negative")
@@ -142,6 +151,7 @@ class ReplayCoverageSummary:
             and self.expected_player_games == self.resolved_identities
             and self.exact_eligibility == self.expected_player_games
             and self.scored_player_games == self.expected_player_games
+            and self.projected_player_games == self.expected_player_games
             and not self.missing_evidence
         )
 

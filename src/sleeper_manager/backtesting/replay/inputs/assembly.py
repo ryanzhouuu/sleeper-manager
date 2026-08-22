@@ -63,6 +63,10 @@ def assemble_historical_team_week_inputs(
     schedule_by_id, schedule_issues = _index_schedules(inputs.games)
     box_scores, box_score_issues = _index_box_scores(inputs.box_scores)
     mapping_by_provider, mapping_issues = _index_mappings(inputs.player_mappings)
+    projection_by_key = {
+        (snapshot.player_id, snapshot.game_id): snapshot
+        for snapshot in inputs.projection_snapshots
+    }
     issues_by_scope: dict[tuple[int, int], list[ReplayInputExclusion]] = defaultdict(list)
 
     games_by_week: dict[int, tuple[ReplayGame, ...]] = {}
@@ -188,6 +192,7 @@ def assemble_historical_team_week_inputs(
             exact_count = 0
             best_known_count = 0
             scored_count = 0
+            projected_count = 0
             missing_evidence: dict[PlanningReasonCode, int] = defaultdict(int)
             for candidate in candidates:
                 positions, quality = _eligibility_at(
@@ -212,6 +217,13 @@ def assemble_historical_team_week_inputs(
                     best_known_count += 1
                 score = calculate_fantasy_points(candidate.box_score.line, inputs.scoring_policy)
                 scored_count += 1
+                projection = projection_by_key.get(
+                    (candidate.sleeper_id, candidate.game.provider_id)
+                )
+                if projection is not None:
+                    projected_count += 1
+                else:
+                    missing_evidence[PlanningReasonCode.MISSING_PROJECTION] += 1
                 player_games.append(
                     ReplayPlayerGame(
                         sleeper_id=candidate.sleeper_id,
@@ -221,6 +233,7 @@ def assemble_historical_team_week_inputs(
                         rostered_at_tipoff=True,
                         eligible_positions=positions,
                         actual_score=score,
+                        projection=projection,
                         membership_segment=candidate.membership_segment,
                     )
                 )
@@ -235,6 +248,7 @@ def assemble_historical_team_week_inputs(
                 exact_eligibility=exact_count,
                 best_known_eligibility=best_known_count,
                 scored_player_games=scored_count,
+                projected_player_games=projected_count,
                 missing_evidence=tuple(
                     sorted(missing_evidence.items(), key=lambda item: item[0].value)
                 ),

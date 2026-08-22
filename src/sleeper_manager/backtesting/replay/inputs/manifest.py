@@ -43,6 +43,7 @@ def build_replay_input_manifest(
             records_fingerprint("parsed-box-scores", inputs.box_scores),
             records_fingerprint("player-mappings", inputs.player_mappings),
             records_fingerprint("eligibility-evidence", inputs.eligibility_evidence),
+            records_fingerprint("projection-snapshots", inputs.projection_snapshots),
             records_fingerprint("roster-timeline", (inputs.roster_timeline,)),
             records_fingerprint("fantasy-week-boundaries", inputs.week_boundaries),
         )
