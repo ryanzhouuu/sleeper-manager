@@ -45,6 +45,7 @@ def row(
         sleeper_id=None,
         game_id=game_id,
         game_start=start,
+        outcome_finalized_at=start + timedelta(hours=2),
         team_id="CHI",
         opponent_team_id="WAS",
         opponent_abbreviation="was",
@@ -164,6 +165,13 @@ def test_legacy_target_outcomes_do_not_change_pregame_projection() -> None:
 def test_pregame_request_excludes_same_tipoff_and_future_outcomes() -> None:
     prior = row("prior", "player-1", datetime(2025, 1, 9, tzinfo=UTC), 10, 10)
     target_start = datetime(2025, 1, 10, 18, tzinfo=UTC)
+    overlapping = row(
+        "overlapping",
+        "player-2",
+        target_start - timedelta(minutes=30),
+        100,
+        40,
+    )
     same_tipoff = row("same", "player-2", target_start, 100, 40)
     future = row("future", "player-1", datetime(2025, 1, 11, tzinfo=UTC), 100, 40)
     request = PregameProjectionRequest(
@@ -173,7 +181,7 @@ def test_pregame_request_excludes_same_tipoff_and_future_outcomes() -> None:
         game_id="target",
         game_start=target_start,
         available_as_of=datetime(2025, 1, 10, 12, tzinfo=UTC),
-        history=(prior, same_tipoff, future),
+        history=(prior, overlapping, same_tipoff, future),
     )
 
     snapshot = DirectFantasyPointBaseline().project_pregame(
@@ -187,6 +195,7 @@ def test_pregame_request_excludes_same_tipoff_and_future_outcomes() -> None:
 
     assert snapshot.distribution == reference.distribution
     assert snapshot.input_version == reference.input_version
+    assert request.history == (prior,)
 
 
 def test_pregame_projection_reports_stable_missing_warmup_reason() -> None:

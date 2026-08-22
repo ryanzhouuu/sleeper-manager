@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from sleeper_manager.domain.nba import (
     PlayerBoxScore,
@@ -221,6 +221,7 @@ def build_historical_feature_dataset(
                 target_line_blocks=box_score.line.blocks,
                 target_line_turnovers=box_score.line.turnovers,
                 source_lineage=source_lineage,
+                outcome_finalized_at=game.start_time + timedelta(minutes=game.duration_minutes),
                 opponent_offensive_rating=opponent_stats[0],
                 opponent_defensive_rating=opponent_stats[1],
                 league_defensive_rating=opponent_stats[2],

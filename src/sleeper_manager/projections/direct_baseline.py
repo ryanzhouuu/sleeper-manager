@@ -104,9 +104,20 @@ class PregameProjectionRequest:
             raise ProjectionBaselineError(
                 "Pregame projection availability cannot follow game start"
             )
-        candidate_history = tuple(row for row in self.history if row.game_start < self.game_start)
-        if any(row.game_start.tzinfo is None for row in candidate_history):
-            raise ProjectionBaselineError("Pregame history game starts must be timezone-aware")
+        for row in self.history:
+            if row.game_start.tzinfo is None:
+                raise ProjectionBaselineError("Pregame history game starts must be timezone-aware")
+            if row.outcome_finalized_at is not None and row.outcome_finalized_at.tzinfo is None:
+                raise ProjectionBaselineError(
+                    "Pregame outcome finalization must be timezone-aware"
+                )
+        candidate_history = tuple(
+            row
+            for row in self.history
+            if row.game_start < self.game_start
+            and row.outcome_finalized_at is not None
+            and row.outcome_finalized_at <= self.available_as_of
+        )
         history = tuple(sorted(candidate_history, key=_history_sort_key))
         object.__setattr__(self, "history", history)
 
@@ -510,6 +521,11 @@ def _pregame_input_version(
         "game_id": request.game_id,
         "game_start": request.game_start.isoformat(),
         "available_as_of": request.available_as_of.isoformat(),
+        "outcome_finalized_at": [
+            (row.game_id, row.outcome_finalized_at.isoformat())
+            for row in request.history
+            if row.outcome_finalized_at is not None
+        ],
         "source_versions": [
             (source.provider, source.schema_version, source.source_ids)
             for source in request.source_versions
@@ -540,6 +556,9 @@ def _row_fingerprint(row: HistoricalFeatureRow) -> str:
         "target_minutes": row.target_minutes,
         "target_started": row.target_started,
         "target_did_play": row.target_did_play,
+        "outcome_finalized_at": (
+            row.outcome_finalized_at.isoformat() if row.outcome_finalized_at is not None else None
+        ),
         "target_box_score": (
             row.target_box_score.points,
             row.target_box_score.rebounds,

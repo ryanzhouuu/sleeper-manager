@@ -91,6 +91,7 @@ class HistoricalFeatureRow:
     time_zone_change_hours: float | None = None
     travel_direction: str = "unknown"
     travel_fallback: str = "unknown_venue"
+    outcome_finalized_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
