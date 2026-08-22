@@ -86,8 +86,10 @@ def test_lock_in_status_advances_when_all_replay_inputs_are_complete(tmp_path: P
         _write_replay_team_week(tmp_path, league_id, complete=True)
 
     output = _run_validation(tmp_path)
+    report = json.loads(output.report_json_path.read_text(encoding="utf-8"))
 
     assert output.status == "ready_for_replay_validation"
+    assert report["replay_inputs"]["selected_manifest_id"] == "manifest-1"
 
 
 def test_lock_in_status_reports_incomplete_replay_inputs(tmp_path: Path) -> None:
@@ -99,6 +101,17 @@ def test_lock_in_status_reports_incomplete_replay_inputs(tmp_path: Path) -> None
     output = _run_validation(tmp_path)
 
     assert output.status == "blocked_incomplete_replay_inputs"
+
+
+def test_lock_in_status_does_not_combine_unrelated_manifests(tmp_path: Path) -> None:
+    _write_validation_archives(tmp_path)
+    _write_replay_team_week(tmp_path, "current", complete=True, manifest_id="manifest-a")
+    _write_replay_team_week(tmp_path, "historical", complete=True, manifest_id="manifest-b")
+    _write_replay_team_week(tmp_path, "stress", complete=True, manifest_id="manifest-c")
+
+    output = _run_validation(tmp_path)
+
+    assert output.status == "blocked_incoherent_replay_inputs"
 
 
 def _run_validation(tmp_path: Path) -> LockInValidationOutput:
@@ -115,17 +128,25 @@ def _write_validation_archives(tmp_path: Path) -> None:
         _write_archive(tmp_path, league_id, season="2026", previous=None, has_events=True)
 
 
-def _write_replay_team_week(tmp_path: Path, league_id: str, *, complete: bool) -> None:
+def _write_replay_team_week(
+    tmp_path: Path,
+    league_id: str,
+    *,
+    complete: bool,
+    manifest_id: str = "manifest-1",
+) -> None:
     path = (
         tmp_path
         / "team-week-inputs"
-        / "manifest-1"
+        / manifest_id
         / "team-weeks"
         / league_id
         / "week-01"
         / "roster-1.json"
     )
     path.parent.mkdir(parents=True)
+    manifest_path = tmp_path / "team-week-inputs" / manifest_id / "manifest.json"
+    manifest_path.write_text(json.dumps({"manifest_id": manifest_id}), encoding="utf-8")
     path.write_text(json.dumps({"league_id": league_id, "complete": complete}), encoding="utf-8")
 
 

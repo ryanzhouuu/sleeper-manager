@@ -183,15 +183,31 @@ def _replay_input_summary(
 ) -> dict[str, Any]:
     expected_leagues = tuple(archive.league_id for archive in archives)
     records_by_league: dict[str, list[bool]] = {league_id: [] for league_id in expected_leagues}
+    records_by_manifest: dict[str, dict[str, list[bool]]] = {}
     root = workspace / "team-week-inputs"
     for path in sorted(root.glob("*/team-weeks/*/week-*/roster-*.json")):
+        manifest_id = path.relative_to(root).parts[0]
+        manifest_payload = _read_json(root / manifest_id / "manifest.json")
+        if (
+            not isinstance(manifest_payload, dict)
+            or manifest_payload.get("manifest_id") != manifest_id
+        ):
+            raise LockInExperimentError(
+                f"Replay input manifest does not match its directory: {manifest_id}"
+            )
         payload = _read_json(path)
         if not isinstance(payload, dict):
             continue
         league_id = payload.get("league_id")
         if league_id not in records_by_league:
             continue
-        records_by_league[league_id].append(payload.get("complete") is True)
+        complete = payload.get("complete") is True
+        records_by_league[league_id].append(complete)
+        manifest_records = records_by_manifest.setdefault(
+            manifest_id,
+            {expected: [] for expected in expected_leagues},
+        )
+        manifest_records[league_id].append(complete)
 
     coverage = {
         league_id: {
@@ -201,30 +217,49 @@ def _replay_input_summary(
         }
         for league_id, records in records_by_league.items()
     }
-    missing = tuple(league_id for league_id, records in records_by_league.items() if not records)
-    incomplete = tuple(
-        league_id
-        for league_id, records in records_by_league.items()
-        if records and not all(records)
+    manifest_coverage = {
+        manifest_id: {
+            league_id: {
+                "team_week_count": len(records),
+                "complete_team_weeks": sum(records),
+                "incomplete_team_weeks": len(records) - sum(records),
+            }
+            for league_id, records in by_league.items()
+        }
+        for manifest_id, by_league in sorted(records_by_manifest.items())
+    }
+    ready_manifests = tuple(
+        manifest_id
+        for manifest_id, by_league in sorted(records_by_manifest.items())
+        if all(by_league[league_id] and all(by_league[league_id]) for league_id in expected_leagues)
     )
-    if missing:
-        status = "blocked_missing_replay_inputs"
-        reason = "Replay input bundles are missing for: " + ", ".join(missing) + "."
-    elif incomplete:
-        status = "blocked_incomplete_replay_inputs"
-        reason = (
-            "Replay input bundles contain incomplete team-weeks for: " + ", ".join(incomplete) + "."
-        )
-    else:
+    selected_manifest_id = ready_manifests[0] if ready_manifests else None
+    missing = tuple(league_id for league_id, records in records_by_league.items() if not records)
+    has_coherent_but_incomplete = any(
+        all(by_league[league_id] for league_id in expected_leagues)
+        for by_league in records_by_manifest.values()
+    )
+    if selected_manifest_id is not None:
         status = "ready_for_replay_validation"
         reason = (
-            "Complete replay inputs are cached for all requested leagues; policy replay "
-            "execution remains pending."
+            f"Manifest {selected_manifest_id} contains complete replay inputs for all requested "
+            "leagues; policy replay execution remains pending."
         )
+    elif missing:
+        status = "blocked_missing_replay_inputs"
+        reason = "Replay input bundles are missing for: " + ", ".join(missing) + "."
+    elif has_coherent_but_incomplete:
+        status = "blocked_incomplete_replay_inputs"
+        reason = "No single replay manifest has complete team-weeks for every requested league."
+    else:
+        status = "blocked_incoherent_replay_inputs"
+        reason = "Replay inputs exist, but they are split across unrelated manifests."
     return {
         "status": status,
         "reason": reason,
+        "selected_manifest_id": selected_manifest_id,
         "leagues": coverage,
+        "manifests": manifest_coverage,
     }
 
 
