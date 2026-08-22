@@ -306,6 +306,7 @@ def build_weekly_plan(
         input_version=state.input_version,
         expected_terminal_score=decision.selected.expected_terminal_value,
         best_alternative_score=alternative_score,
+        baseline_terminal_score=decision.baseline_terminal_value,
         decision_margin=margin,
         distribution_summary=PlanDistributionSummary(
             scenario_count=decision.scenario_count,

@@ -485,6 +485,7 @@ class WeeklyPlan:
     input_version: str = "unknown"
     expected_terminal_score: float | None = None
     best_alternative_score: float | None = None
+    baseline_terminal_score: float | None = None
     decision_margin: float | None = None
     distribution_summary: PlanDistributionSummary | None = None
     fixed_slots: tuple[FixedSlot, ...] = ()
@@ -515,6 +516,7 @@ class WeeklyPlan:
         for label, score in (
             ("Expected terminal score", self.expected_terminal_score),
             ("Best alternative score", self.best_alternative_score),
+            ("Baseline terminal score", self.baseline_terminal_score),
             ("Decision margin", self.decision_margin),
         ):
             if score is not None and not isfinite(score):
@@ -622,6 +624,7 @@ class WeeklyPlan:
             self.confidence.value,
             _format_optional(self.expected_terminal_score),
             _format_optional(self.best_alternative_score),
+            _format_optional(self.baseline_terminal_score),
             _format_optional(self.decision_margin),
             None
             if self.distribution_summary is None

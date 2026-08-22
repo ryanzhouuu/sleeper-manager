@@ -181,6 +181,7 @@ def test_build_weekly_plan_requires_the_better_bench_starter() -> None:
     assert all(move.deadline == start - timedelta(minutes=10) for move in plan.moves)
     assert plan.expected_terminal_score == 30
     assert plan.best_alternative_score == 10
+    assert plan.baseline_terminal_score == 0
     assert plan.decision_margin == 20
     assert plan.confidence is PlanConfidence.LOW
     assert plan.desired_assignments == (_planned(0, "G", "p2"),)
@@ -450,6 +451,7 @@ def test_material_hash_ignores_explanation_only_drift() -> None:
     plan = _plan()
 
     drifted = replace(plan, expected_terminal_score=999.5, decision_margin=-1.25)
+    rebaselined = replace(plan, baseline_terminal_score=7.5)
     retimed = replace(
         plan,
         moves=tuple(
@@ -459,6 +461,8 @@ def test_material_hash_ignores_explanation_only_drift() -> None:
 
     assert plan.material_hash == drifted.material_hash
     assert plan.plan_id != drifted.plan_id
+    assert plan.material_hash == rebaselined.material_hash
+    assert plan.plan_id != rebaselined.plan_id
     assert plan.material_hash != retimed.material_hash
 
 
