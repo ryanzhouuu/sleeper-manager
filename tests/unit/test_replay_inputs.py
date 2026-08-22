@@ -377,9 +377,7 @@ def test_historical_join_blocks_player_games_without_projection_snapshots() -> N
     assert not team_week.complete
     assert team_week.coverage.projected_player_games == 0
     assert all(player_game.projection is None for player_game in team_week.player_games)
-    assert team_week.coverage.missing_evidence == (
-        (PlanningReasonCode.MISSING_PROJECTION, 2),
-    )
+    assert team_week.coverage.missing_evidence == ((PlanningReasonCode.MISSING_PROJECTION, 2),)
 
 
 def test_unrelated_missing_schedule_does_not_exclude_another_week() -> None:

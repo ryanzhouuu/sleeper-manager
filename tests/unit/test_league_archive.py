@@ -27,9 +27,7 @@ def test_archive_parses_transaction_timestamps_and_positions() -> None:
     archive = parse_historical_league_archive(
         league_payload(),
         rosters=[{"roster_id": 1, "players": ["p1"], "starters": ["0", "p1"]}],
-        matchup_weeks={
-            1: [{"roster_id": 1, "players": ["p1"], "starters": ["0", "p1"]}]
-        },
+        matchup_weeks={1: [{"roster_id": 1, "players": ["p1"], "starters": ["0", "p1"]}]},
         transactions=[
             {
                 "transaction_id": "tx-1",

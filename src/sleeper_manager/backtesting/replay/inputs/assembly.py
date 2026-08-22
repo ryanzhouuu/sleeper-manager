@@ -64,8 +64,7 @@ def assemble_historical_team_week_inputs(
     box_scores, box_score_issues = _index_box_scores(inputs.box_scores)
     mapping_by_provider, mapping_issues = _index_mappings(inputs.player_mappings)
     projection_by_key = {
-        (snapshot.player_id, snapshot.game_id): snapshot
-        for snapshot in inputs.projection_snapshots
+        (snapshot.player_id, snapshot.game_id): snapshot for snapshot in inputs.projection_snapshots
     }
     issues_by_scope: dict[tuple[int, int], list[ReplayInputExclusion]] = defaultdict(list)
 

@@ -108,9 +108,7 @@ class PregameProjectionRequest:
             if row.game_start.tzinfo is None:
                 raise ProjectionBaselineError("Pregame history game starts must be timezone-aware")
             if row.outcome_finalized_at is not None and row.outcome_finalized_at.tzinfo is None:
-                raise ProjectionBaselineError(
-                    "Pregame outcome finalization must be timezone-aware"
-                )
+                raise ProjectionBaselineError("Pregame outcome finalization must be timezone-aware")
         candidate_history = tuple(
             row
             for row in self.history
