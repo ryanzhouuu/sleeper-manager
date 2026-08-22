@@ -1,4 +1,6 @@
 import asyncio
+import sqlite3
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from urllib.parse import parse_qs, urlparse
 
@@ -88,3 +90,54 @@ def test_notification_loop_retries_after_all_delivery_attempts_fail(tmp_path) ->
     assert first.status == "delivery_failed"
     assert second.status == "delivery_failed"
     assert len(sender.messages) == 2
+
+
+def test_lineup_recommendations_only_offer_open_sleeper(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
+    asyncio.run(repository.initialize())
+    sender = RecordingSender()
+    workflow = NotificationLoop(
+        repository,
+        NotificationDispatcher(sender),
+        acknowledgement_base_url="https://example.test/ack",
+        clock=lambda: NOW,
+        acknowledgement_kinds=frozenset({"placeholder_lock_in"}),
+    )
+
+    result = asyncio.run(workflow.run(replace(request(), decision_type="weekly_lineup")))
+
+    assert result.status == "created"
+    assert result.notification is not None
+    assert [action.label for action in result.notification.actions] == ["Open Sleeper"]
+    connection = sqlite3.connect(tmp_path / "state.db")
+    try:
+        token_rows = connection.execute(
+            "SELECT COUNT(*) FROM action_tokens WHERE recommendation_id = ?",
+            (result.recommendation.recommendation_id,),
+        ).fetchone()
+    finally:
+        connection.close()
+    assert token_rows[0] == 0
+    assert len(sender.messages) == 1
+
+
+def test_configured_acknowledgement_kinds_keep_creating_actions(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
+    asyncio.run(repository.initialize())
+    sender = RecordingSender()
+    workflow = NotificationLoop(
+        repository,
+        NotificationDispatcher(sender),
+        acknowledgement_base_url="https://example.test/ack",
+        clock=lambda: NOW,
+        acknowledgement_kinds=frozenset({"placeholder_lock_in"}),
+    )
+
+    result = asyncio.run(workflow.run(request()))
+
+    assert result.notification is not None
+    assert [action.label for action in result.notification.actions] == [
+        "Locked",
+        "Passed",
+        "Open Sleeper",
+    ]

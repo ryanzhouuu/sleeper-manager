@@ -55,12 +55,14 @@ class NotificationLoop:
         *,
         acknowledgement_base_url: str,
         clock: Clock | None = None,
+        acknowledgement_kinds: frozenset[str] | None = None,
     ) -> None:
         if not acknowledgement_base_url:
             raise ValueError("acknowledgement base URL is required")
         self._repository = repository
         self._dispatcher = dispatcher
         self._acknowledgement_base_url = acknowledgement_base_url.rstrip("?")
+        self._acknowledgement_kinds = acknowledgement_kinds
         self._clock = clock or (lambda: datetime.now(UTC))
 
     def _action_url(self, token: str, action: AcknowledgementAction) -> str:
@@ -113,28 +115,33 @@ class NotificationLoop:
         now: datetime,
     ) -> NotificationLoopResult:
 
+        requires_acknowledgements = (
+            self._acknowledgement_kinds is None
+            or request.decision_type in self._acknowledgement_kinds
+        )
         actions: list[NotificationAction] = []
-        for acknowledgement_action, label in (
-            (AcknowledgementAction.LOCKED, "Locked"),
-            (AcknowledgementAction.PASSED, "Passed"),
-        ):
-            raw_token = generate_action_token()
-            await self._repository.create_action_token(
-                ActionTokenRecord(
-                    token_hash=hash_action_token(raw_token),
-                    recommendation_id=recommendation.recommendation_id,
-                    action=acknowledgement_action,
-                    created_at=now,
-                    expires_at=request.deadline,
+        if requires_acknowledgements:
+            for acknowledgement_action, label in (
+                (AcknowledgementAction.LOCKED, "Locked"),
+                (AcknowledgementAction.PASSED, "Passed"),
+            ):
+                raw_token = generate_action_token()
+                await self._repository.create_action_token(
+                    ActionTokenRecord(
+                        token_hash=hash_action_token(raw_token),
+                        recommendation_id=recommendation.recommendation_id,
+                        action=acknowledgement_action,
+                        created_at=now,
+                        expires_at=request.deadline,
+                    )
                 )
-            )
-            actions.append(
-                NotificationAction(
-                    label=label,
-                    url=self._action_url(raw_token, acknowledgement_action),
-                    method="POST",
+                actions.append(
+                    NotificationAction(
+                        label=label,
+                        url=self._action_url(raw_token, acknowledgement_action),
+                        method="POST",
+                    )
                 )
-            )
         actions.append(NotificationAction(label="Open Sleeper", url=request.open_sleeper_url))
 
         notification = Notification(
