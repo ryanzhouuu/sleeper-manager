@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from math import isfinite
 
@@ -23,10 +23,22 @@ from sleeper_manager.decisions.simulation import (
 from sleeper_manager.domain.planning import (
     FixedSlot,
     GameOpportunity,
+    LineupMove,
+    PassedOpportunity,
+    PlanConfidence,
+    PlanDistributionSummary,
+    PlannedAssignment,
     PlanningGameStatus,
+    PlanningQuality,
+    PlanningReasonCode,
+    PlanStatus,
     StarterSlot,
     TeamWeekState,
+    WeeklyPlan,
 )
+
+WEEKLY_PLANNER_VERSION = "weekly-planner-v1"
+DEFAULT_MOVE_LEAD_TIME = timedelta(minutes=10)
 
 
 class WeeklyPlanError(ValueError):
@@ -107,6 +119,8 @@ def score_weekly_options(
         raise WeeklyPlanError(f"Cannot score a blocked team-week state: {reasons}")
 
     batch = _next_actionable_batch(state)
+    if batch is None:
+        raise WeeklyPlanError("No actionable pre-tipoff opportunity remains")
     batch_start = batch[0].scheduled_start
     future = _future_opportunities(state, batch_start)
     fixed_assignments = _fixed_assignments(state.fixed_slots)
@@ -205,6 +219,279 @@ def score_weekly_options(
         evaluations=evaluations,
         perfect_information_bound=perfect_information_bound,
     )
+
+
+def build_weekly_plan(
+    state: TeamWeekState,
+    *,
+    lead_time: timedelta = DEFAULT_MOVE_LEAD_TIME,
+    policy: WeeklyPlanPolicyConfig | None = None,
+    planner_version: str = WEEKLY_PLANNER_VERSION,
+) -> WeeklyPlan:
+    policy_config = policy or WeeklyPlanPolicyConfig()
+    observed_view, slot_positions = _observed_assignment_view(state)
+    if state.is_blocked:
+        return _static_plan(
+            state,
+            observed_view,
+            slot_positions,
+            PlanStatus.BLOCKED,
+            (),
+            planner_version,
+        )
+
+    batch = _next_actionable_batch(state)
+    if batch is None:
+        return _static_plan(
+            state,
+            observed_view,
+            slot_positions,
+            PlanStatus.NO_ACTION,
+            (),
+            planner_version,
+        )
+    future = _future_opportunities(state, batch[0].scheduled_start)
+    if any(opportunity.projection is None for opportunity in (*batch, *future)):
+        return _static_plan(
+            state,
+            observed_view,
+            slot_positions,
+            PlanStatus.BLOCKED,
+            (PlanningReasonCode.MISSING_PROJECTION,),
+            planner_version,
+        )
+
+    decision = score_weekly_options(state, config=policy_config)
+    desired_players = {
+        assignment.slot_index: assignment.player_id for assignment in decision.selected.assignments
+    }
+    desired_players.update({fixed.slot_index: fixed.player_id for fixed in state.fixed_slots})
+    desired_view = _ordered_view(slot_positions, desired_players)
+    moves = _plan_moves(state, desired_view, batch[0].scheduled_start, lead_time)
+
+    blocking_reasons: tuple[PlanningReasonCode, ...] = ()
+    status = PlanStatus.ACTION_REQUIRED if moves else PlanStatus.NO_ACTION
+    if state.warnings:
+        status = PlanStatus.DEGRADED
+    if any(move.deadline <= state.decision_time for move in moves):
+        status = PlanStatus.BLOCKED
+        blocking_reasons = (PlanningReasonCode.DEADLINE_ELAPSED,)
+
+    alternative_score = (
+        decision.alternative.expected_terminal_value
+        if decision.alternative is not None
+        else decision.baseline_terminal_value
+    )
+    margin = round(decision.selected.expected_terminal_value - alternative_score, 6)
+    return WeeklyPlan(
+        league_id=state.league_id,
+        season=state.season,
+        week=state.week,
+        roster_id=state.roster_id,
+        decision_time=state.decision_time,
+        status=status,
+        observed_assignments=observed_view,
+        desired_assignments=desired_view,
+        moves=moves,
+        confidence=_plan_confidence(
+            state.eligibility_quality,
+            margin,
+            policy_config.tie_tolerance,
+        ),
+        planner_version=planner_version,
+        manager_policy_version=state.manager_policy_version,
+        scoring_policy_version=state.scoring_policy_version,
+        league_configuration_version=state.league_configuration_version,
+        projection_model_version=state.projection_model_version,
+        input_version=state.input_version,
+        expected_terminal_score=decision.selected.expected_terminal_value,
+        best_alternative_score=alternative_score,
+        decision_margin=margin,
+        distribution_summary=PlanDistributionSummary(
+            scenario_count=decision.scenario_count,
+            seed=decision.seed,
+            approximation=decision.approximation.value,
+            perfect_information_bound=decision.perfect_information_bound,
+        ),
+        fixed_slots=tuple(sorted(state.fixed_slots, key=lambda fixed: fixed.slot_index)),
+        passed_opportunities=tuple(sorted(state.passed_opportunities, key=_passed_sort_key)),
+        schedule_assumptions=_schedule_assumptions(batch, future),
+        freshness=state.freshness,
+        warnings=state.warnings,
+        blocking_reasons=blocking_reasons,
+    )
+
+
+def _static_plan(
+    state: TeamWeekState,
+    observed_view: tuple[PlannedAssignment, ...],
+    slot_positions: dict[int, str],
+    status: PlanStatus,
+    extra_blocking: tuple[PlanningReasonCode, ...],
+    planner_version: str,
+) -> WeeklyPlan:
+    observed_players = {assignment.slot_index: assignment.player_id for assignment in observed_view}
+    for fixed in state.fixed_slots:
+        observed_players[fixed.slot_index] = fixed.player_id
+    return WeeklyPlan(
+        league_id=state.league_id,
+        season=state.season,
+        week=state.week,
+        roster_id=state.roster_id,
+        decision_time=state.decision_time,
+        status=status,
+        observed_assignments=observed_view,
+        desired_assignments=_ordered_view(slot_positions, observed_players),
+        moves=(),
+        confidence=PlanConfidence.LOW,
+        planner_version=planner_version,
+        manager_policy_version=state.manager_policy_version,
+        scoring_policy_version=state.scoring_policy_version,
+        league_configuration_version=state.league_configuration_version,
+        projection_model_version=state.projection_model_version,
+        input_version=state.input_version,
+        fixed_slots=tuple(sorted(state.fixed_slots, key=lambda fixed: fixed.slot_index)),
+        passed_opportunities=tuple(sorted(state.passed_opportunities, key=_passed_sort_key)),
+        freshness=state.freshness,
+        warnings=state.warnings,
+        blocking_reasons=state.blocking_reasons + extra_blocking,
+    )
+
+
+def _observed_assignment_view(
+    state: TeamWeekState,
+) -> tuple[tuple[PlannedAssignment, ...], dict[int, str]]:
+    slot_positions = {slot.index: slot.position for slot in state.starter_slots}
+    observed_players = {
+        starter.slot_index: starter.player_id for starter in state.observed_starters
+    }
+    return _ordered_view(slot_positions, observed_players), slot_positions
+
+
+def _ordered_view(
+    slot_positions: dict[int, str],
+    players_by_slot: Mapping[int, str | None],
+) -> tuple[PlannedAssignment, ...]:
+    return tuple(
+        PlannedAssignment(index, slot_positions[index], players_by_slot.get(index))
+        for index in sorted(slot_positions)
+    )
+
+
+def _plan_moves(
+    state: TeamWeekState,
+    desired_view: tuple[PlannedAssignment, ...],
+    batch_start: datetime,
+    lead_time: timedelta,
+) -> tuple[LineupMove, ...]:
+    fixed_indices = {fixed.slot_index for fixed in state.fixed_slots}
+    open_indices = [slot.index for slot in state.starter_slots if slot.index not in fixed_indices]
+    observed_players = {
+        starter.slot_index: starter.player_id for starter in state.observed_starters
+    }
+    desired_players = {assignment.slot_index: assignment.player_id for assignment in desired_view}
+
+    pending: dict[str, list[int | None]] = {}
+
+    def pending_move(player_id: str) -> list[int | None]:
+        return pending.setdefault(player_id, [None, None])
+
+    for index in open_indices:
+        current = observed_players.get(index)
+        wanted = desired_players.get(index)
+        if current == wanted:
+            continue
+        if current is not None:
+            pending_move(current)[0] = index
+        if wanted is not None:
+            pending_move(wanted)[1] = index
+
+    occupied = {
+        index: player for index, player in observed_players.items() if index in open_indices
+    }
+    emitted: list[LineupMove] = []
+    while pending:
+        progressed = False
+        for player_id in sorted(pending):
+            source, target = pending[player_id]
+            if target is not None and target in occupied:
+                continue
+            emitted.append(
+                LineupMove(
+                    player_id=player_id,
+                    source_slot_index=source,
+                    target_slot_index=target,
+                    deadline=_move_deadline(state, player_id, batch_start, lead_time),
+                )
+            )
+            if source is not None:
+                occupied.pop(source)
+            if target is not None:
+                occupied[target] = player_id
+            del pending[player_id]
+            progressed = True
+        if pending and not progressed:
+            player_id = min(pending)
+            source, target = pending.pop(player_id)
+            emitted.append(
+                LineupMove(
+                    player_id=player_id,
+                    source_slot_index=source,
+                    target_slot_index=None,
+                    deadline=_move_deadline(state, player_id, batch_start, lead_time),
+                )
+            )
+            if source is not None:
+                occupied.pop(source)
+            pending[player_id] = [None, target]
+    return tuple(emitted)
+
+
+def _move_deadline(
+    state: TeamWeekState,
+    player_id: str,
+    batch_start: datetime,
+    lead_time: timedelta,
+) -> datetime:
+    passed = {(item.player_id, item.game_id) for item in state.passed_opportunities}
+    starts = sorted(
+        opportunity.scheduled_start
+        for opportunity in state.opportunities
+        if opportunity.sleeper_player_id == player_id
+        and opportunity.status is PlanningGameStatus.SCHEDULED
+        and opportunity.scheduled_start > state.decision_time
+        and (opportunity.sleeper_player_id, opportunity.game_id) not in passed
+    )
+    earliest = starts[0] if starts else batch_start
+    return earliest - lead_time
+
+
+def _plan_confidence(
+    quality: PlanningQuality,
+    margin: float,
+    tie_tolerance: float,
+) -> PlanConfidence:
+    if quality in (PlanningQuality.PARTIAL, PlanningQuality.UNKNOWN):
+        return PlanConfidence.LOW
+    if quality is PlanningQuality.BEST_KNOWN_CONSTRAINTS_ORACLE:
+        return PlanConfidence.MEDIUM
+    return PlanConfidence.HIGH if abs(margin) > tie_tolerance else PlanConfidence.MEDIUM
+
+
+def _schedule_assumptions(
+    batch: tuple[GameOpportunity, ...],
+    future: tuple[GameOpportunity, ...],
+) -> tuple[str, ...]:
+    assumptions = [
+        f"game {opportunity.game_id} assumed to start {opportunity.scheduled_start.isoformat()}"
+        for opportunity in sorted(batch, key=_opportunity_id)
+    ]
+    assumptions.append(f"{len(future)} later opportunities remain replannable")
+    return tuple(assumptions)
+
+
+def _passed_sort_key(passed: PassedOpportunity) -> tuple[str, str]:
+    return passed.player_id, passed.game_id
 
 
 def _option_candidates(
@@ -499,7 +786,7 @@ def _retained_observed_count(assignments: tuple[SlotAssignment, ...], state: Tea
     )
 
 
-def _next_actionable_batch(state: TeamWeekState) -> tuple[GameOpportunity, ...]:
+def _next_actionable_batch(state: TeamWeekState) -> tuple[GameOpportunity, ...] | None:
     passed = {(item.player_id, item.game_id) for item in state.passed_opportunities}
     candidates = tuple(
         opportunity
@@ -510,7 +797,7 @@ def _next_actionable_batch(state: TeamWeekState) -> tuple[GameOpportunity, ...]:
         and (opportunity.sleeper_player_id, opportunity.game_id) not in passed
     )
     if not candidates:
-        raise WeeklyPlanError("No actionable pre-tipoff opportunity remains")
+        return None
     batch_start = min(opportunity.scheduled_start for opportunity in candidates)
     return tuple(
         sorted(
@@ -580,11 +867,14 @@ def _opportunity_id(opportunity: GameOpportunity) -> str:
 
 
 __all__ = (
+    "DEFAULT_MOVE_LEAD_TIME",
     "PlacementEvaluation",
     "TerminalValueApproximation",
+    "WEEKLY_PLANNER_VERSION",
     "WeeklyPlanDecision",
     "WeeklyPlanError",
     "WeeklyPlanOption",
     "WeeklyPlanPolicyConfig",
+    "build_weekly_plan",
     "score_weekly_options",
 )
