@@ -193,6 +193,33 @@ def test_continuation_value_is_allocated_once_across_selected_assignment() -> No
     } == {("p1", 0, 10), ("p1", 1, -20), ("p2", 1, -20)}
 
 
+def test_terminal_value_bound_holds_when_current_slot_conflicts_with_future_player() -> None:
+    start = NOW + timedelta(hours=1)
+    later = NOW + timedelta(days=1)
+    state = _state(
+        (
+            _opportunity("p1", "g1", start, ("PG",), ((10, 1),)),
+            _opportunity("p2", "g2", start, ("PG",), ((10, 1),)),
+            _opportunity("p1", "g3", later, ("PG",), ((30, 1),)),
+        ),
+        starter_slots=(StarterSlot(0, "G"),),
+    )
+
+    decision = score_weekly_options(state, config=WeeklyPlanPolicyConfig(scenario_count=5))
+
+    assert decision.perfect_information_bound == 30
+    assert decision.selected.expected_terminal_value == 30
+    assert decision.selected.expected_terminal_value <= decision.perfect_information_bound
+    assert {
+        (
+            evaluation.player_id,
+            evaluation.marginal_terminal_value,
+            evaluation.expected_terminal_value,
+        )
+        for evaluation in decision.evaluations
+    } == {("p1", -20, 10), ("p2", -20, 10)}
+
+
 def test_fixed_slots_and_passed_opportunities_constrain_terminal_options() -> None:
     start = NOW + timedelta(hours=1)
     later = NOW + timedelta(days=1)

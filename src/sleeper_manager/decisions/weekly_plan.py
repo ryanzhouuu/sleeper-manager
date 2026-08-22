@@ -42,14 +42,14 @@ class TerminalValueApproximation(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class _ContinuationAllocation:
-    player_values: tuple[tuple[str, float], ...]
-    slot_values: tuple[tuple[int, float], ...]
+    assignments: tuple[SlotAssignment, ...]
 
-    def value_for_player(self, player_id: str) -> float:
-        return dict(self.player_values).get(player_id, 0.0)
-
-    def value_for_slot(self, slot_index: int) -> float:
-        return dict(self.slot_values).get(slot_index, 0.0)
+    def conflicting_value(self, player_id: str, slot_index: int) -> float:
+        return sum(
+            item.score
+            for item in self.assignments
+            if item.player_id == player_id or item.slot_index == slot_index
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,7 +164,15 @@ def score_weekly_options(
         tie_key=tie_key,
         tie_tolerance=policy_config.tie_tolerance,
     )
-    selected = _option(selected_assignment, baseline, state)
+    selected_value = _assignment_terminal_value(
+        selected_assignment,
+        candidates=option_candidates,
+        fixed_assignments=fixed_assignments,
+        future_inputs=future_inputs,
+        open_slots=open_slots,
+        scenarios=scenarios,
+    )
+    selected = _option(selected_assignment, selected_value, baseline, state)
     alternative_assignment = _best_alternative(
         option_candidates,
         open_slots,
@@ -172,11 +180,17 @@ def score_weekly_options(
         tie_key=tie_key,
         tie_tolerance=policy_config.tie_tolerance,
     )
-    alternative = (
-        _option(alternative_assignment, baseline, state)
-        if alternative_assignment is not None
-        else None
-    )
+    alternative = None
+    if alternative_assignment is not None:
+        alternative_value = _assignment_terminal_value(
+            alternative_assignment,
+            candidates=option_candidates,
+            fixed_assignments=fixed_assignments,
+            future_inputs=future_inputs,
+            open_slots=open_slots,
+            scenarios=scenarios,
+        )
+        alternative = _option(alternative_assignment, alternative_value, baseline, state)
     return WeeklyPlanDecision(
         decision_time=state.decision_time,
         batch_start=batch_start,
@@ -202,10 +216,8 @@ def _score_options(
 ) -> tuple[tuple[AssignmentCandidate, ...], tuple[PlacementEvaluation, ...]]:
     candidates: list[AssignmentCandidate] = []
     evaluations: list[PlacementEvaluation] = []
-    batch_player_ids = {opportunity.sleeper_player_id for opportunity in batch}
     allocations = tuple(
-        _continuation_allocation(assignment, batch_player_ids)
-        for assignment in continuation_assignments
+        _continuation_allocation(assignment) for assignment in continuation_assignments
     )
     for opportunity in batch:
         assert opportunity.projection is not None
@@ -259,29 +271,15 @@ def _marginal_value(
     candidate_id = _opportunity_id(opportunity)
     return sum(
         scenario.value_for(candidate_id)
-        - allocation.value_for_player(opportunity.sleeper_player_id)
-        - allocation.value_for_slot(slot_index)
+        - allocation.conflicting_value(opportunity.sleeper_player_id, slot_index)
         for scenario, allocation in zip(scenarios, allocations, strict=True)
     ) / len(scenarios)
 
 
 def _continuation_allocation(
     assignment: AssignmentResult,
-    batch_player_ids: set[str],
 ) -> _ContinuationAllocation:
-    player_values: dict[str, float] = {}
-    slot_values: dict[int, float] = {}
-    for item in assignment.assignments:
-        if item.player_id is None:
-            continue
-        if item.player_id in batch_player_ids:
-            player_values[item.player_id] = player_values.get(item.player_id, 0.0) + item.score
-        else:
-            slot_values[item.slot_index] = slot_values.get(item.slot_index, 0.0) + item.score
-    return _ContinuationAllocation(
-        player_values=tuple(sorted(player_values.items())),
-        slot_values=tuple(sorted(slot_values.items())),
-    )
+    return _ContinuationAllocation(assignment.assignments)
 
 
 def _mean_terminal_value(
@@ -386,8 +384,55 @@ def _better_result(
     return tie_key(candidate.assignments) < tie_key(incumbent.assignments)
 
 
+def _assignment_terminal_value(
+    assignment: AssignmentResult,
+    *,
+    candidates: tuple[AssignmentCandidate, ...],
+    fixed_assignments: tuple[AssignmentCandidate, ...],
+    future_inputs: tuple[ScenarioInput, ...],
+    open_slots: tuple[StarterSlot, ...],
+    scenarios: tuple[Scenario, ...],
+) -> float:
+    candidates_by_id = {candidate.candidate_id: candidate for candidate in candidates}
+    fixed_score = sum(candidate.score for candidate in fixed_assignments)
+    values: list[float] = []
+    for scenario in scenarios:
+        current_assignments: list[AssignmentCandidate] = []
+        current_slots: set[int] = set()
+        for item in assignment.assignments:
+            if item.candidate_id is None:
+                continue
+            candidate = candidates_by_id[item.candidate_id]
+            current_assignments.append(
+                AssignmentCandidate(
+                    candidate_id=candidate.candidate_id,
+                    player_id=candidate.player_id,
+                    score=scenario.value_for(candidate.candidate_id.rsplit("@slot-", 1)[0]),
+                    eligible_positions=candidate.eligible_positions,
+                    game_id=candidate.game_id,
+                    eligible_slot_indices=candidate.eligible_slot_indices,
+                )
+            )
+            current_slots.add(item.slot_index)
+        remaining_slots = tuple(slot for slot in open_slots if slot.index not in current_slots)
+        future_result = rollout_scenario_assignments(
+            fixed_assignments=fixed_assignments + tuple(current_assignments),
+            remaining_inputs=future_inputs,
+            open_slots=tuple(slot.position for slot in remaining_slots),
+            scenarios=(scenario,),
+            slot_indices=tuple(slot.index for slot in remaining_slots),
+        )[0]
+        values.append(
+            fixed_score
+            + sum(candidate.score for candidate in current_assignments)
+            + future_result.score
+        )
+    return round(sum(values) / len(values), 6)
+
+
 def _option(
     assignment: AssignmentResult,
+    expected_terminal_value: float,
     baseline: float,
     state: TeamWeekState,
 ) -> WeeklyPlanOption:
@@ -395,8 +440,8 @@ def _option(
     moves = _move_count(assignment.assignments, state)
     return WeeklyPlanOption(
         assignments=assignment.assignments,
-        expected_terminal_value=round(baseline + assignment.score, 6),
-        marginal_value=assignment.score,
+        expected_terminal_value=round(expected_terminal_value, 6),
+        marginal_value=round(expected_terminal_value - baseline, 6),
         move_count=moves,
         retained_observed_count=retained,
     )
