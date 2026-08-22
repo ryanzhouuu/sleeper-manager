@@ -6,6 +6,7 @@ import pytest
 from sleeper_manager.backtesting.replay import ReplayConfig, ReplayState
 from sleeper_manager.backtesting.replay.models import ReplayGame, ReplayGameStatus, ReplayPlayerGame
 from sleeper_manager.backtesting.replay.planning_adapter import team_week_state_from_replay
+from sleeper_manager.decisions.lineup import SlotAssignment
 from sleeper_manager.decisions.weekly_plan import (
     TerminalValueApproximation,
     WeeklyPlanError,
@@ -218,6 +219,20 @@ def test_terminal_value_bound_holds_when_current_slot_conflicts_with_future_play
         )
         for evaluation in decision.evaluations
     } == {("p1", -20, 10), ("p2", -20, 10)}
+
+
+def test_best_alternative_includes_leaving_the_lineup_empty() -> None:
+    start = NOW + timedelta(hours=1)
+    state = _state(
+        (_opportunity("p1", "g1", start, ("PG",), ((10, 1),)),),
+        starter_slots=(StarterSlot(0, "G"),),
+    )
+
+    decision = score_weekly_options(state, config=WeeklyPlanPolicyConfig(scenario_count=5))
+
+    assert decision.alternative is not None
+    assert decision.alternative.assignments == (SlotAssignment(0, "G", None, None, None, 0),)
+    assert decision.alternative.expected_terminal_value == 0
 
 
 def test_fixed_slots_and_passed_opportunities_constrain_terminal_options() -> None:

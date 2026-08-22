@@ -368,6 +368,21 @@ def _best_alternative(
         } != selected_ids:
             if best is None or _better_result(result, best, tie_key, tie_tolerance):
                 best = result
+    for slot_index, candidate_id in selected_ids:
+        result = _solve(
+            candidates,
+            open_slots,
+            tie_key=tie_key,
+            tie_tolerance=tie_tolerance,
+            forbidden_edges=frozenset({(slot_index, candidate_id)}),
+        )
+        if {
+            (assignment.slot_index, assignment.candidate_id)
+            for assignment in result.assignments
+            if assignment.candidate_id is not None
+        } != selected_ids:
+            if best is None or _better_result(result, best, tie_key, tie_tolerance):
+                best = result
     return best
 
 
