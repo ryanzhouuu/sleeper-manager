@@ -124,6 +124,25 @@ def test_lineup_recommendations_only_offer_open_sleeper(tmp_path) -> None:  # ty
     assert len(sender.messages) == 1
 
 
+def test_default_configuration_still_suppresses_lineup_acknowledgements(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
+    asyncio.run(repository.initialize())
+    sender = RecordingSender()
+    workflow = NotificationLoop(
+        repository,
+        NotificationDispatcher(sender),
+        acknowledgement_base_url="https://example.test/ack",
+        clock=lambda: NOW,
+    )
+
+    result = asyncio.run(
+        workflow.run(replace(request(), decision_type=WEEKLY_LINEUP_DECISION_TYPE))
+    )
+
+    assert result.notification is not None
+    assert [action.label for action in result.notification.actions] == ["Open Sleeper"]
+
+
 def test_configured_acknowledgement_kinds_keep_creating_actions(tmp_path) -> None:  # type: ignore[no-untyped-def]
     repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
     asyncio.run(repository.initialize())

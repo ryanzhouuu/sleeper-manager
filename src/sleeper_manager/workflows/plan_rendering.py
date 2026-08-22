@@ -1,6 +1,7 @@
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import tzinfo
+from datetime import datetime, tzinfo
 
 from sleeper_manager.domain.planning import (
     PlanningReasonCode,
@@ -12,6 +13,10 @@ WEEKLY_LINEUP_DECISION_TYPE = "weekly_lineup"
 
 # Deltas smaller than the :.1f display half-step would otherwise render as "0.0 points".
 _UNCHANGED_DELTA_EPSILON = 0.05
+
+# Structured assumption lines emitted by the weekly planner's schedule summary.
+_SCHEDULE_START_PATTERN = re.compile(r"^game \S+ assumed to start (.+)$")
+_REPLANNABLE_PATTERN = re.compile(r"^(\d+) later opportunities remain replannable$")
 
 _TITLES = {
     PlanStatus.ACTION_REQUIRED: "Lineup move required",
@@ -53,7 +58,11 @@ def render_weekly_plan(
     local_timezone: tzinfo | None = None,
 ) -> RenderedPlanNotification:
     title = _TITLES[plan.status]
-    if plan.status is not PlanStatus.ACTION_REQUIRED:
+    # Blocked plans suppress instructions even when they retain moves.
+    actionable = plan.status in (PlanStatus.ACTION_REQUIRED, PlanStatus.DEGRADED) and bool(
+        plan.moves
+    )
+    if not actionable:
         return RenderedPlanNotification(
             title=title,
             message=_static_message(plan),
@@ -61,6 +70,7 @@ def render_weekly_plan(
     sections = (
         _imperative(plan, player_names),
         _value_clause(plan),
+        _schedule_clause(plan, local_timezone),
         _risk_clause(plan),
         _deadline_clause(plan, local_timezone),
     )
@@ -167,12 +177,41 @@ def _deadline_clause(plan: WeeklyPlan, local_timezone: tzinfo | None) -> str:
     deadlines = [move.deadline for move in plan.moves]
     if not deadlines:
         return ""
-    deadline = min(deadlines).astimezone(local_timezone or plan.decision_time.tzinfo)
-    hour12 = deadline.hour % 12 or 12
-    zone = deadline.tzname() or str(deadline.tzinfo)
+    moment = min(deadlines).astimezone(local_timezone or plan.decision_time.tzinfo)
     return (
-        f"Complete before {deadline.strftime('%a')} {hour12}:{deadline.strftime('%M %p')} {zone}."
+        f"Complete before {_format_local_time(moment, local_timezone, plan.decision_time.tzinfo)}."
     )
+
+
+def _format_local_time(
+    moment: datetime,
+    local_timezone: tzinfo | None,
+    fallback: tzinfo | None,
+) -> str:
+    local = moment.astimezone(local_timezone or fallback)
+    hour12 = local.hour % 12 or 12
+    zone = local.tzname() or str(local.tzinfo)
+    return f"{local.strftime('%a')} {hour12}:{local.strftime('%M %p')} {zone}"
+
+
+def _schedule_clause(plan: WeeklyPlan, local_timezone: tzinfo | None) -> str:
+    lines: list[str] = []
+    starts: list[datetime] = []
+    for assumption in plan.schedule_assumptions:
+        start_match = _SCHEDULE_START_PATTERN.match(assumption)
+        if start_match:
+            try:
+                starts.append(datetime.fromisoformat(start_match.group(1)))
+            except ValueError:
+                continue
+            continue
+        count_match = _REPLANNABLE_PATTERN.match(assumption)
+        if count_match and int(count_match.group(1)) > 0:
+            lines.append(f"{count_match.group(1)} later opportunities remain replannable.")
+    if starts:
+        tipoff = _format_local_time(min(starts), local_timezone, plan.decision_time.tzinfo)
+        lines.insert(0, f"This matters because the first affected game tips off {tipoff}.")
+    return "\n".join(lines)
 
 
 def _slot_labels(plan: WeeklyPlan) -> dict[int, str]:

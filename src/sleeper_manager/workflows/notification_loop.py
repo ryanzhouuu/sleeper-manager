@@ -17,6 +17,11 @@ from sleeper_manager.persistence.base import (
     RecommendationRecord,
 )
 from sleeper_manager.persistence.tokens import generate_action_token, hash_action_token
+from sleeper_manager.workflows.plan_rendering import WEEKLY_LINEUP_DECISION_TYPE
+
+# Frozen product decision: lineup notifications never carry acknowledgement actions,
+# regardless of caller configuration.
+_UNACKNOWLEDGEABLE_KINDS = frozenset({WEEKLY_LINEUP_DECISION_TYPE})
 
 
 class Clock(Protocol):
@@ -117,7 +122,7 @@ class NotificationLoop:
         now: datetime,
     ) -> NotificationLoopResult:
 
-        requires_acknowledgements = (
+        requires_acknowledgements = request.decision_type not in _UNACKNOWLEDGEABLE_KINDS and (
             self._acknowledgement_kinds is None
             or request.decision_type in self._acknowledgement_kinds
         )

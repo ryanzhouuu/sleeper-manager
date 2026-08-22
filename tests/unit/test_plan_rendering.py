@@ -176,6 +176,38 @@ def test_degraded_plans_surface_warnings_and_confidence() -> None:
     assert "Confidence: low." in rendered.message
 
 
+def test_degraded_plans_with_moves_keep_their_instructions() -> None:
+    plan = _plan(
+        status=PlanStatus.DEGRADED,
+        warnings=(PlanningReasonCode.STALE_NBA_STATE,),
+        confidence=PlanConfidence.LOW,
+    )
+
+    rendered = render_weekly_plan(plan, player_names=NAMES, local_timezone=CHICAGO)
+
+    sections = rendered.message.split("\n\n")
+    assert sections[0] == "Start Alice in UTIL."
+    assert sections[-1] == "Complete before Mon 6:50 AM CST."
+    assert "Notes: NBA schedule data may be stale." in rendered.message
+
+
+def test_schedule_reasons_explain_why_the_change_matters() -> None:
+    plan = _plan(
+        schedule_assumptions=(
+            f"game g1 assumed to start {(NOW + timedelta(hours=1)).isoformat()}",
+            "2 later opportunities remain replannable",
+        )
+    )
+
+    rendered = render_weekly_plan(plan, local_timezone=CHICAGO)
+
+    schedule_section = rendered.message.split("\n\n")[2]
+    assert (
+        "This matters because the first affected game tips off Mon 7:00 AM CST." in schedule_section
+    )
+    assert "2 later opportunities remain replannable." in schedule_section
+
+
 def test_value_clauses_are_omitted_without_scores() -> None:
     rendered = render_weekly_plan(_plan(expected_terminal_score=None, observed_terminal_score=None))
 
