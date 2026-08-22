@@ -133,7 +133,7 @@ def test_equal_terminal_values_prefer_observed_placement_and_return_alternative(
 
     decision = score_weekly_options(state, config=WeeklyPlanPolicyConfig(scenario_count=5, seed=7))
 
-    assert decision.approximation is TerminalValueApproximation.COMMON_BASELINE_MARGINAL
+    assert decision.approximation is TerminalValueApproximation.COMPLETE_ASSIGNMENT_ROLLOUT
     assert _assignment_players(decision) == ("p1",)
     assert decision.alternative is not None
     assert tuple(item.player_id for item in decision.alternative.assignments) == ("p2",)
@@ -191,7 +191,7 @@ def test_continuation_value_is_allocated_once_across_selected_assignment() -> No
     assert {
         (evaluation.player_id, evaluation.slot_index, evaluation.marginal_terminal_value)
         for evaluation in decision.evaluations
-    } == {("p1", 0, 10), ("p1", 1, -20), ("p2", 1, -20)}
+    } == {("p1", 0, 10), ("p1", 1, 10), ("p2", 1, 10)}
 
 
 def test_terminal_value_bound_holds_when_current_slot_conflicts_with_future_player() -> None:
@@ -219,6 +219,35 @@ def test_terminal_value_bound_holds_when_current_slot_conflicts_with_future_play
         )
         for evaluation in decision.evaluations
     } == {("p1", -20, 10), ("p2", -20, 10)}
+
+
+def test_complete_assignment_scoring_charges_joint_continuation_conflict_once() -> None:
+    start = NOW + timedelta(hours=1)
+    later = NOW + timedelta(days=1)
+    current_p1 = replace(
+        _opportunity("p1", "g1", start, ("PG",), ((60, 1),)),
+        eligible_slot_indices=(1,),
+    )
+    current_p2 = replace(
+        _opportunity("p2", "g2", start, ("PG",), ((60, 1),)),
+        eligible_slot_indices=(0,),
+    )
+    future_p1 = replace(
+        _opportunity("p1", "g3", later, ("PG",), ((100, 1),)),
+        eligible_slot_indices=(0,),
+    )
+    state = _state(
+        (current_p1, current_p2, future_p1),
+        starter_slots=(StarterSlot(0, "G"), StarterSlot(1, "UTIL")),
+    )
+
+    decision = score_weekly_options(state, config=WeeklyPlanPolicyConfig(scenario_count=5))
+
+    assert tuple(item.player_id for item in decision.selected.assignments) == ("p2", "p1")
+    assert decision.selected.expected_terminal_value == 120
+    assert decision.perfect_information_bound == 120
+    assert decision.alternative is not None
+    assert decision.alternative.expected_terminal_value == 100
 
 
 def test_best_alternative_includes_leaving_the_lineup_empty() -> None:

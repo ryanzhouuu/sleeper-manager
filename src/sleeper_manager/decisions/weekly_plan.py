@@ -10,7 +10,7 @@ from sleeper_manager.decisions.lineup import (
     AssignmentCandidate,
     AssignmentResult,
     SlotAssignment,
-    maximum_weight_assignment,
+    candidate_eligible_for_slot,
 )
 from sleeper_manager.decisions.simulation import (
     Scenario,
@@ -38,18 +38,13 @@ AssignmentTieKey = Callable[[tuple[SlotAssignment, ...]], tuple[object, ...]]
 
 class TerminalValueApproximation(StrEnum):
     COMMON_BASELINE_MARGINAL = "common_baseline_marginal"
+    COMPLETE_ASSIGNMENT_ROLLOUT = "complete_assignment_rollout"
 
 
 @dataclass(frozen=True, slots=True)
-class _ContinuationAllocation:
-    assignments: tuple[SlotAssignment, ...]
-
-    def conflicting_value(self, player_id: str, slot_index: int) -> float:
-        return sum(
-            item.score
-            for item in self.assignments
-            if item.player_id == player_id or item.slot_index == slot_index
-        )
+class _EvaluatedAssignment:
+    result: AssignmentResult
+    expected_terminal_value: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,47 +145,53 @@ def score_weekly_options(
         open_slots=open_slots,
         scenarios=scenarios,
     )
-    option_candidates, evaluations = _score_options(
-        batch=batch,
-        open_slots=open_slots,
-        scenarios=scenarios,
-        baseline=baseline,
-        continuation_assignments=continuation_assignments,
-    )
+    option_candidates = _option_candidates(batch, open_slots)
+    assignments = _enumerate_current_assignments(option_candidates, open_slots)
     tie_key = _tie_key(state)
-    selected_assignment = _solve(
-        option_candidates,
-        open_slots,
+    evaluated = tuple(
+        _EvaluatedAssignment(
+            assignment,
+            _assignment_terminal_value(
+                assignment,
+                candidates=option_candidates,
+                fixed_assignments=fixed_assignments,
+                future_inputs=future_inputs,
+                open_slots=open_slots,
+                scenarios=scenarios,
+            ),
+        )
+        for assignment in assignments
+    )
+    ordered = _rank_evaluations(
+        evaluated,
         tie_key=tie_key,
         tie_tolerance=policy_config.tie_tolerance,
     )
-    selected_value = _assignment_terminal_value(
-        selected_assignment,
-        candidates=option_candidates,
-        fixed_assignments=fixed_assignments,
-        future_inputs=future_inputs,
-        open_slots=open_slots,
-        scenarios=scenarios,
-    )
-    selected = _option(selected_assignment, selected_value, baseline, state)
-    alternative_assignment = _best_alternative(
-        option_candidates,
-        open_slots,
-        selected_assignment,
-        tie_key=tie_key,
-        tie_tolerance=policy_config.tie_tolerance,
+    selected_evaluation = ordered[0]
+    selected = _option(
+        selected_evaluation.result,
+        selected_evaluation.expected_terminal_value,
+        baseline,
+        state,
     )
     alternative = None
-    if alternative_assignment is not None:
-        alternative_value = _assignment_terminal_value(
-            alternative_assignment,
-            candidates=option_candidates,
-            fixed_assignments=fixed_assignments,
-            future_inputs=future_inputs,
-            open_slots=open_slots,
-            scenarios=scenarios,
+    if len(ordered) > 1:
+        alternative_evaluation = ordered[1]
+        alternative = _option(
+            alternative_evaluation.result,
+            alternative_evaluation.expected_terminal_value,
+            baseline,
+            state,
         )
-        alternative = _option(alternative_assignment, alternative_value, baseline, state)
+    evaluations = _placement_evaluations(
+        batch,
+        open_slots,
+        option_candidates,
+        evaluated,
+        baseline,
+        tie_key=tie_key,
+        tie_tolerance=policy_config.tie_tolerance,
+    )
     return WeeklyPlanDecision(
         decision_time=state.decision_time,
         batch_start=batch_start,
@@ -200,86 +201,35 @@ def score_weekly_options(
         alternative=alternative,
         scenario_count=policy_config.scenario_count,
         seed=seed,
-        approximation=TerminalValueApproximation.COMMON_BASELINE_MARGINAL,
-        evaluations=tuple(evaluations),
+        approximation=TerminalValueApproximation.COMPLETE_ASSIGNMENT_ROLLOUT,
+        evaluations=evaluations,
         perfect_information_bound=perfect_information_bound,
     )
 
 
-def _score_options(
-    *,
+def _option_candidates(
     batch: tuple[GameOpportunity, ...],
     open_slots: tuple[StarterSlot, ...],
-    scenarios: tuple[Scenario, ...],
-    baseline: float,
-    continuation_assignments: tuple[AssignmentResult, ...],
-) -> tuple[tuple[AssignmentCandidate, ...], tuple[PlacementEvaluation, ...]]:
+) -> tuple[AssignmentCandidate, ...]:
     candidates: list[AssignmentCandidate] = []
-    evaluations: list[PlacementEvaluation] = []
-    allocations = tuple(
-        _continuation_allocation(assignment) for assignment in continuation_assignments
-    )
     for opportunity in batch:
         assert opportunity.projection is not None
         for slot in open_slots:
             slot_index = slot.index
-            slot_position = slot.position
             if slot_index not in opportunity.eligible_slot_indices:
                 continue
             candidate_id = f"{_opportunity_id(opportunity)}@slot-{slot_index}"
-            marginal = round(
-                _marginal_value(
-                    opportunity=opportunity,
-                    slot_index=slot_index,
-                    scenarios=scenarios,
-                    allocations=allocations,
-                ),
-                6,
-            )
             candidates.append(
                 AssignmentCandidate(
                     candidate_id=candidate_id,
                     player_id=opportunity.sleeper_player_id,
-                    score=marginal,
+                    score=opportunity.projection.distribution.expected_value,
                     eligible_positions=opportunity.eligible_positions,
                     game_id=opportunity.game_id,
                     eligible_slot_indices=(slot_index,),
                 )
             )
-            evaluations.append(
-                PlacementEvaluation(
-                    candidate_id=candidate_id,
-                    player_id=opportunity.sleeper_player_id,
-                    game_id=opportunity.game_id,
-                    slot_index=slot_index,
-                    slot_position=slot_position,
-                    standalone_expected_value=opportunity.projection.distribution.expected_value,
-                    expected_terminal_value=round(baseline + marginal, 6),
-                    marginal_terminal_value=marginal,
-                )
-            )
-    return tuple(candidates), tuple(evaluations)
-
-
-def _marginal_value(
-    *,
-    opportunity: GameOpportunity,
-    scenarios: tuple[Scenario, ...],
-    allocations: tuple[_ContinuationAllocation, ...],
-    slot_index: int,
-) -> float:
-    candidate_id = _opportunity_id(opportunity)
-    return sum(
-        scenario.value_for(candidate_id)
-        - allocation.conflicting_value(opportunity.sleeper_player_id, slot_index)
-        for scenario, allocation in zip(scenarios, allocations, strict=True)
-    ) / len(scenarios)
-
-
-def _continuation_allocation(
-    assignment: AssignmentResult,
-) -> _ContinuationAllocation:
-    return _ContinuationAllocation(assignment.assignments)
+    return tuple(candidates)
 
 
 def _mean_terminal_value(
@@ -312,91 +262,141 @@ def _terminal_value(
     )
 
 
-def _solve(
+def _enumerate_current_assignments(
     candidates: tuple[AssignmentCandidate, ...],
     open_slots: tuple[StarterSlot, ...],
-    *,
-    tie_key: AssignmentTieKey,
-    tie_tolerance: float,
-    forbidden_edges: frozenset[tuple[int, str]] = frozenset(),
-    required_edges: frozenset[tuple[int, str]] = frozenset(),
-) -> AssignmentResult:
-    return maximum_weight_assignment(
-        candidates,
-        tuple(slot.position for slot in open_slots),
-        slot_indices=tuple(slot.index for slot in open_slots),
-        forbidden_edges=forbidden_edges,
-        required_edges=required_edges,
-        tie_break_key=tie_key,
-        tie_tolerance=tie_tolerance,
+) -> tuple[AssignmentResult, ...]:
+    candidates_by_slot = tuple(
+        tuple(
+            candidate
+            for candidate in sorted(candidates, key=lambda item: item.candidate_id)
+            if candidate_eligible_for_slot(
+                candidate,
+                slot_index=slot.index,
+                slot_position=slot.position,
+            )
+        )
+        for slot in open_slots
     )
+    results: list[AssignmentResult] = []
+
+    def visit(
+        offset: int,
+        used_players: frozenset[str],
+        assignments: tuple[SlotAssignment, ...],
+        score: float,
+    ) -> None:
+        if offset == len(open_slots):
+            results.append(AssignmentResult(round(score, 6), assignments))
+            return
+        slot = open_slots[offset]
+        visit(
+            offset + 1,
+            used_players,
+            assignments + (SlotAssignment(slot.index, slot.position, None, None, None, 0.0),),
+            score,
+        )
+        for candidate in candidates_by_slot[offset]:
+            if candidate.player_id in used_players:
+                continue
+            visit(
+                offset + 1,
+                used_players | {candidate.player_id},
+                assignments
+                + (
+                    SlotAssignment(
+                        slot.index,
+                        slot.position,
+                        candidate.candidate_id,
+                        candidate.player_id,
+                        candidate.game_id,
+                        candidate.score,
+                    ),
+                ),
+                score + candidate.score,
+            )
+
+    visit(0, frozenset(), (), 0.0)
+    return tuple(results)
 
 
-def _best_alternative(
-    candidates: tuple[AssignmentCandidate, ...],
-    open_slots: tuple[StarterSlot, ...],
-    selected: AssignmentResult,
+def _rank_evaluations(
+    evaluations: tuple[_EvaluatedAssignment, ...],
     *,
     tie_key: AssignmentTieKey,
     tie_tolerance: float,
-) -> AssignmentResult | None:
-    selected_ids = {
-        (assignment.slot_index, assignment.candidate_id)
-        for assignment in selected.assignments
-        if assignment.candidate_id is not None
-    }
-    best: AssignmentResult | None = None
-    for candidate in candidates:
-        edge = next(
-            (slot.index, candidate.candidate_id)
-            for slot in open_slots
-            if slot.index in (candidate.eligible_slot_indices or ())
-        )
-        if edge in selected_ids:
-            continue
-        result = _solve(
-            candidates,
-            open_slots,
-            tie_key=tie_key,
-            tie_tolerance=tie_tolerance,
-            required_edges=frozenset({edge}),
-        )
-        if {
-            (assignment.slot_index, assignment.candidate_id)
-            for assignment in result.assignments
-            if assignment.candidate_id is not None
-        } != selected_ids:
-            if best is None or _better_result(result, best, tie_key, tie_tolerance):
-                best = result
-    for slot_index, candidate_id in selected_ids:
-        result = _solve(
-            candidates,
-            open_slots,
-            tie_key=tie_key,
-            tie_tolerance=tie_tolerance,
-            forbidden_edges=frozenset({(slot_index, candidate_id)}),
-        )
-        if {
-            (assignment.slot_index, assignment.candidate_id)
-            for assignment in result.assignments
-            if assignment.candidate_id is not None
-        } != selected_ids:
-            if best is None or _better_result(result, best, tie_key, tie_tolerance):
-                best = result
-    return best
+) -> tuple[_EvaluatedAssignment, ...]:
+    remaining = list(evaluations)
+    ordered: list[_EvaluatedAssignment] = []
+    while remaining:
+        best = remaining[0]
+        for candidate in remaining[1:]:
+            if _better_evaluation(candidate, best, tie_key, tie_tolerance):
+                best = candidate
+        remaining.remove(best)
+        ordered.append(best)
+    return tuple(ordered)
 
 
-def _better_result(
-    candidate: AssignmentResult,
-    incumbent: AssignmentResult,
+def _better_evaluation(
+    candidate: _EvaluatedAssignment,
+    incumbent: _EvaluatedAssignment,
     tie_key: AssignmentTieKey,
     tie_tolerance: float,
 ) -> bool:
-    if candidate.score > incumbent.score + tie_tolerance:
+    if candidate.expected_terminal_value > incumbent.expected_terminal_value + tie_tolerance:
         return True
-    if abs(candidate.score - incumbent.score) > tie_tolerance:
+    if abs(candidate.expected_terminal_value - incumbent.expected_terminal_value) > tie_tolerance:
         return False
-    return tie_key(candidate.assignments) < tie_key(incumbent.assignments)
+    return tie_key(candidate.result.assignments) < tie_key(incumbent.result.assignments)
+
+
+def _placement_evaluations(
+    batch: tuple[GameOpportunity, ...],
+    open_slots: tuple[StarterSlot, ...],
+    candidates: tuple[AssignmentCandidate, ...],
+    evaluated: tuple[_EvaluatedAssignment, ...],
+    baseline: float,
+    *,
+    tie_key: AssignmentTieKey,
+    tie_tolerance: float,
+) -> tuple[PlacementEvaluation, ...]:
+    opportunities = {_opportunity_id(opportunity): opportunity for opportunity in batch}
+    slots = {slot.index: slot for slot in open_slots}
+    results: list[PlacementEvaluation] = []
+    for candidate in candidates:
+        slot_index = (candidate.eligible_slot_indices or ())[0]
+        containing = tuple(
+            evaluation
+            for evaluation in evaluated
+            if any(
+                assignment.candidate_id == candidate.candidate_id
+                for assignment in evaluation.result.assignments
+            )
+        )
+        best = _rank_evaluations(
+            containing,
+            tie_key=tie_key,
+            tie_tolerance=tie_tolerance,
+        )[0]
+        opportunity_id = candidate.candidate_id.rsplit("@slot-", 1)[0]
+        opportunity = opportunities[opportunity_id]
+        expected_terminal = best.expected_terminal_value
+        results.append(
+            PlacementEvaluation(
+                candidate_id=candidate.candidate_id,
+                player_id=candidate.player_id,
+                game_id=candidate.game_id or opportunity.game_id,
+                slot_index=slot_index,
+                slot_position=slots[slot_index].position,
+                standalone_expected_value=opportunity.projection.distribution.expected_value
+                if opportunity.projection is not None
+                else 0.0,
+                expected_terminal_value=expected_terminal,
+                marginal_terminal_value=round(expected_terminal - baseline, 6),
+            )
+        )
+    return tuple(results)
 
 
 def _assignment_terminal_value(
@@ -467,7 +467,17 @@ def _tie_key(state: TeamWeekState) -> AssignmentTieKey:
     def key(assignments: tuple[SlotAssignment, ...]) -> tuple[object, ...]:
         moves = _move_count(assignments, state)
         retained = _retained_observed_count(assignments, state)
-        stable = tuple(assignment.candidate_id or "" for assignment in assignments)
+        stable = tuple(
+            sorted(
+                (
+                    assignment.player_id or "",
+                    assignment.slot_index,
+                    assignment.candidate_id or "",
+                )
+                for assignment in assignments
+                if assignment.player_id is not None
+            )
+        )
         return moves, -retained, stable
 
     return key
@@ -476,9 +486,7 @@ def _tie_key(state: TeamWeekState) -> AssignmentTieKey:
 def _move_count(assignments: tuple[SlotAssignment, ...], state: TeamWeekState) -> int:
     observed = {starter.slot_index: starter.player_id for starter in state.observed_starters}
     return sum(
-        assignment.player_id is not None
-        and assignment.player_id != observed.get(assignment.slot_index)
-        for assignment in assignments
+        assignment.player_id != observed.get(assignment.slot_index) for assignment in assignments
     )
 
 
