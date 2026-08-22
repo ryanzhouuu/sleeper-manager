@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
+from hashlib import sha256
 from math import isfinite
 
 from sleeper_manager.domain.eligibility import eligible_for_slot
@@ -226,6 +227,71 @@ class PassedOpportunity:
         _require_text(self.provenance, "Passed provenance")
 
 
+class PlanStatus(StrEnum):
+    NO_ACTION = "no_action"
+    ACTION_REQUIRED = "action_required"
+    DEGRADED = "degraded"
+    BLOCKED = "blocked"
+
+
+class PlanConfidence(StrEnum):
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+
+@dataclass(frozen=True, slots=True)
+class PlannedAssignment:
+    slot_index: int
+    slot_position: str
+    player_id: str | None
+
+    def __post_init__(self) -> None:
+        if self.slot_index < 0:
+            raise PlanningStateError("Planned assignment slot indices must be non-negative")
+        _require_text(self.slot_position, "Planned assignment slot position")
+        object.__setattr__(self, "slot_position", self.slot_position.strip().upper())
+        if self.player_id is not None:
+            _require_text(self.player_id, "Planned assignment player ID")
+
+
+@dataclass(frozen=True, slots=True)
+class LineupMove:
+    player_id: str
+    source_slot_index: int | None
+    target_slot_index: int | None
+    deadline: datetime
+
+    def __post_init__(self) -> None:
+        _require_text(self.player_id, "Lineup move player ID")
+        if self.source_slot_index is None and self.target_slot_index is None:
+            raise PlanningStateError("A lineup move must change a slot or the bench")
+        if self.source_slot_index == self.target_slot_index:
+            raise PlanningStateError("A lineup move cannot reference the same slot twice")
+        for label, index in (
+            ("Lineup move source", self.source_slot_index),
+            ("Lineup move target", self.target_slot_index),
+        ):
+            if index is not None and index < 0:
+                raise PlanningStateError(f"{label} slot indices must be non-negative")
+        _require_aware(self.deadline, "Lineup move deadline")
+
+
+@dataclass(frozen=True, slots=True)
+class PlanDistributionSummary:
+    scenario_count: int
+    seed: int
+    approximation: str
+    perfect_information_bound: float
+
+    def __post_init__(self) -> None:
+        if self.scenario_count <= 0:
+            raise PlanningStateError("Plan scenario counts must be positive")
+        _require_text(self.approximation, "Plan approximation")
+        if not isfinite(self.perfect_information_bound):
+            raise PlanningStateError("Plan bounds must be finite")
+
+
 @dataclass(frozen=True, slots=True)
 class TeamWeekState:
     league_id: str
@@ -399,9 +465,213 @@ class TeamWeekState:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class WeeklyPlan:
+    league_id: str
+    season: str
+    week: int
+    roster_id: int
+    decision_time: datetime
+    status: PlanStatus
+    observed_assignments: tuple[PlannedAssignment, ...]
+    desired_assignments: tuple[PlannedAssignment, ...]
+    moves: tuple[LineupMove, ...]
+    confidence: PlanConfidence
+    planner_version: str
+    manager_policy_version: str
+    scoring_policy_version: str = "unknown"
+    league_configuration_version: str = "unknown"
+    projection_model_version: str = "unknown"
+    input_version: str = "unknown"
+    expected_terminal_score: float | None = None
+    best_alternative_score: float | None = None
+    decision_margin: float | None = None
+    distribution_summary: PlanDistributionSummary | None = None
+    fixed_slots: tuple[FixedSlot, ...] = ()
+    passed_opportunities: tuple[PassedOpportunity, ...] = ()
+    schedule_assumptions: tuple[str, ...] = ()
+    explanation_reasons: tuple[PlanningReasonCode, ...] = ()
+    freshness: FreshnessSummary = field(default_factory=FreshnessSummary)
+    warnings: tuple[PlanningReasonCode, ...] = ()
+    blocking_reasons: tuple[PlanningReasonCode, ...] = ()
+
+    def __post_init__(self) -> None:
+        _require_text(self.league_id, "Plan league ID")
+        _require_text(self.season, "Plan season")
+        if self.week <= 0:
+            raise PlanningStateError("Plan fantasy weeks must be positive")
+        if self.roster_id <= 0:
+            raise PlanningStateError("Plan roster IDs must be positive")
+        _require_aware(self.decision_time, "Plan decision time")
+        for name, value in (
+            ("Plan planner version", self.planner_version),
+            ("Plan manager policy version", self.manager_policy_version),
+            ("Plan scoring policy version", self.scoring_policy_version),
+            ("Plan league configuration version", self.league_configuration_version),
+            ("Plan projection model version", self.projection_model_version),
+            ("Plan input version", self.input_version),
+        ):
+            _require_text(value, name)
+        for label, score in (
+            ("Expected terminal score", self.expected_terminal_score),
+            ("Best alternative score", self.best_alternative_score),
+            ("Decision margin", self.decision_margin),
+        ):
+            if score is not None and not isfinite(score):
+                raise PlanningStateError(f"{label} must be finite when present")
+        if any(not assumption.strip() for assumption in self.schedule_assumptions):
+            raise PlanningStateError("Schedule assumptions must be non-empty")
+
+        observed_players = _assignment_player_map(self.observed_assignments)
+        desired_players = _assignment_player_map(self.desired_assignments)
+        observed_positions = {
+            assignment.slot_index: assignment.slot_position
+            for assignment in self.observed_assignments
+        }
+        desired_positions = {
+            assignment.slot_index: assignment.slot_position
+            for assignment in self.desired_assignments
+        }
+        if set(observed_players) != set(desired_players):
+            raise PlanningStateError("Observed and desired assignments must cover the same slots")
+        for index in observed_players:
+            if observed_positions[index] != desired_positions[index]:
+                raise PlanningStateError(
+                    "Observed and desired assignments disagree on a slot position"
+                )
+
+        simulated = dict(observed_players)
+        for move in self.moves:
+            if move.source_slot_index is not None:
+                if simulated.get(move.source_slot_index) != move.player_id:
+                    raise PlanningStateError("A lineup move source does not hold its player")
+                del simulated[move.source_slot_index]
+            elif move.player_id in set(simulated.values()):
+                raise PlanningStateError("A bench-source move requires a benched player")
+            if move.target_slot_index is not None:
+                if simulated.get(move.target_slot_index) is not None:
+                    raise PlanningStateError("A lineup move targets an occupied slot")
+                simulated[move.target_slot_index] = move.player_id
+        if simulated != desired_players:
+            raise PlanningStateError("Lineup moves do not produce the desired assignment")
+
+        for fixed in self.fixed_slots:
+            if desired_players.get(fixed.slot_index) != fixed.player_id:
+                raise PlanningStateError("Desired assignment does not preserve a fixed slot")
+
+        if (self.status is PlanStatus.BLOCKED) != bool(self.blocking_reasons):
+            raise PlanningStateError("Blocked plans require blocking reasons and vice versa")
+        if self.status is PlanStatus.NO_ACTION and self.moves:
+            raise PlanningStateError("No-action plans cannot contain moves")
+        if self.status is PlanStatus.ACTION_REQUIRED and not self.moves:
+            raise PlanningStateError("Actionable plans require moves")
+        if self.status is not PlanStatus.BLOCKED:
+            for move in self.moves:
+                if move.deadline <= self.decision_time:
+                    raise PlanningStateError(
+                        "Actionable move deadlines must follow the decision time"
+                    )
+
+    @property
+    def material_hash(self) -> str:
+        return sha256(repr(self._material_components()).encode()).hexdigest()
+
+    @property
+    def plan_id(self) -> str:
+        payload = (
+            "weekly-plan-identity-v1",
+            *self._material_components(),
+            self._lineage_components(),
+        )
+        return sha256(repr(payload).encode()).hexdigest()
+
+    def _material_components(self) -> tuple[object, ...]:
+        return (
+            "weekly-plan-material-v1",
+            self.league_id,
+            self.season,
+            self.week,
+            self.roster_id,
+            self.status.value,
+            tuple(
+                (
+                    move.player_id,
+                    move.source_slot_index,
+                    move.target_slot_index,
+                    move.deadline.isoformat(),
+                )
+                for move in self.moves
+            ),
+            tuple(
+                sorted(
+                    (fixed.slot_index, fixed.player_id, fixed.game_id) for fixed in self.fixed_slots
+                )
+            ),
+            self.planner_version,
+            self.manager_policy_version,
+            tuple(reason.value for reason in self.blocking_reasons),
+        )
+
+    def _lineage_components(self) -> tuple[object, ...]:
+        return (
+            self.decision_time.isoformat(),
+            self.scoring_policy_version,
+            self.league_configuration_version,
+            self.projection_model_version,
+            self.input_version,
+            self.confidence.value,
+            _format_optional(self.expected_terminal_score),
+            _format_optional(self.best_alternative_score),
+            _format_optional(self.decision_margin),
+            None
+            if self.distribution_summary is None
+            else (
+                self.distribution_summary.scenario_count,
+                self.distribution_summary.seed,
+                self.distribution_summary.approximation,
+                repr(round(self.distribution_summary.perfect_information_bound, 6)),
+            ),
+            tuple(
+                passed.player_id
+                for passed in sorted(self.passed_opportunities, key=_passed_sort_key)
+            ),
+            tuple(reason.value for reason in self.warnings),
+            tuple(reason.value for reason in self.explanation_reasons),
+            tuple(sorted(self.schedule_assumptions)),
+            tuple(
+                (source.source, source.version, source.available_as_of.isoformat())
+                for source in sorted(self.freshness.sources, key=lambda item: item.source)
+            ),
+        )
+
+
 def _require_aware(value: datetime, label: str) -> None:
     if value.tzinfo is None:
         raise PlanningStateError(f"{label} must be timezone-aware")
+
+
+def _assignment_player_map(
+    assignments: tuple[PlannedAssignment, ...],
+) -> dict[int, str | None]:
+    players: dict[int, str | None] = {}
+    occupied: set[str] = set()
+    for assignment in assignments:
+        if assignment.slot_index in players:
+            raise PlanningStateError("Planned assignments cannot reuse a slot")
+        if assignment.player_id is not None:
+            if assignment.player_id in occupied:
+                raise PlanningStateError("Planned assignments cannot reuse a player")
+            occupied.add(assignment.player_id)
+        players[assignment.slot_index] = assignment.player_id
+    return players
+
+
+def _passed_sort_key(passed: PassedOpportunity) -> tuple[str, str]:
+    return passed.player_id, passed.game_id
+
+
+def _format_optional(value: float | None) -> str | None:
+    return None if value is None else repr(round(value, 6))
 
 
 def _require_text(value: str, label: str) -> None:
@@ -429,8 +699,13 @@ __all__ = (
     "FixedSlot",
     "FreshnessSummary",
     "GameOpportunity",
+    "LineupMove",
     "ObservedStarter",
     "PassedOpportunity",
+    "PlanConfidence",
+    "PlanDistributionSummary",
+    "PlanStatus",
+    "PlannedAssignment",
     "PlanningGameStatus",
     "PlanningQuality",
     "PlanningReasonCode",
@@ -438,4 +713,5 @@ __all__ = (
     "SourceLineage",
     "StarterSlot",
     "TeamWeekState",
+    "WeeklyPlan",
 )
