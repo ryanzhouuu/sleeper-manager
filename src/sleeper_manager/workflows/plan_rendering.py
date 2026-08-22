@@ -10,6 +10,9 @@ from sleeper_manager.domain.planning import (
 
 WEEKLY_LINEUP_DECISION_TYPE = "weekly_lineup"
 
+# Deltas smaller than the :.1f display half-step would otherwise render as "0.0 points".
+_UNCHANGED_DELTA_EPSILON = 0.05
+
 _TITLES = {
     PlanStatus.ACTION_REQUIRED: "Lineup move required",
     PlanStatus.NO_ACTION: "Lineup is set",
@@ -55,42 +58,40 @@ def render_weekly_plan(
             title=title,
             message=_static_message(plan),
         )
-    sections = [
+    sections = (
         _imperative(plan, player_names),
         _value_clause(plan),
         _risk_clause(plan),
         _deadline_clause(plan, local_timezone),
-    ]
+    )
     return RenderedPlanNotification(
         title=title,
-        message="\n\n".join(section for section in sections if section),
+        message=_join_sections("\n\n", *sections),
     )
+
+
+def _join_sections(separator: str, *sections: str) -> str:
+    return separator.join(section for section in sections if section)
 
 
 def _static_message(plan: WeeklyPlan) -> str:
     if plan.status is PlanStatus.NO_ACTION:
         return "Your lineup already matches the weekly plan."
     if plan.status is PlanStatus.DEGRADED:
-        return "\n\n".join(
-            section
-            for section in (
-                "Lineup advice is limited right now.",
-                _notes_clause(plan.warnings + plan.explanation_reasons),
-                _confidence_clause(plan),
-            )
-            if section
+        return _join_sections(
+            "\n\n",
+            "Lineup advice is limited right now.",
+            _notes_clause(plan.explanation_reasons + plan.warnings),
+            _confidence_clause(plan),
         )
     phrases = _reason_phrases(plan.blocking_reasons)
     blocked_clause = (
         f"Advice is blocked: {'; '.join(phrases)}." if phrases else "Advice is blocked."
     )
-    return "\n\n".join(
-        section
-        for section in (
-            blocked_clause,
-            "Lineup advice resumes once the issue resolves.",
-        )
-        if section
+    return _join_sections(
+        "\n\n",
+        blocked_clause,
+        "Lineup advice resumes once the issue resolves.",
     )
 
 
@@ -119,23 +120,19 @@ def _value_clause(plan: WeeklyPlan) -> str:
     if expected is None or baseline is None:
         return ""
     delta = round(expected - baseline, 6)
-    if abs(delta) < 0.05:
+    if abs(delta) < _UNCHANGED_DELTA_EPSILON:
         return "Expected terminal weekly value is unchanged."
     direction = "improves by" if delta > 0 else "drops by"
     return f"Expected terminal weekly value {direction} {abs(delta):.1f} points."
 
 
 def _risk_clause(plan: WeeklyPlan) -> str:
-    clauses = [
-        clause
-        for clause in (
-            _notes_clause(plan.explanation_reasons + plan.warnings),
-            _confidence_clause(plan),
-            _approximation_clause(plan),
-        )
-        if clause
-    ]
-    return "\n".join(clauses)
+    return _join_sections(
+        "\n",
+        _notes_clause(plan.explanation_reasons + plan.warnings),
+        _confidence_clause(plan),
+        _approximation_clause(plan),
+    )
 
 
 def _confidence_clause(plan: WeeklyPlan) -> str:

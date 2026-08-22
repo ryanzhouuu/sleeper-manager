@@ -62,6 +62,8 @@ class NotificationLoop:
         self._repository = repository
         self._dispatcher = dispatcher
         self._acknowledgement_base_url = acknowledgement_base_url.rstrip("?")
+        # None issues acknowledgements for every kind: an
+        # explicit set restricts them to those kinds, so an empty set disables them.
         self._acknowledgement_kinds = acknowledgement_kinds
         self._clock = clock or (lambda: datetime.now(UTC))
 

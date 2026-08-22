@@ -11,6 +11,7 @@ from sleeper_manager.workflows.notification_loop import (
     NotificationLoop,
     RecommendationRequest,
 )
+from sleeper_manager.workflows.plan_rendering import WEEKLY_LINEUP_DECISION_TYPE
 
 
 class RecordingSender:
@@ -104,7 +105,9 @@ def test_lineup_recommendations_only_offer_open_sleeper(tmp_path) -> None:  # ty
         acknowledgement_kinds=frozenset({"placeholder_lock_in"}),
     )
 
-    result = asyncio.run(workflow.run(replace(request(), decision_type="weekly_lineup")))
+    result = asyncio.run(
+        workflow.run(replace(request(), decision_type=WEEKLY_LINEUP_DECISION_TYPE))
+    )
 
     assert result.status == "created"
     assert result.notification is not None
