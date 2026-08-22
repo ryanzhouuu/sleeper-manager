@@ -3,6 +3,7 @@ from pathlib import Path
 
 from sleeper_manager.backtesting.experiments.lock_in import (
     LockInExperimentError,
+    LockInValidationOutput,
     _load_cached_archive,
     run_lock_in_policy_validation,
 )
@@ -66,6 +67,66 @@ def test_cached_archive_falls_back_to_requested_league_without_events(tmp_path: 
     assert archive.league_id == "shell"
     assert archive.season == "2026"
     assert archive.resolved_from_league_id is None
+
+
+def test_lock_in_status_reports_missing_replay_inputs(tmp_path: Path) -> None:
+    _write_validation_archives(tmp_path)
+
+    output = _run_validation(tmp_path)
+    report = json.loads(output.report_json_path.read_text(encoding="utf-8"))
+
+    assert output.status == "blocked_missing_replay_inputs"
+    assert report["status"] == output.status
+    assert report["replay_inputs"]["leagues"]["historical"]["team_week_count"] == 0
+
+
+def test_lock_in_status_advances_when_all_replay_inputs_are_complete(tmp_path: Path) -> None:
+    _write_validation_archives(tmp_path)
+    for league_id in ("current", "historical", "stress"):
+        _write_replay_team_week(tmp_path, league_id, complete=True)
+
+    output = _run_validation(tmp_path)
+
+    assert output.status == "ready_for_replay_validation"
+
+
+def test_lock_in_status_reports_incomplete_replay_inputs(tmp_path: Path) -> None:
+    _write_validation_archives(tmp_path)
+    _write_replay_team_week(tmp_path, "current", complete=True)
+    _write_replay_team_week(tmp_path, "historical", complete=False)
+    _write_replay_team_week(tmp_path, "stress", complete=True)
+
+    output = _run_validation(tmp_path)
+
+    assert output.status == "blocked_incomplete_replay_inputs"
+
+
+def _run_validation(tmp_path: Path) -> LockInValidationOutput:
+    return run_lock_in_policy_validation(
+        tmp_path,
+        current_league_id="current",
+        historical_league_id="historical",
+        stress_league_id="stress",
+    )
+
+
+def _write_validation_archives(tmp_path: Path) -> None:
+    for league_id in ("current", "historical", "stress"):
+        _write_archive(tmp_path, league_id, season="2026", previous=None, has_events=True)
+
+
+def _write_replay_team_week(tmp_path: Path, league_id: str, *, complete: bool) -> None:
+    path = (
+        tmp_path
+        / "team-week-inputs"
+        / "manifest-1"
+        / "team-weeks"
+        / league_id
+        / "week-01"
+        / "roster-1.json"
+    )
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({"league_id": league_id, "complete": complete}), encoding="utf-8")
 
 
 def _write_archive(

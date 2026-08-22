@@ -55,11 +55,13 @@ def run_lock_in_policy_validation(
         _empty_league_report(archive, primary=archive.league_id == historical_league_id)
         for archive in archives.values()
     )
+    replay_inputs = _replay_input_summary(workspace, tuple(archives.values()))
     report = {
-        "status": "blocked_pending_nba_replay_inputs",
+        "status": replay_inputs["status"],
         "generated_at": datetime.now(UTC).isoformat(),
         "release_decision": "do_not_promote",
-        "reason": "Sleeper archives loaded, but NBA replay inputs are not present in this cache.",
+        "reason": replay_inputs["reason"],
+        "replay_inputs": replay_inputs,
         "leagues": reports,
     }
     report_dir = workspace / "reports"
@@ -164,6 +166,7 @@ def _empty_league_report(archive: HistoricalLeagueArchive, *, primary: bool) -> 
             "team_week_count": 0,
             "mean_regret": None,
             "mean_score_capture": None,
+            "aggregate_score_capture": None,
             "excluded_team_weeks": 0,
         },
         "coverage": {
@@ -172,6 +175,56 @@ def _empty_league_report(archive: HistoricalLeagueArchive, *, primary: bool) -> 
             "transactions": len(archive.transactions),
             "eligibility_records": len(archive.player_eligibility),
         },
+    }
+
+
+def _replay_input_summary(
+    workspace: Path, archives: tuple[HistoricalLeagueArchive, ...]
+) -> dict[str, Any]:
+    expected_leagues = tuple(archive.league_id for archive in archives)
+    records_by_league: dict[str, list[bool]] = {league_id: [] for league_id in expected_leagues}
+    root = workspace / "team-week-inputs"
+    for path in sorted(root.glob("*/team-weeks/*/week-*/roster-*.json")):
+        payload = _read_json(path)
+        if not isinstance(payload, dict):
+            continue
+        league_id = payload.get("league_id")
+        if league_id not in records_by_league:
+            continue
+        records_by_league[league_id].append(payload.get("complete") is True)
+
+    coverage = {
+        league_id: {
+            "team_week_count": len(records),
+            "complete_team_weeks": sum(records),
+            "incomplete_team_weeks": len(records) - sum(records),
+        }
+        for league_id, records in records_by_league.items()
+    }
+    missing = tuple(league_id for league_id, records in records_by_league.items() if not records)
+    incomplete = tuple(
+        league_id
+        for league_id, records in records_by_league.items()
+        if records and not all(records)
+    )
+    if missing:
+        status = "blocked_missing_replay_inputs"
+        reason = "Replay input bundles are missing for: " + ", ".join(missing) + "."
+    elif incomplete:
+        status = "blocked_incomplete_replay_inputs"
+        reason = (
+            "Replay input bundles contain incomplete team-weeks for: " + ", ".join(incomplete) + "."
+        )
+    else:
+        status = "ready_for_replay_validation"
+        reason = (
+            "Complete replay inputs are cached for all requested leagues; policy replay "
+            "execution remains pending."
+        )
+    return {
+        "status": status,
+        "reason": reason,
+        "leagues": coverage,
     }
 
 
