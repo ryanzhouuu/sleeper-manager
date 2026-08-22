@@ -162,6 +162,24 @@ def test_legacy_target_outcomes_do_not_change_pregame_projection() -> None:
     assert changed.input_version == original.input_version
 
 
+def test_historical_wrapper_uses_provider_history_and_emits_sleeper_identity() -> None:
+    prior = row("prior", "provider-1", datetime(2025, 1, 9, tzinfo=UTC), 10, 10)
+    target = replace(
+        row("target", "provider-1", datetime(2025, 1, 10, tzinfo=UTC), 0, 0),
+        sleeper_id="sleeper-1",
+    )
+
+    snapshot = DirectFantasyPointBaseline().project(
+        dataset((prior, target)),
+        player_id="provider-1",
+        game_id="target",
+        scoring_policy=POLICY,
+    )
+
+    assert snapshot.player_id == "sleeper-1"
+    assert snapshot.distribution.expected_value > 0
+
+
 def test_pregame_request_excludes_same_tipoff_and_future_outcomes() -> None:
     prior = row("prior", "player-1", datetime(2025, 1, 9, tzinfo=UTC), 10, 10)
     target_start = datetime(2025, 1, 10, 18, tzinfo=UTC)

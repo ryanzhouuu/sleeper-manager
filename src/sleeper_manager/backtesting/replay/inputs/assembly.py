@@ -219,10 +219,17 @@ def assemble_historical_team_week_inputs(
                 projection = projection_by_key.get(
                     (candidate.sleeper_id, candidate.game.provider_id)
                 )
-                if projection is not None:
+                if (
+                    projection is not None
+                    and projection.available_as_of <= candidate.game.start_time
+                ):
                     projected_count += 1
                 else:
-                    missing_evidence[PlanningReasonCode.MISSING_PROJECTION] += 1
+                    if projection is not None:
+                        projection = None
+                        missing_evidence[PlanningReasonCode.PROJECTION_AFTER_DECISION] += 1
+                    else:
+                        missing_evidence[PlanningReasonCode.MISSING_PROJECTION] += 1
                 player_games.append(
                     ReplayPlayerGame(
                         sleeper_id=candidate.sleeper_id,

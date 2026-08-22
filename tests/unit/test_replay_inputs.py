@@ -380,6 +380,38 @@ def test_historical_join_blocks_player_games_without_projection_snapshots() -> N
     assert team_week.coverage.missing_evidence == ((PlanningReasonCode.MISSING_PROJECTION, 2),)
 
 
+def test_replay_inputs_reject_incompatible_projection_snapshots() -> None:
+    inputs = _historical_join_inputs()
+    wrong_scoring = replace(inputs.projection_snapshots[0], scoring_policy_version="wrong-scoring")
+
+    with pytest.raises(ReplayInputError, match="scoring policy"):
+        replace(
+            inputs,
+            projection_snapshots=(wrong_scoring, *inputs.projection_snapshots[1:]),
+        )
+
+    with pytest.raises(ReplayInputError, match="model"):
+        replace(inputs, projection_config_version="different-model")
+
+
+def test_historical_join_rejects_projection_available_after_tipoff() -> None:
+    inputs = _historical_join_inputs()
+    late = replace(
+        inputs.projection_snapshots[0],
+        available_as_of=datetime(2026, 1, 6, tzinfo=UTC),
+    )
+
+    team_week = assemble_historical_team_week_inputs(
+        replace(inputs, projection_snapshots=(late, *inputs.projection_snapshots[1:]))
+    )[0]
+
+    assert not team_week.complete
+    assert team_week.player_games[0].projection is None
+    assert team_week.coverage.missing_evidence == (
+        (PlanningReasonCode.PROJECTION_AFTER_DECISION, 1),
+    )
+
+
 def test_unrelated_missing_schedule_does_not_exclude_another_week() -> None:
     base = _historical_join_inputs()
     boundaries = build_fantasy_week_boundaries(

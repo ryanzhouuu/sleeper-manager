@@ -74,6 +74,20 @@ class HistoricalReplayBuildInput:
         )
         if len(set(projection_keys)) != len(projection_keys):
             raise ReplayInputError("Projection snapshots cannot duplicate a player-game")
+        for snapshot in self.projection_snapshots:
+            if snapshot.available_as_of.tzinfo is None:
+                raise ReplayInputError("Projection availability must be timezone-aware")
+            if snapshot.scoring_policy_version != self.scoring_policy.version:
+                raise ReplayInputError(
+                    "Projection snapshot scoring policy does not match replay scoring"
+                )
+            if (
+                self.projection_config_version != "projection-unconfigured"
+                and snapshot.model_version != self.projection_config_version
+            ):
+                raise ReplayInputError(
+                    "Projection snapshot model does not match replay projection configuration"
+                )
         _unique_source_names(self.source_fingerprints)
 
 

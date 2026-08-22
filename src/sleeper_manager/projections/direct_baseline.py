@@ -87,6 +87,7 @@ class PregameProjectionRequest:
     game_start: datetime
     available_as_of: datetime
     history: tuple[HistoricalFeatureRow, ...]
+    history_player_id: str | None = None
     source_versions: tuple[DatasetSourceVersion, ...] = ()
 
     def __post_init__(self) -> None:
@@ -100,6 +101,10 @@ class PregameProjectionRequest:
                 raise ProjectionBaselineError(f"Pregame {label} must be non-empty")
         _validate_timestamp(self.game_start, "pregame game_start")
         _validate_timestamp(self.available_as_of, "pregame available_as_of")
+        history_player_id = self.history_player_id or self.player_id
+        if not history_player_id.strip():
+            raise ProjectionBaselineError("Pregame history_player_id must be non-empty")
+        object.__setattr__(self, "history_player_id", history_player_id)
         if self.available_as_of > self.game_start:
             raise ProjectionBaselineError(
                 "Pregame projection availability cannot follow game start"
@@ -138,11 +143,12 @@ class DirectFantasyPointBaseline:
         request = PregameProjectionRequest(
             dataset_version=dataset.dataset_version,
             feature_schema_version=dataset.feature_schema_version,
-            player_id=target.player_id,
+            player_id=target.sleeper_id or target.player_id,
             game_id=target.game_id,
             game_start=target.game_start,
             available_as_of=target.available_as_of,
             history=tuple(row for row in dataset.rows if row.game_start < target.game_start),
+            history_player_id=target.player_id,
             source_versions=dataset.source_versions,
         )
         return self.project_pregame(
@@ -161,7 +167,7 @@ class DirectFantasyPointBaseline:
         index = self._pregame_index(request, scoring_policy)
         season = nba_season_start_year(request.game_start)
         prior_rows = index.player_rows_before(
-            request.player_id,
+            request.history_player_id or request.player_id,
             season,
             request.game_start,
         )
@@ -516,6 +522,7 @@ def _pregame_input_version(
         "dataset_version": request.dataset_version,
         "feature_schema_version": request.feature_schema_version,
         "player_id": request.player_id,
+        "history_player_id": request.history_player_id,
         "game_id": request.game_id,
         "game_start": request.game_start.isoformat(),
         "available_as_of": request.available_as_of.isoformat(),
