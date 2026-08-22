@@ -39,7 +39,7 @@ def team_week_state_from_replay(
     config: ReplayConfig,
     decision_time: datetime,
     league_profile: LeagueProfile | None = None,
-    observed_starter_ids: Iterable[str] = (),
+    observed_starter_ids: Iterable[str | None] = (),
     roster_player_ids: Iterable[str] | None = None,
     player_positions_by_id: Mapping[str, Iterable[str]] | None = None,
     manager_policy_version: str = "replay-policy-v1",
@@ -78,6 +78,7 @@ def team_week_state_from_replay(
             eligible_positions=positions_by_player.get(player_id, ()),
         )
         for index, player_id in enumerate(observed_ids)
+        if player_id is not None
         if index < len(starter_slots)
     )
     if len(observed_ids) > len(starter_slots):
@@ -281,17 +282,17 @@ def _roster_player_ids(
 def _observed_starter_ids(
     roster_id: int,
     league_profile: LeagueProfile | None,
-    supplied: Iterable[str],
-) -> tuple[str, ...]:
-    supplied_ids = _clean_ids(supplied)
+    supplied: Iterable[str | None],
+) -> tuple[str | None, ...]:
+    supplied_ids = tuple(supplied)
     if supplied_ids:
-        return supplied_ids
+        return _preserve_starter_slots(supplied_ids)
     if league_profile is None:
         return ()
     roster = next(
         (roster for roster in league_profile.rosters if roster.roster_id == roster_id), None
     )
-    return _clean_ids(roster.starter_ids) if roster is not None else ()
+    return _preserve_starter_slots(roster.starter_ids) if roster is not None else ()
 
 
 def _point_in_time_projection(
@@ -387,6 +388,17 @@ def _clean_ids(values: Iterable[str]) -> tuple[str, ...]:
     return tuple(
         dict.fromkeys(value.strip() for value in values if value.strip() and value.strip() != "0")
     )
+
+
+def _preserve_starter_slots(values: Iterable[str | None]) -> tuple[str | None, ...]:
+    result: list[str | None] = []
+    for value in values:
+        if value is None:
+            result.append(None)
+            continue
+        normalized = value.strip()
+        result.append(normalized if normalized and normalized != "0" else None)
+    return tuple(result)
 
 
 __all__ = ("PlanningAdapterError", "team_week_state_from_replay")

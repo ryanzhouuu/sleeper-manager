@@ -26,8 +26,10 @@ def league_payload() -> dict[str, object]:
 def test_archive_parses_transaction_timestamps_and_positions() -> None:
     archive = parse_historical_league_archive(
         league_payload(),
-        rosters=[{"roster_id": 1, "players": ["p1"], "starters": ["p1"]}],
-        matchup_weeks={1: [{"roster_id": 1, "players": ["p1"], "starters": ["p1"]}]},
+        rosters=[{"roster_id": 1, "players": ["p1"], "starters": ["0", "p1"]}],
+        matchup_weeks={
+            1: [{"roster_id": 1, "players": ["p1"], "starters": ["0", "p1"]}]
+        },
         transactions=[
             {
                 "transaction_id": "tx-1",
@@ -46,6 +48,8 @@ def test_archive_parses_transaction_timestamps_and_positions() -> None:
     assert transaction.status_updated_at == datetime.fromtimestamp(1_700_000_001, tz=UTC)
     assert archive.player_eligibility[0].eligible_positions == ("G", "PG")
     assert archive.matchup_weeks[0].week == 1
+    assert archive.final_rosters[0].starter_ids == (None, "p1")
+    assert archive.matchup_weeks[0].starter_ids == (None, "p1")
 
 
 def test_archive_rejects_unsupported_nonzero_scoring_field() -> None:

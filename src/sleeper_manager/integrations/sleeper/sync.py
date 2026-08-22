@@ -144,12 +144,21 @@ def _ids(values: list[str]) -> tuple[str, ...]:
     return tuple(value.strip() for value in values if value.strip() and value.strip() != "0")
 
 
+def _starter_ids(values: list[str]) -> tuple[str | None, ...]:
+    result: list[str | None] = []
+    for value in values:
+        normalized = value.strip()
+        result.append(normalized if normalized and normalized != "0" else None)
+    return tuple(result)
+
+
 def _parse_roster(payload: SleeperRosterPayload) -> Roster:
     players = _ids(payload.players)
-    starters = _ids(payload.starters)
+    starters = _starter_ids(payload.starters)
     reserve = _ids(payload.reserve or [])
-    if not set(starters).issubset(players):
-        missing = sorted(set(starters) - set(players))
+    concrete_starters = tuple(starter for starter in starters if starter is not None)
+    if not set(concrete_starters).issubset(players):
+        missing = sorted(set(concrete_starters) - set(players))
         raise LeagueCompatibilityError(
             f"Roster {payload.roster_id} lists starters not present in players: {missing}"
         )

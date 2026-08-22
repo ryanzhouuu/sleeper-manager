@@ -91,6 +91,23 @@ def test_duplicate_position_labels_retain_distinct_slot_indices() -> None:
     assert state.observed_starters[0].slot_index == 0
 
 
+def test_empty_observed_slot_does_not_shift_later_starter_index() -> None:
+    replay = ReplayState(
+        ("G", "G"),
+        (_replay_state().games[0],),
+        (ReplayPlayerGame("p1", "provider-p1", "g1", 1, True, ("PG",), 10),),
+    )
+
+    state = team_week_state_from_replay(
+        replay,
+        config=ReplayConfig(starter_slots=("G", "G"), roster_id=1),
+        decision_time=DECISION_TIME,
+        observed_starter_ids=(None, "p1"),
+    )
+
+    assert tuple(starter.slot_index for starter in state.observed_starters) == (1,)
+
+
 def test_duplicate_game_records_are_retained_as_a_blocking_reason() -> None:
     replay = _replay_state()
     replay = ReplayState(

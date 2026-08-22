@@ -165,7 +165,7 @@ class HistoricalTeamWeekInput:
     roster_id: int
     starter_slots: tuple[str, ...]
     roster_player_ids: tuple[str, ...]
-    observed_starter_ids: tuple[str, ...]
+    observed_starter_ids: tuple[str | None, ...]
     games: tuple[ReplayGame, ...]
     player_games: tuple[ReplayPlayerGame, ...]
     eligibility_quality: PlanningQuality

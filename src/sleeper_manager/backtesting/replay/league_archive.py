@@ -38,7 +38,7 @@ class SleeperArchiveReader(Protocol):
 class ArchivedRoster:
     roster_id: int
     player_ids: tuple[str, ...]
-    starter_ids: tuple[str, ...] = ()
+    starter_ids: tuple[str | None, ...] = ()
     reserve_ids: tuple[str, ...] = ()
 
 
@@ -47,7 +47,7 @@ class HistoricalMatchup:
     week: int
     roster_id: int
     player_ids: tuple[str, ...]
-    starter_ids: tuple[str, ...] = ()
+    starter_ids: tuple[str | None, ...] = ()
     points: float | None = None
     leg: int | None = None
 
@@ -280,7 +280,7 @@ def _parse_roster(payload: Mapping[str, Any]) -> ArchivedRoster:
     return ArchivedRoster(
         roster_id=roster.roster_id,
         player_ids=_ids(roster.players),
-        starter_ids=_ids(roster.starters),
+        starter_ids=_starter_ids(roster.starters),
         reserve_ids=_ids(roster.reserve or ()),
     )
 
@@ -302,7 +302,7 @@ def _parse_matchups(
                     week=week,
                     roster_id=roster_id,
                     player_ids=_ids(payload.get("players", ())),
-                    starter_ids=_ids(payload.get("starters", ())),
+                    starter_ids=_starter_ids(payload.get("starters", ())),
                     points=_optional_float(payload.get("points")),
                     leg=_optional_int(payload.get("leg")),
                 )
@@ -364,6 +364,14 @@ def _changes(values: Mapping[str, int | str] | None) -> tuple[tuple[str, int], .
 
 def _ids(values: Iterable[Any]) -> tuple[str, ...]:
     return tuple(str(value).strip() for value in values if str(value).strip() and str(value) != "0")
+
+
+def _starter_ids(values: Iterable[Any]) -> tuple[str | None, ...]:
+    result: list[str | None] = []
+    for value in values:
+        normalized = str(value).strip()
+        result.append(normalized if normalized and normalized != "0" else None)
+    return tuple(result)
 
 
 def _parse_timestamp(value: int | float | str | None) -> datetime | None:

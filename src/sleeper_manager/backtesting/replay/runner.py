@@ -137,7 +137,7 @@ class ChronologicalReplayRunner:
         planning_cutoffs: Iterable[datetime] | None = None,
         runner_config: ReplayRunnerConfig | None = None,
         initial_roster_player_ids: Iterable[str] | None = None,
-        observed_starter_ids: Iterable[str] = (),
+        observed_starter_ids: Iterable[str | None] = (),
         league_profile: LeagueProfile | None = None,
         player_positions_by_id: Mapping[str, Iterable[str]] | None = None,
         manager_policy_version: str = "replay-policy-v1",
@@ -152,7 +152,7 @@ class ChronologicalReplayRunner:
         self.initial_roster_player_ids = (
             None if initial_roster_player_ids is None else _normalize_ids(initial_roster_player_ids)
         )
-        self.observed_starter_ids = _normalize_ids(observed_starter_ids)
+        self.observed_starter_ids = _normalize_starter_ids(observed_starter_ids)
         self.league_profile = league_profile
         self.player_positions_by_id = player_positions_by_id
         self.manager_policy_version = manager_policy_version
@@ -240,7 +240,7 @@ def run_chronological_replay(
     planning_cutoffs: Iterable[datetime] | None = None,
     runner_config: ReplayRunnerConfig | None = None,
     initial_roster_player_ids: Iterable[str] | None = None,
-    observed_starter_ids: Iterable[str] = (),
+    observed_starter_ids: Iterable[str | None] = (),
     league_profile: LeagueProfile | None = None,
     player_positions_by_id: Mapping[str, Iterable[str]] | None = None,
     manager_policy_version: str = "replay-policy-v1",
@@ -454,6 +454,17 @@ def _validate_unique_event_ids(events: Iterable[ReplayEvent]) -> None:
 def _normalize_ids(values: Iterable[str]) -> tuple[str, ...]:
     normalized = tuple(dict.fromkeys(value.strip() for value in values if value.strip()))
     return tuple(sorted(normalized))
+
+
+def _normalize_starter_ids(values: Iterable[str | None]) -> tuple[str | None, ...]:
+    result: list[str | None] = []
+    for value in values:
+        if value is None:
+            result.append(None)
+            continue
+        normalized = value.strip()
+        result.append(normalized if normalized and normalized != "0" else None)
+    return tuple(result)
 
 
 def _require_aware(value: datetime, label: str) -> None:

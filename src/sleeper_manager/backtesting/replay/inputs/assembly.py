@@ -593,13 +593,13 @@ def _observed_starters(
     matchups: Sequence[HistoricalMatchup],
     week: int,
     roster_id: int,
-) -> tuple[str, ...]:
+) -> tuple[str | None, ...]:
     matching = tuple(
         matchup for matchup in matchups if matchup.week == week and matchup.roster_id == roster_id
     )
     if not matching:
         return ()
-    return tuple(dict.fromkeys(matching[0].starter_ids))
+    return matching[0].starter_ids
 
 
 def _starter_slots(roster_slots: Sequence[str]) -> tuple[str, ...]:

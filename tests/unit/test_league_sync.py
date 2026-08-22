@@ -117,7 +117,7 @@ def test_sync_treats_null_reserve_as_empty() -> None:
 @respx.mock
 def test_sync_treats_zero_starter_as_empty() -> None:
     rosters = fixture("rosters.json")
-    rosters[0]["starters"].append("0")
+    rosters[0]["starters"].insert(0, "0")
     route_league(fixture("current_league.json"), rosters=rosters)
 
     async def run() -> Any:
@@ -128,7 +128,7 @@ def test_sync_treats_zero_starter_as_empty() -> None:
 
     result = asyncio.run(run())
 
-    assert result.profile.rosters[0].starter_ids == ("player-1", "player-2")
+    assert result.profile.rosters[0].starter_ids == (None, "player-1", "player-2")
 
 
 @respx.mock

@@ -16,7 +16,7 @@ class Roster:
     roster_id: int
     owner_id: str | None
     player_ids: tuple[str, ...]
-    starter_ids: tuple[str, ...]
+    starter_ids: tuple[str | None, ...]
     reserve_ids: tuple[str, ...] = ()
 
 
