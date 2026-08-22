@@ -116,10 +116,10 @@ def _imperative(
 
 def _value_clause(plan: WeeklyPlan) -> str:
     expected = plan.expected_terminal_score
-    baseline = plan.baseline_terminal_score
-    if expected is None or baseline is None:
+    observed = plan.observed_terminal_score
+    if expected is None or observed is None:
         return ""
-    delta = round(expected - baseline, 6)
+    delta = round(expected - observed, 6)
     if abs(delta) < _UNCHANGED_DELTA_EPSILON:
         return "Expected terminal weekly value is unchanged."
     direction = "improves by" if delta > 0 else "drops by"

@@ -485,7 +485,7 @@ class WeeklyPlan:
     input_version: str = "unknown"
     expected_terminal_score: float | None = None
     best_alternative_score: float | None = None
-    baseline_terminal_score: float | None = None
+    observed_terminal_score: float | None = None
     decision_margin: float | None = None
     distribution_summary: PlanDistributionSummary | None = None
     fixed_slots: tuple[FixedSlot, ...] = ()
@@ -516,7 +516,7 @@ class WeeklyPlan:
         for label, score in (
             ("Expected terminal score", self.expected_terminal_score),
             ("Best alternative score", self.best_alternative_score),
-            ("Baseline terminal score", self.baseline_terminal_score),
+            ("Observed terminal score", self.observed_terminal_score),
             ("Decision margin", self.decision_margin),
         ):
             if score is not None and not isfinite(score):
@@ -560,6 +560,11 @@ class WeeklyPlan:
         for fixed in self.fixed_slots:
             if desired_players.get(fixed.slot_index) != fixed.player_id:
                 raise PlanningStateError("Desired assignment does not preserve a fixed slot")
+
+        locked_indices = {fixed.slot_index for fixed in self.fixed_slots}
+        for move in self.moves:
+            if move.source_slot_index in locked_indices or move.target_slot_index in locked_indices:
+                raise PlanningStateError("Locked slots cannot appear as move sources or targets")
 
         if (self.status is PlanStatus.BLOCKED) != bool(self.blocking_reasons):
             raise PlanningStateError("Blocked plans require blocking reasons and vice versa")
@@ -624,7 +629,7 @@ class WeeklyPlan:
             self.confidence.value,
             _format_optional(self.expected_terminal_score),
             _format_optional(self.best_alternative_score),
-            _format_optional(self.baseline_terminal_score),
+            _format_optional(self.observed_terminal_score),
             _format_optional(self.decision_margin),
             None
             if self.distribution_summary is None

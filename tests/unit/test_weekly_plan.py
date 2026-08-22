@@ -181,7 +181,7 @@ def test_build_weekly_plan_requires_the_better_bench_starter() -> None:
     assert all(move.deadline == start - timedelta(minutes=10) for move in plan.moves)
     assert plan.expected_terminal_score == 30
     assert plan.best_alternative_score == 10
-    assert plan.baseline_terminal_score == 0
+    assert plan.observed_terminal_score == 10
     assert plan.decision_margin == 20
     assert plan.confidence is PlanConfidence.LOW
     assert plan.desired_assignments == (_planned(0, "G", "p2"),)
@@ -441,17 +441,53 @@ def test_three_way_cycles_require_a_temporary_bench_step() -> None:
     assert len(plan.moves) == 4
 
 
-def test_fixed_slots_demand_desired_preservation() -> None:
+def test_swap_moves_share_the_earliest_affected_tipoff() -> None:
+    tonight = NOW + timedelta(hours=2)
+    tomorrow = NOW + timedelta(days=1)
+    state = _state(
+        (
+            _opportunity("a", "g_tonight", tonight, ("PG",), ((40, 1),)),
+            _opportunity("b", "g_tomorrow", tomorrow, ("PG",), ((10, 1),)),
+        ),
+        observed=(ObservedStarter(0, "b", ("PG",)),),
+        starter_slots=(StarterSlot(0, "G"),),
+    )
+
+    plan = build_weekly_plan(state)
+
+    assert [
+        (move.player_id, move.source_slot_index, move.target_slot_index) for move in plan.moves
+    ] == [
+        ("b", 0, None),
+        ("a", None, 0),
+    ]
+    assert all(move.deadline == tonight - timedelta(minutes=10) for move in plan.moves)
+
+
+def test_locked_slots_cannot_appear_as_move_sources_or_targets() -> None:
     fixed = (FixedSlot(1, "UTIL", "p2", "g9", 5, NOW - timedelta(days=1), "lock-1", "fixture"),)
-    with pytest.raises(PlanningStateError, match="preserve a fixed slot"):
-        _plan(fixed_slots=fixed)
+    assignments = (
+        _planned(0, "G", "p1"),
+        _planned(1, "UTIL", "p2"),
+    )
+    round_trip = (
+        LineupMove("p2", 1, None, DEADLINE),
+        LineupMove("p2", None, 1, DEADLINE),
+    )
+    with pytest.raises(PlanningStateError, match="cannot appear as move sources or targets"):
+        _plan(
+            observed_assignments=assignments,
+            desired_assignments=assignments,
+            moves=round_trip,
+            fixed_slots=fixed,
+        )
 
 
 def test_material_hash_ignores_explanation_only_drift() -> None:
     plan = _plan()
 
     drifted = replace(plan, expected_terminal_score=999.5, decision_margin=-1.25)
-    rebaselined = replace(plan, baseline_terminal_score=7.5)
+    reobserved = replace(plan, observed_terminal_score=7.5)
     retimed = replace(
         plan,
         moves=tuple(
@@ -461,8 +497,8 @@ def test_material_hash_ignores_explanation_only_drift() -> None:
 
     assert plan.material_hash == drifted.material_hash
     assert plan.plan_id != drifted.plan_id
-    assert plan.material_hash == rebaselined.material_hash
-    assert plan.plan_id != rebaselined.plan_id
+    assert plan.material_hash == reobserved.material_hash
+    assert plan.plan_id != reobserved.plan_id
     assert plan.material_hash != retimed.material_hash
 
 

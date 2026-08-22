@@ -99,6 +99,7 @@ class WeeklyPlanDecision:
     batch_start: datetime
     batch_game_ids: tuple[str, ...]
     baseline_terminal_value: float
+    observed_terminal_value: float
     selected: WeeklyPlanOption
     alternative: WeeklyPlanOption | None
     scenario_count: int
@@ -206,11 +207,25 @@ def score_weekly_options(
         tie_key=tie_key,
         tie_tolerance=policy_config.tie_tolerance,
     )
+    observed_result = _observed_assignment_result(state, open_slots, option_candidates)
+    observed_value = (
+        _assignment_terminal_value(
+            observed_result,
+            candidates=option_candidates,
+            fixed_assignments=fixed_assignments,
+            future_inputs=future_inputs,
+            open_slots=open_slots,
+            scenarios=scenarios,
+        )
+        if observed_result is not None
+        else baseline
+    )
     return WeeklyPlanDecision(
         decision_time=state.decision_time,
         batch_start=batch_start,
         batch_game_ids=tuple(sorted({opportunity.game_id for opportunity in batch})),
         baseline_terminal_value=baseline,
+        observed_terminal_value=observed_value,
         selected=selected,
         alternative=alternative,
         scenario_count=policy_config.scenario_count,
@@ -280,7 +295,7 @@ def build_weekly_plan(
     alternative_score = (
         decision.alternative.expected_terminal_value
         if decision.alternative is not None
-        else decision.baseline_terminal_value
+        else decision.observed_terminal_value
     )
     margin = round(decision.selected.expected_terminal_value - alternative_score, 6)
     return WeeklyPlan(
@@ -306,7 +321,7 @@ def build_weekly_plan(
         input_version=state.input_version,
         expected_terminal_score=decision.selected.expected_terminal_value,
         best_alternative_score=alternative_score,
-        baseline_terminal_score=decision.baseline_terminal_value,
+        observed_terminal_score=decision.observed_terminal_value,
         decision_margin=margin,
         distribution_summary=PlanDistributionSummary(
             scenario_count=decision.scenario_count,
@@ -410,6 +425,12 @@ def _plan_moves(
     occupied = {
         index: player for index, player in observed_players.items() if index in open_indices
     }
+    # Every step must land before the earliest tipoff the sequence depends on,
+    # so a swap's bench step cannot carry a later deadline than its dependent fill.
+    sequence_deadline = min(
+        (_move_deadline(state, player_id, batch_start, lead_time) for player_id in pending),
+        default=batch_start,
+    )
     emitted: list[LineupMove] = []
     while pending:
         progressed = False
@@ -422,7 +443,7 @@ def _plan_moves(
                     player_id=player_id,
                     source_slot_index=source,
                     target_slot_index=target,
-                    deadline=_move_deadline(state, player_id, batch_start, lead_time),
+                    deadline=sequence_deadline,
                 )
             )
             if source is not None:
@@ -439,7 +460,7 @@ def _plan_moves(
                     player_id=player_id,
                     source_slot_index=source,
                     target_slot_index=None,
-                    deadline=_move_deadline(state, player_id, batch_start, lead_time),
+                    deadline=sequence_deadline,
                 )
             )
             if source is not None:
@@ -685,6 +706,42 @@ def _placement_evaluations(
             )
         )
     return tuple(results)
+
+
+def _observed_assignment_result(
+    state: TeamWeekState,
+    open_slots: tuple[StarterSlot, ...],
+    candidates: tuple[AssignmentCandidate, ...],
+) -> AssignmentResult | None:
+    observed_by_slot = {
+        starter.slot_index: starter.player_id for starter in state.observed_starters
+    }
+    candidate_by_player_slot = {
+        (candidate.player_id, candidate.eligible_slot_indices[0]): candidate
+        for candidate in candidates
+        if candidate.eligible_slot_indices
+    }
+    assignments: list[SlotAssignment] = []
+    for slot in open_slots:
+        player_id = observed_by_slot.get(slot.index)
+        if player_id is None:
+            continue
+        candidate = candidate_by_player_slot.get((player_id, slot.index))
+        if candidate is None:
+            continue
+        assignments.append(
+            SlotAssignment(
+                slot_index=slot.index,
+                slot_position=slot.position,
+                candidate_id=candidate.candidate_id,
+                player_id=candidate.player_id,
+                game_id=candidate.game_id,
+                score=candidate.score,
+            )
+        )
+    if not assignments:
+        return None
+    return AssignmentResult(0.0, tuple(assignments))
 
 
 def _assignment_terminal_value(

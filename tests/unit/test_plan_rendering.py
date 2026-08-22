@@ -49,7 +49,7 @@ def _plan(**overrides: object) -> WeeklyPlan:
         "planner_version": "weekly-planner-v1",
         "manager_policy_version": "policy-v1",
         "expected_terminal_score": 104.8,
-        "baseline_terminal_score": 100.0,
+        "observed_terminal_score": 100.0,
     }
     values.update(overrides)
     return WeeklyPlan(**values)
@@ -177,7 +177,7 @@ def test_degraded_plans_surface_warnings_and_confidence() -> None:
 
 
 def test_value_clauses_are_omitted_without_scores() -> None:
-    rendered = render_weekly_plan(_plan(expected_terminal_score=None, baseline_terminal_score=None))
+    rendered = render_weekly_plan(_plan(expected_terminal_score=None, observed_terminal_score=None))
 
     assert "points" not in rendered.message
 
