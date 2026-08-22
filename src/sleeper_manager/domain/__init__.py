@@ -1,6 +1,8 @@
 """Core fantasy domain models and rules."""
 
 from sleeper_manager.domain.planning import (
+    AcknowledgedAction,
+    AcknowledgedDecisionEvidence,
     FixedSlot,
     FreshnessSummary,
     GameOpportunity,
@@ -22,6 +24,8 @@ from sleeper_manager.domain.planning import (
 )
 
 __all__ = (
+    "AcknowledgedAction",
+    "AcknowledgedDecisionEvidence",
     "FixedSlot",
     "FreshnessSummary",
     "GameOpportunity",

@@ -3,6 +3,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from sleeper_manager.domain.planning import (
+    AcknowledgedAction,
+    AcknowledgedDecisionEvidence,
     FixedSlot,
     FreshnessSummary,
     GameOpportunity,
@@ -208,3 +210,72 @@ def test_blocked_state_retains_reason_codes_and_source_coverage() -> None:
         PlanningReasonCode.MISSING_PROJECTION,
     )
     assert state.freshness.sources[0].source == "replay"
+
+
+def _lock_evidence(
+    *,
+    slot_index: int | None = 0,
+    slot_position: str | None = "G",
+    score: float | None = 12,
+) -> AcknowledgedDecisionEvidence:
+    return AcknowledgedDecisionEvidence(
+        decision_id="rec-1",
+        player_id="p1",
+        game_id="g1",
+        action=AcknowledgedAction.LOCK,
+        decided_at=NOW - timedelta(hours=1),
+        provenance="notification-token",
+        slot_index=slot_index,
+        slot_position=slot_position,
+        accepted_fantasy_score=score,
+    )
+
+
+def test_acknowledged_lock_requires_slot_and_score_evidence() -> None:
+    with pytest.raises(PlanningStateError, match="slot evidence"):
+        _lock_evidence(slot_index=None)
+    with pytest.raises(PlanningStateError, match="finite accepted score"):
+        _lock_evidence(score=None)
+
+
+def test_acknowledged_pass_rejects_slot_evidence() -> None:
+    with pytest.raises(PlanningStateError, match="cannot carry slot evidence"):
+        AcknowledgedDecisionEvidence(
+            decision_id="rec-2",
+            player_id="p2",
+            game_id="g1",
+            action=AcknowledgedAction.PASS,
+            decided_at=NOW - timedelta(hours=1),
+            provenance="notification-token",
+            slot_index=0,
+            slot_position="G",
+            accepted_fantasy_score=12,
+        )
+
+
+def test_acknowledged_decision_requires_aware_timestamp() -> None:
+    with pytest.raises(PlanningStateError, match="timezone-aware"):
+        AcknowledgedDecisionEvidence(
+            decision_id="rec-3",
+            player_id="p1",
+            game_id="g1",
+            action=AcknowledgedAction.PASS,
+            decided_at=datetime(2026, 1, 5, 11),
+            provenance="notification-token",
+        )
+
+
+def test_acknowledged_decision_preserves_reconciliation_state() -> None:
+    evidence = AcknowledgedDecisionEvidence(
+        decision_id="rec-4",
+        player_id="p1",
+        game_id="g1",
+        action=AcknowledgedAction.LOCK,
+        decided_at=NOW - timedelta(hours=1),
+        provenance="repository-query",
+        slot_index=1,
+        slot_position="UTIL",
+        accepted_fantasy_score=-3.5,
+        reconciled=False,
+    )
+    assert evidence.reconciled is False

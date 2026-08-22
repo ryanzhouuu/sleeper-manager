@@ -227,6 +227,48 @@ class PassedOpportunity:
         _require_text(self.provenance, "Passed provenance")
 
 
+class AcknowledgedAction(StrEnum):
+    LOCK = "lock"
+    PASS = "pass"
+
+
+@dataclass(frozen=True, slots=True)
+class AcknowledgedDecisionEvidence:
+    """Provider-neutral manager decision that later planning must treat as fixed."""
+
+    decision_id: str
+    player_id: str
+    game_id: str
+    action: AcknowledgedAction
+    decided_at: datetime
+    provenance: str
+    slot_index: int | None = None
+    slot_position: str | None = None
+    accepted_fantasy_score: float | None = None
+    reconciled: bool = True
+
+    def __post_init__(self) -> None:
+        _require_text(self.decision_id, "Acknowledged decision ID")
+        _require_text(self.player_id, "Acknowledged player ID")
+        _require_text(self.game_id, "Acknowledged game ID")
+        _require_aware(self.decided_at, "Acknowledged decision time")
+        _require_text(self.provenance, "Acknowledged provenance")
+        if self.action is AcknowledgedAction.LOCK:
+            if self.slot_index is None or self.slot_position is None:
+                raise PlanningStateError("Acknowledged locks require slot evidence")
+            if self.slot_index < 0:
+                raise PlanningStateError("Acknowledged lock slot indices must be non-negative")
+            if self.accepted_fantasy_score is None or not isfinite(self.accepted_fantasy_score):
+                raise PlanningStateError("Acknowledged locks require a finite accepted score")
+            return
+        if (
+            self.slot_index is not None
+            or self.slot_position is not None
+            or self.accepted_fantasy_score is not None
+        ):
+            raise PlanningStateError("Acknowledged passes cannot carry slot evidence")
+
+
 class PlanStatus(StrEnum):
     NO_ACTION = "no_action"
     ACTION_REQUIRED = "action_required"
@@ -704,6 +746,8 @@ def _validate_lineage_at(lineage: SourceLineage, decision_time: datetime) -> Non
 
 
 __all__ = (
+    "AcknowledgedAction",
+    "AcknowledgedDecisionEvidence",
     "FixedSlot",
     "FreshnessSummary",
     "GameOpportunity",
