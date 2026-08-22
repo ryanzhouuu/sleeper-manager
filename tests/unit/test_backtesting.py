@@ -52,6 +52,7 @@ def row(
         sleeper_id=None,
         game_id=game_id,
         game_start=start,
+        outcome_finalized_at=start + timedelta(hours=2),
         team_id="CHI",
         opponent_team_id="WAS",
         opponent_abbreviation="was",

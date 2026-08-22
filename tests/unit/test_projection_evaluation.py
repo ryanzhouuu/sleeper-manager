@@ -47,6 +47,7 @@ def row(game_id: str, player_id: str, start: datetime, points: int) -> Historica
         sleeper_id=None,
         game_id=game_id,
         game_start=start,
+        outcome_finalized_at=start + timedelta(hours=2),
         team_id="CHI",
         opponent_team_id="WAS",
         opponent_abbreviation="was",
