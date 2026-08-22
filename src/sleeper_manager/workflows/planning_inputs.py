@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Protocol
 
 from sleeper_manager.domain.eligibility import eligible_for_slot
 from sleeper_manager.domain.league import LeagueProfile
@@ -33,6 +34,20 @@ from sleeper_manager.domain.planning import (
     TeamWeekState,
 )
 from sleeper_manager.domain.projection import ProjectionSnapshot
+from sleeper_manager.domain.scoring import ScoringPolicy
+from sleeper_manager.projections.live_baseline import LiveProjectionTarget
+
+
+class LiveProjectionProvider(Protocol):
+    """Produces outcome-free pregame snapshots; history stays behind this seam."""
+
+    def project(
+        self,
+        target: LiveProjectionTarget,
+        *,
+        scoring_policy: ScoringPolicy,
+        decision_time: datetime,
+    ) -> ProjectionSnapshot | None: ...
 
 
 class PlanningInputsError(ValueError):
@@ -781,6 +796,7 @@ __all__ = (
     "AvailabilityResourceResult",
     "FantasyWeekWindow",
     "LivePlanningInputs",
+    "LiveProjectionProvider",
     "LiveProjectionResult",
     "PlanningFreshnessPolicy",
     "PlanningInputsError",
