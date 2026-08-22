@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from sleeper_manager.backtesting.replay.inputs.manifest import build_replay_input_manifest
 from sleeper_manager.backtesting.replay.inputs.models import (
@@ -497,15 +497,10 @@ def _replay_game(game: ScheduledGame, week: int) -> ReplayGame:
         GameStatus.CANCELED: ReplayGameStatus.CANCELED,
         GameStatus.UNKNOWN: ReplayGameStatus.SCHEDULED,
     }[game.status]
-    final_time = (
-        game.start_time + timedelta(minutes=game.duration_minutes)
-        if status is ReplayGameStatus.FINAL
-        else None
-    )
     return ReplayGame(
         game_id=game.provider_id,
         start_time=game.start_time,
-        final_time=final_time,
+        final_time=game.finalized_at if status is ReplayGameStatus.FINAL else None,
         week=week,
         team_ids=(game.home_team_id, game.away_team_id),
         status=status,

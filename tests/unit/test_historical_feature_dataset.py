@@ -123,6 +123,29 @@ def test_historical_feature_dataset_uses_only_prior_player_history_and_schedule_
     assert dataset.source_versions[0].provider == "fixture"
 
 
+def test_historical_feature_dataset_preserves_only_explicit_outcome_finalization() -> None:
+    start = datetime(2025, 1, 1, 1, tzinfo=UTC)
+    explicit = start.replace(hour=3)
+    without_evidence = game("game-1", "2025-01-01T01:00:00")
+    with_evidence = replace(without_evidence, finalized_at=explicit)
+
+    def build(target: ScheduledGame):
+        return build_historical_feature_dataset(
+            box_scores=[box("game-1", "espn-1", "2025-01-01T01:00:00", 30, True)],
+            games=[target],
+            teams=[team("CHI", "CHI"), team("WAS", "WAS")],
+            player_mappings=[],
+            injury_reports=[],
+            availability=[],
+            decision_cutoffs={"game-1": start},
+            dataset_version="v1",
+            generated_at=NOW,
+        )
+
+    assert build(without_evidence).rows[0].outcome_finalized_at is None
+    assert build(with_evidence).rows[0].outcome_finalized_at == explicit
+
+
 def test_historical_feature_dataset_uses_latest_report_at_cutoff_and_distinguishes_missing() -> (
     None
 ):

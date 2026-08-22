@@ -366,6 +366,19 @@ def test_historical_join_respects_tipoff_membership_and_game_status() -> None:
     assert team_week.player_games[1].membership_segment == "tx-reacquire"
     assert team_week.games[2].status is ReplayGameStatus.POSTPONED
     assert team_week.games[3].status is ReplayGameStatus.CANCELED
+    assert team_week.games[0].final_time is None
+
+
+def test_historical_join_preserves_explicit_game_finalization() -> None:
+    inputs = _historical_join_inputs()
+    finalized_at = datetime(2026, 1, 6, 1, tzinfo=UTC)
+    finalized_game = replace(inputs.games[0], finalized_at=finalized_at)
+
+    team_week = assemble_historical_team_week_inputs(
+        replace(inputs, games=(finalized_game, *inputs.games[1:]))
+    )[0]
+
+    assert team_week.games[0].finalized_at == finalized_at
 
 
 def test_historical_join_blocks_player_games_without_projection_snapshots() -> None:

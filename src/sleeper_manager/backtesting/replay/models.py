@@ -30,7 +30,7 @@ class ReplayGame:
     def finalized_at(self) -> datetime | None:
         if self.status is not ReplayGameStatus.FINAL:
             return None
-        return self.final_time or self.start_time
+        return self.final_time
 
 
 @dataclass(frozen=True, slots=True)

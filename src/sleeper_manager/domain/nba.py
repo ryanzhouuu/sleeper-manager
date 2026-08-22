@@ -78,6 +78,17 @@ class ScheduledGame:
     neutral_site: bool = False
     regulation_periods: int = 4
     completed_periods: int = 4
+    finalized_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        if self.finalized_at is None:
+            return
+        if self.finalized_at.tzinfo is None:
+            raise ValueError("Game finalization must be timezone-aware")
+        if self.finalized_at < self.start_time:
+            raise ValueError("Game finalization cannot precede its start")
+        if self.status is not GameStatus.FINAL:
+            raise ValueError("Only final games may have a finalization timestamp")
 
     @property
     def duration_minutes(self) -> int:
