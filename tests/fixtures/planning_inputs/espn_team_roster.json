@@ -1,0 +1,26 @@
+{
+  "team": {
+    "id": "team-home",
+    "abbreviation": "DEN"
+  },
+  "athletes": [
+    {
+      "id": "101",
+      "fullName": "Fixture Point Guard",
+      "shortName": "F. PG",
+      "active": true
+    },
+    {
+      "id": "102",
+      "fullName": "Fixture Swing Guard",
+      "shortName": "F. SG",
+      "active": true
+    },
+    {
+      "id": "103",
+      "fullName": "Fixture Backup Big",
+      "shortName": "F. Big",
+      "active": true
+    }
+  ]
+}

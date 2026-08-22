@@ -1,0 +1,24 @@
+{
+  "injuries": [
+    {
+      "athlete": {
+        "id": "101",
+        "displayName": "Fixture Point Guard"
+      },
+      "status": "Questionable",
+      "shortComment": "Knee soreness",
+      "date": "2026-01-07T15:00:00Z"
+    },
+    {
+      "athlete": {
+        "id": "103",
+        "displayName": "Fixture Backup Big"
+      },
+      "status": "Out",
+      "details": {
+        "type": "Ankle",
+        "detail": "Sprain"
+      }
+    }
+  ]
+}

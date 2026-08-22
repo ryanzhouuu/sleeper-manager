@@ -1,0 +1,26 @@
+{
+  "player-1": {
+    "full_name": "Fixture Point Guard",
+    "first_name": "Fixture",
+    "last_name": "Point Guard",
+    "team": "DEN",
+    "espn_id": 101,
+    "fantasy_positions": ["PG"]
+  },
+  "player-2": {
+    "full_name": "Fixture Swing Guard",
+    "first_name": "Fixture",
+    "last_name": "Swing Guard",
+    "team": "DEN",
+    "espn_id": 102,
+    "fantasy_positions": ["SG", "SF"]
+  },
+  "player-3": {
+    "full_name": "Fixture Backup Big",
+    "first_name": "Fixture",
+    "last_name": "Backup Big",
+    "team": "DEN",
+    "espn_id": 103,
+    "fantasy_positions": ["PF", "C"]
+  }
+}

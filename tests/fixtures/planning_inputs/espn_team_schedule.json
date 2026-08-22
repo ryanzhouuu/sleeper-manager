@@ -1,0 +1,85 @@
+{
+  "events": [
+    {
+      "id": "game-tuesday",
+      "date": "2026-01-06T00:00:00Z",
+      "competitions": [
+        {
+          "competitors": [
+            {
+              "id": "team-home",
+              "homeAway": "home",
+              "team": { "id": "team-home" }
+            },
+            {
+              "id": "team-away",
+              "homeAway": "away",
+              "team": { "id": "team-away" }
+            }
+          ],
+          "status": {
+            "type": {
+              "name": "STATUS_SCHEDULED",
+              "state": "pre",
+              "completed": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "game-friday",
+      "date": "2026-01-09T00:00:00Z",
+      "competitions": [
+        {
+          "competitors": [
+            {
+              "id": "team-away",
+              "homeAway": "home",
+              "team": { "id": "team-away" }
+            },
+            {
+              "id": "team-home",
+              "homeAway": "away",
+              "team": { "id": "team-home" }
+            }
+          ],
+          "status": {
+            "type": {
+              "name": "STATUS_SCHEDULED",
+              "state": "pre",
+              "completed": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "game-next-month",
+      "date": "2026-01-20T00:00:00Z",
+      "competitions": [
+        {
+          "competitors": [
+            {
+              "id": "team-home",
+              "homeAway": "home",
+              "team": { "id": "team-home" }
+            },
+            {
+              "id": "team-away",
+              "homeAway": "away",
+              "team": { "id": "team-away" }
+            }
+          ],
+          "status": {
+            "type": {
+              "name": "STATUS_SCHEDULED",
+              "state": "pre",
+              "completed": false
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
