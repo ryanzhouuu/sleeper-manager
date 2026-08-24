@@ -178,6 +178,25 @@ def test_point_in_time_includes_equivalent_offsets_and_excludes_newer() -> None:
     assert [item.decision_id for item in result] == ["rec-earlier", "rec-boundary"]
 
 
+def test_future_rows_are_skipped_before_identity_decoding() -> None:
+    future = (AS_OF + timedelta(minutes=1)).isoformat()
+    rows = (
+        _row(recommendation_id="rec-current"),
+        _row(
+            recommendation_id=None,
+            player_id=None,
+            game_id=None,
+            acknowledgement_action="lock",
+            acknowledged_at=future,
+            recommendation_acknowledged_at=future,
+        ),
+    )
+
+    result = decode_acknowledged_decisions(rows, as_of=AS_OF)
+
+    assert [item.decision_id for item in result] == ["rec-current"]
+
+
 def test_result_order_uses_datetime_comparison_not_iso_strings() -> None:
     later_utc = datetime(2026, 1, 7, 19, tzinfo=UTC)
     earlier_offset = datetime(2026, 1, 7, 12, tzinfo=timezone(timedelta(hours=-8)))
@@ -881,6 +900,75 @@ def test_d1_unexpected_result_envelope_raises() -> None:
 
     repository = D1StateRepository(_Broken())
     with pytest.raises(AcknowledgementQueryError, match="envelope"):
+        asyncio.run(repository.load_acknowledged_decisions("league-1", 1, as_of=AS_OF))
+
+
+class _JsProxy:
+    """Minimal Python Worker D1 proxy: not a Mapping, convertible via to_py()."""
+
+    def __init__(self, value: object) -> None:
+        self._value = value
+
+    def to_py(self) -> object:
+        return self._value
+
+
+class _AttributeD1Result:
+    def __init__(self, results: object, success: object = True) -> None:
+        self.results = results
+        self.success = success
+
+
+def _joined_lock_row() -> dict[str, object]:
+    return {
+        "recommendation_id": "rec-1",
+        "player_id": "p1",
+        "game_id": "g1",
+        "recommendation_status": "acknowledged",
+        "recommendation_action": "locked",
+        "recommendation_acknowledged_at": AS_OF.isoformat(),
+        "trace_json": _lock_trace(),
+        "acknowledgement_action": "locked",
+        "acknowledged_at": AS_OF.isoformat(),
+    }
+
+
+def _repository_returning(result: object) -> D1StateRepository:
+    class _Statement:
+        def bind(self, *params: object) -> _Statement:
+            return self
+
+        async def all(self) -> object:
+            return result
+
+    class _Database:
+        def prepare(self, query: str) -> object:
+            return _Statement()
+
+    return D1StateRepository(_Database())
+
+
+def test_d1_python_worker_proxy_results_decode() -> None:
+    row = _joined_lock_row()
+    proxy_result = _JsProxy({"success": True, "results": [_JsProxy(row)]})
+    loaded = asyncio.run(
+        _repository_returning(proxy_result).load_acknowledged_decisions("league-1", 1, as_of=AS_OF)
+    )
+    assert [item.decision_id for item in loaded] == ["rec-1"]
+    assert loaded[0].reconciled is True
+
+    attribute_result = _AttributeD1Result(results=[_JsProxy(row)], success=True)
+    loaded = asyncio.run(
+        _repository_returning(attribute_result).load_acknowledged_decisions(
+            "league-1", 1, as_of=AS_OF
+        )
+    )
+    assert [item.decision_id for item in loaded] == ["rec-1"]
+
+
+def test_d1_unsuccessful_query_raises_instead_of_empty_constraints() -> None:
+    repository = _repository_returning({"success": False, "results": []})
+    with pytest.raises(AcknowledgementQueryError, match="unsuccessful"):
         asyncio.run(repository.load_acknowledged_decisions("league-1", 1, as_of=AS_OF))
 
 
