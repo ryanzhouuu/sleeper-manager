@@ -117,6 +117,23 @@ CREATE INDEX IF NOT EXISTS recommendations_league_week_decision_status_idx
 ON recommendations (league_id, fantasy_week, decision_type, status);
 """
 
+_MISSING = object()
+
+
+def _js_to_python(value: object) -> object:
+    converter = getattr(value, "to_py", None)
+    if callable(converter):
+        return converter()
+    return value
+
+
+def _d1_field(original: object, payload: object, name: str) -> object:
+    if isinstance(payload, Mapping) and name in payload:
+        return _js_to_python(payload[name])
+    if hasattr(original, name):
+        return _js_to_python(getattr(original, name))
+    return _MISSING
+
 
 class D1StateRepository(AsyncStateRepository):
     """Async repository backed by a Cloudflare D1 binding."""
@@ -137,12 +154,16 @@ class D1StateRepository(AsyncStateRepository):
 
     async def _all(self, query: str, *params: object) -> Sequence[object]:
         result = await self._statement(query, params).all()
-        if not isinstance(result, Mapping):
+        payload = _js_to_python(result)
+        rows = _d1_field(result, payload, "results")
+        if rows is _MISSING or isinstance(rows, str | bytes) or not isinstance(rows, Sequence):
             raise AcknowledgementQueryError("unexpected D1 result envelope")
-        rows = result.get("results")
-        if isinstance(rows, str | bytes) or not isinstance(rows, Sequence):
+        success = _d1_field(result, payload, "success")
+        if success is False:
+            raise AcknowledgementQueryError("unsuccessful D1 query")
+        if success is not True:
             raise AcknowledgementQueryError("unexpected D1 result envelope")
-        return rows
+        return tuple(_js_to_python(row) for row in rows)
 
     async def _run(self, query: str, *params: object) -> Any:
         return await self._statement(query, params).run()

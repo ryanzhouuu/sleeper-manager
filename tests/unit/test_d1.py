@@ -44,7 +44,7 @@ class FakeStatement:
 
     async def all(self) -> dict[str, Any]:
         cursor = self.execute()
-        return {"results": [dict(row) for row in cursor.fetchall()]}
+        return {"success": True, "results": [dict(row) for row in cursor.fetchall()]}
 
 
 class FakeD1:

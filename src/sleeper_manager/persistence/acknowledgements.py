@@ -98,21 +98,23 @@ def decode_acknowledged_decisions(
         raise AcknowledgementQueryError("as_of must be timezone-aware")
     decoded: list[AcknowledgedDecisionEvidence] = []
     for row in rows:
-        evidence = _decode_row(row)
-        if evidence.decided_at > as_of:
+        decided_at = _parse_aware(row.acknowledged_at, label="acknowledgement timestamp")
+        if decided_at > as_of:
             continue
-        decoded.append(evidence)
+        decoded.append(_decode_row(row, decided_at))
     return _reconcile(_order(decoded))
 
 
-def _decode_row(row: AcknowledgementRawRow) -> AcknowledgedDecisionEvidence:
+def _decode_row(
+    row: AcknowledgementRawRow,
+    decided_at: datetime,
+) -> AcknowledgedDecisionEvidence:
     decision_id = _require_identity(row.recommendation_id, "recommendation ID")
     player_id = _require_identity(row.player_id, "player ID")
     game_id = _require_identity(row.game_id, "game ID")
     action = _ACTION_BY_STORED_VALUE.get(_text_or_none(row.acknowledgement_action) or "")
     if action is None:
         raise AcknowledgementQueryError("unknown acknowledgement action")
-    decided_at = _parse_aware(row.acknowledged_at, label="acknowledgement timestamp")
     slot_index, slot_position, accepted_score, trace_ok = _parse_trace(row.trace_json, action)
     duplicates_ok = _duplicates_match(row, action, decided_at)
     return AcknowledgedDecisionEvidence(
