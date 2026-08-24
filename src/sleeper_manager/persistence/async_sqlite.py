@@ -1,6 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 
+from sleeper_manager.domain.planning import AcknowledgedDecisionEvidence
 from sleeper_manager.persistence.base import (
     AcknowledgementAction,
     AcknowledgementResult,
@@ -79,3 +80,16 @@ class AsyncSQLiteStateRepository(AsyncStateRepository):
 
     async def is_locked(self, recommendation_id: str) -> bool:
         return self._repository.is_locked(recommendation_id)
+
+    async def load_acknowledged_decisions(
+        self,
+        league_id: str,
+        fantasy_week: int,
+        *,
+        as_of: datetime,
+    ) -> tuple[AcknowledgedDecisionEvidence, ...]:
+        return self._repository.load_acknowledged_decisions(
+            league_id,
+            fantasy_week,
+            as_of=as_of,
+        )

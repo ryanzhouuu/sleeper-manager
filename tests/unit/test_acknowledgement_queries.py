@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import sqlite3
 from datetime import UTC, datetime, timedelta, timezone
 from math import inf, nan
+from pathlib import Path
 
 import pytest
+from test_d1 import FakeD1
 
 from sleeper_manager.domain.planning import AcknowledgedAction, AcknowledgedDecisionEvidence
 from sleeper_manager.persistence.acknowledgements import (
@@ -15,6 +19,17 @@ from sleeper_manager.persistence.acknowledgements import (
     AcknowledgementRawRow,
     decode_acknowledged_decisions,
 )
+from sleeper_manager.persistence.async_sqlite import AsyncSQLiteStateRepository
+from sleeper_manager.persistence.base import (
+    AcknowledgementAction,
+    AcknowledgementOutcome,
+    AcknowledgementResult,
+    ActionTokenRecord,
+    RecommendationRecord,
+)
+from sleeper_manager.persistence.d1 import D1_SCHEMA, D1StateRepository
+from sleeper_manager.persistence.sqlite import SQLiteStateRepository
+from sleeper_manager.persistence.tokens import hash_action_token
 
 AS_OF = datetime(2026, 1, 7, 18, tzinfo=UTC)
 EASTERN = timezone(timedelta(hours=-5))
@@ -485,3 +500,468 @@ def test_passes_for_different_games_and_later_lock_are_valid() -> None:
         AcknowledgedAction.PASS,
         AcknowledgedAction.LOCK,
     ]
+
+
+class _Backend:
+    def __init__(self, kind: str, tmp_path: Path) -> None:
+        self.kind = kind
+        if kind == "sqlite":
+            self.path = tmp_path / "state.db"
+            self.repo: SQLiteStateRepository | D1StateRepository = SQLiteStateRepository(self.path)
+            self.repo.initialize()
+            self.database: FakeD1 | None = None
+        else:
+            self.path = tmp_path / "d1.db"
+            self.database = FakeD1()
+            asyncio.run(self.database.exec(D1_SCHEMA))
+            self.repo = D1StateRepository(self.database)
+
+    def call(self, method: str, *args: object, **kwargs: object) -> object:
+        result = getattr(self.repo, method)(*args, **kwargs)
+        if asyncio.iscoroutine(result):
+            return asyncio.run(result)
+        return result
+
+    def load(
+        self, league_id: str = "league-1", week: int = 1, *, as_of: datetime = AS_OF
+    ) -> tuple[AcknowledgedDecisionEvidence, ...]:
+        loaded = self.call("load_acknowledged_decisions", league_id, week, as_of=as_of)
+        assert isinstance(loaded, tuple)
+        return loaded
+
+    def execute(self, sql: str, params: tuple[object, ...] = ()) -> sqlite3.Cursor:
+        if self.kind == "sqlite":
+            assert isinstance(self.repo, SQLiteStateRepository)
+            with self.repo._connect() as connection:
+                cursor = connection.execute(sql, params)
+                connection.commit()
+                return cursor
+        assert self.database is not None
+        cursor = self.database.connection.execute(sql, params)
+        self.database.connection.commit()
+        return cursor
+
+
+@pytest.fixture(params=["sqlite", "d1"])
+def backend(request: pytest.FixtureRequest, tmp_path: Path) -> _Backend:
+    return _Backend(request.param, tmp_path)
+
+
+def _recommendation(**overrides: object) -> RecommendationRecord:
+    values: dict[str, object] = {
+        "recommendation_id": "rec-1",
+        "idempotency_key": "idemp-1",
+        "league_id": "league-1",
+        "fantasy_week": 1,
+        "player_id": "p1",
+        "game_id": "g1",
+        "decision_type": LOCK_IN_DECISION_TYPE,
+        "title": "Lock",
+        "message": "Lock the player",
+        "deadline": AS_OF + timedelta(hours=1),
+        "policy_version": "v1",
+        "created_at": AS_OF - timedelta(hours=1),
+        "trace_json": _lock_trace(),
+    }
+    values.update(overrides)
+    return RecommendationRecord(**values)  # type: ignore[arg-type]
+
+
+def _acknowledge(
+    backend: _Backend,
+    record: RecommendationRecord,
+    action: AcknowledgementAction,
+    *,
+    token: str,
+    at: datetime,
+) -> AcknowledgementOutcome:
+    backend.call("create_recommendation", record)
+    backend.call(
+        "create_action_token",
+        ActionTokenRecord(
+            token_hash=hash_action_token(token),
+            recommendation_id=record.recommendation_id,
+            action=action,
+            created_at=record.created_at,
+            expires_at=record.deadline or at,
+        ),
+    )
+    result = backend.call("consume_action_token", hash_action_token(token), action, at)
+    assert isinstance(result, AcknowledgementResult)
+    return result.outcome
+
+
+def test_empty_league_week_returns_no_acknowledgements(backend: _Backend) -> None:
+    assert backend.load() == ()
+
+
+def test_league_and_week_are_isolated(backend: _Backend) -> None:
+    _acknowledge(
+        backend,
+        _recommendation(),
+        AcknowledgementAction.LOCKED,
+        token="lock-token",
+        at=AS_OF - timedelta(minutes=1),
+    )
+    _acknowledge(
+        backend,
+        _recommendation(
+            recommendation_id="rec-other-league",
+            idempotency_key="idemp-other-league",
+            league_id="league-2",
+        ),
+        AcknowledgementAction.LOCKED,
+        token="other-league",
+        at=AS_OF - timedelta(minutes=1),
+    )
+    _acknowledge(
+        backend,
+        _recommendation(
+            recommendation_id="rec-other-week",
+            idempotency_key="idemp-other-week",
+            fantasy_week=2,
+            game_id="g2",
+        ),
+        AcknowledgementAction.LOCKED,
+        token="other-week",
+        at=AS_OF - timedelta(minutes=1),
+    )
+
+    loaded = backend.load("league-1", 1)
+    assert [item.decision_id for item in loaded] == ["rec-1"]
+
+
+def test_as_of_includes_boundary_and_excludes_future(backend: _Backend) -> None:
+    _acknowledge(
+        backend,
+        _recommendation(),
+        AcknowledgementAction.LOCKED,
+        token="boundary",
+        at=AS_OF,
+    )
+    _acknowledge(
+        backend,
+        _recommendation(
+            recommendation_id="rec-future",
+            idempotency_key="idemp-future",
+            game_id="g2",
+        ),
+        AcknowledgementAction.LOCKED,
+        token="future",
+        at=AS_OF + timedelta(seconds=1),
+    )
+
+    loaded = backend.load(as_of=AS_OF)
+    assert [item.decision_id for item in loaded] == ["rec-1"]
+    assert loaded[0].decided_at == AS_OF
+
+
+def test_canonical_lock_and_pass_round_trip(backend: _Backend) -> None:
+    decided_lock = AS_OF - timedelta(hours=2)
+    decided_pass = AS_OF - timedelta(hours=1)
+    _acknowledge(
+        backend,
+        _recommendation(trace_json=_lock_trace()),
+        AcknowledgementAction.LOCKED,
+        token="lock",
+        at=decided_lock,
+    )
+    _acknowledge(
+        backend,
+        _recommendation(
+            recommendation_id="rec-pass",
+            idempotency_key="idemp-pass",
+            player_id="p2",
+            game_id="g2",
+            trace_json=_pass_trace(),
+        ),
+        AcknowledgementAction.PASSED,
+        token="pass",
+        at=decided_pass,
+    )
+
+    loaded = backend.load()
+    assert loaded == (
+        AcknowledgedDecisionEvidence(
+            decision_id="rec-1",
+            player_id="p1",
+            game_id="g1",
+            action=AcknowledgedAction.LOCK,
+            decided_at=decided_lock,
+            provenance=ACKNOWLEDGEMENT_PROVENANCE,
+            slot_index=2,
+            slot_position="UTIL",
+            accepted_fantasy_score=34.7,
+        ),
+        AcknowledgedDecisionEvidence(
+            decision_id="rec-pass",
+            player_id="p2",
+            game_id="g2",
+            action=AcknowledgedAction.PASS,
+            decided_at=decided_pass,
+            provenance=ACKNOWLEDGEMENT_PROVENANCE,
+        ),
+    )
+
+
+def test_placeholder_and_weekly_lineup_records_are_excluded(backend: _Backend) -> None:
+    _acknowledge(
+        backend,
+        _recommendation(
+            recommendation_id="rec-placeholder",
+            idempotency_key="idemp-placeholder",
+            decision_type="placeholder_lock_in",
+        ),
+        AcknowledgementAction.LOCKED,
+        token="placeholder",
+        at=AS_OF - timedelta(minutes=1),
+    )
+    _acknowledge(
+        backend,
+        _recommendation(
+            recommendation_id="rec-lineup",
+            idempotency_key="idemp-lineup",
+            player_id="p2",
+            decision_type="weekly_lineup",
+            trace_json=_pass_trace(),
+        ),
+        AcknowledgementAction.PASSED,
+        token="lineup",
+        at=AS_OF - timedelta(minutes=1),
+    )
+
+    assert backend.load() == ()
+
+
+def test_duplicate_token_replay_returns_one_constraint(backend: _Backend) -> None:
+    record = _recommendation()
+    first = _acknowledge(
+        backend,
+        record,
+        AcknowledgementAction.LOCKED,
+        token="once",
+        at=AS_OF - timedelta(minutes=1),
+    )
+    replay = backend.call(
+        "consume_action_token",
+        hash_action_token("once"),
+        AcknowledgementAction.LOCKED,
+        AS_OF,
+    )
+
+    assert first is AcknowledgementOutcome.APPLIED
+    assert replay.outcome is AcknowledgementOutcome.ALREADY_USED  # type: ignore[union-attr]
+    assert [item.decision_id for item in backend.load()] == ["rec-1"]
+
+
+def test_malformed_trace_loads_as_unreconciled_evidence(backend: _Backend) -> None:
+    _acknowledge(
+        backend,
+        _recommendation(trace_json="{"),
+        AcknowledgementAction.LOCKED,
+        token="bad-trace",
+        at=AS_OF - timedelta(minutes=1),
+    )
+
+    loaded = backend.load()
+    assert len(loaded) == 1
+    assert loaded[0].reconciled is False
+    assert loaded[0].decision_id == "rec-1"
+
+
+def test_direct_sql_duplicate_column_mismatch_is_unreconciled(backend: _Backend) -> None:
+    # Public writes refuse this inconsistency; mutate the duplicated recommendation copy.
+    _acknowledge(
+        backend,
+        _recommendation(),
+        AcknowledgementAction.LOCKED,
+        token="mismatch",
+        at=AS_OF - timedelta(minutes=1),
+    )
+    backend.execute(
+        """
+        UPDATE recommendations
+        SET status = ?, acknowledged_action = ?
+        WHERE recommendation_id = ?
+        """,
+        ("pending", "passed", "rec-1"),
+    )
+
+    loaded = backend.load()
+    assert loaded[0].reconciled is False
+    assert loaded[0].action is AcknowledgedAction.LOCK
+
+
+def test_sqlite_index_leading_columns(tmp_path: Path) -> None:
+    repository = SQLiteStateRepository(tmp_path / "state.db")
+    repository.initialize()
+    with repository._connect() as connection:
+        columns = [
+            row[2]
+            for row in connection.execute(
+                "PRAGMA index_info(recommendations_league_week_decision_status_idx)"
+            )
+        ]
+    assert columns[:3] == ["league_id", "fantasy_week", "decision_type"]
+    assert columns[-1] == "status"
+
+
+def test_async_sqlite_matches_sync_after_reopen(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    sync = SQLiteStateRepository(path)
+    sync.initialize()
+    backend = _Backend("sqlite", tmp_path)
+    backend.repo = sync
+    backend.path = path
+    _acknowledge(
+        backend,
+        _recommendation(),
+        AcknowledgementAction.LOCKED,
+        token="durable",
+        at=AS_OF - timedelta(minutes=1),
+    )
+    expected = sync.load_acknowledged_decisions("league-1", 1, as_of=AS_OF)
+
+    reopened = AsyncSQLiteStateRepository(path)
+    actual = asyncio.run(reopened.load_acknowledged_decisions("league-1", 1, as_of=AS_OF))
+    assert actual == expected
+
+
+def test_d1_all_returns_every_joined_row() -> None:
+    database = FakeD1()
+    asyncio.run(database.exec(D1_SCHEMA))
+    repository = D1StateRepository(database)
+    backend = _Backend("d1", Path("/tmp"))
+    backend.database = database
+    backend.repo = repository
+    _acknowledge(
+        backend,
+        _recommendation(),
+        AcknowledgementAction.LOCKED,
+        token="one",
+        at=AS_OF - timedelta(hours=1),
+    )
+    _acknowledge(
+        backend,
+        _recommendation(
+            recommendation_id="rec-2",
+            idempotency_key="idemp-2",
+            player_id="p2",
+            game_id="g2",
+            trace_json=_pass_trace(),
+        ),
+        AcknowledgementAction.PASSED,
+        token="two",
+        at=AS_OF - timedelta(minutes=1),
+    )
+
+    loaded = asyncio.run(repository.load_acknowledged_decisions("league-1", 1, as_of=AS_OF))
+    assert [item.decision_id for item in loaded] == ["rec-1", "rec-2"]
+
+
+def test_d1_binds_league_week_and_decision_type() -> None:
+    database = FakeD1()
+    asyncio.run(database.exec(D1_SCHEMA))
+    repository = D1StateRepository(database)
+    asyncio.run(repository.load_acknowledged_decisions("league-9", 4, as_of=AS_OF))
+    assert database.last_bound == ("league-9", 4, LOCK_IN_DECISION_TYPE)
+
+
+def test_d1_unexpected_result_envelope_raises() -> None:
+    class _Broken:
+        def prepare(self, query: str) -> object:
+            class _Statement:
+                def bind(self, *params: object) -> _Statement:
+                    return self
+
+                async def all(self) -> object:
+                    return {"results": "not-rows"}
+
+            return _Statement()
+
+    repository = D1StateRepository(_Broken())
+    with pytest.raises(AcknowledgementQueryError, match="envelope"):
+        asyncio.run(repository.load_acknowledged_decisions("league-1", 1, as_of=AS_OF))
+
+
+def test_migration_adds_index_without_rewriting_phase3_rows(tmp_path: Path) -> None:
+    path = tmp_path / "migrated.db"
+    connection = sqlite3.connect(path)
+    root = Path(__file__).resolve().parents[2]
+    connection.executescript(
+        (root / "infra/cloudflare/migrations/0001_phase3.sql").read_text(encoding="utf-8")
+    )
+    connection.execute(
+        """
+        INSERT INTO recommendations (
+            recommendation_id, idempotency_key, league_id, fantasy_week, player_id, game_id,
+            decision_type, title, message, deadline, policy_version, created_at, status,
+            acknowledged_action, acknowledged_at, trace_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "rec-phase3",
+            "idemp-phase3",
+            "league-1",
+            1,
+            "p1",
+            "g1",
+            "placeholder_lock_in",
+            "Lock",
+            "placeholder",
+            AS_OF.isoformat(),
+            "v1",
+            AS_OF.isoformat(),
+            "acknowledged",
+            "locked",
+            AS_OF.isoformat(),
+            _lock_trace(),
+        ),
+    )
+    connection.execute(
+        """
+        INSERT INTO action_tokens (
+            token_hash, recommendation_id, action, created_at, expires_at, used_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "token-hash",
+            "rec-phase3",
+            "locked",
+            AS_OF.isoformat(),
+            AS_OF.isoformat(),
+            AS_OF.isoformat(),
+        ),
+    )
+    connection.execute(
+        """
+        INSERT INTO acknowledgements (
+            acknowledgement_id, recommendation_id, action, acknowledged_at, token_hash
+        ) VALUES (?, ?, ?, ?, ?)
+        """,
+        ("ack-phase3", "rec-phase3", "locked", AS_OF.isoformat(), "token-hash"),
+    )
+    connection.commit()
+    connection.executescript(
+        (root / "infra/cloudflare/migrations/0002_acknowledged_team_week_decisions.sql").read_text(
+            encoding="utf-8"
+        )
+    )
+    remaining = connection.execute(
+        "SELECT decision_type, trace_json FROM recommendations WHERE recommendation_id = ?",
+        ("rec-phase3",),
+    ).fetchone()
+    columns = [
+        row[2]
+        for row in connection.execute(
+            "PRAGMA index_info(recommendations_league_week_decision_status_idx)"
+        )
+    ]
+    connection.close()
+
+    assert remaining is not None
+    assert remaining[0] == "placeholder_lock_in"
+    assert columns[:3] == ["league_id", "fantasy_week", "decision_type"]
+
+    repository = SQLiteStateRepository(path)
+    assert repository.load_acknowledged_decisions("league-1", 1, as_of=AS_OF) == ()

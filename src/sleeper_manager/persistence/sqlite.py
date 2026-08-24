@@ -5,6 +5,14 @@ from hashlib import sha256
 from pathlib import Path
 
 from sleeper_manager.domain.nba import DataQualityState
+from sleeper_manager.domain.planning import AcknowledgedDecisionEvidence
+from sleeper_manager.persistence.acknowledgements import (
+    ACKNOWLEDGED_DECISIONS_INDEX_SQL,
+    ACKNOWLEDGED_DECISIONS_QUERY,
+    LOCK_IN_DECISION_TYPE,
+    decode_acknowledged_decisions,
+    raw_row_from_sequence,
+)
 from sleeper_manager.persistence.base import (
     AcknowledgementAction,
     AcknowledgementOutcome,
@@ -134,6 +142,24 @@ class SQLiteStateRepository:
                 )
                 """
             )
+            connection.execute(ACKNOWLEDGED_DECISIONS_INDEX_SQL)
+
+    def load_acknowledged_decisions(
+        self,
+        league_id: str,
+        fantasy_week: int,
+        *,
+        as_of: datetime,
+    ) -> tuple[AcknowledgedDecisionEvidence, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                ACKNOWLEDGED_DECISIONS_QUERY,
+                (league_id, fantasy_week, LOCK_IN_DECISION_TYPE),
+            ).fetchall()
+        return decode_acknowledged_decisions(
+            tuple(raw_row_from_sequence(row) for row in rows),
+            as_of=as_of,
+        )
 
     @staticmethod
     def _recommendation(row: tuple[object, ...]) -> RecommendationRecord:
