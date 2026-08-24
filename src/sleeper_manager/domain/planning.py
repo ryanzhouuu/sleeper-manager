@@ -255,11 +255,13 @@ class AcknowledgedDecisionEvidence:
         _require_text(self.provenance, "Acknowledged provenance")
         if self.action is AcknowledgedAction.LOCK:
             if self.slot_index is None or self.slot_position is None:
-                raise PlanningStateError("Acknowledged locks require slot evidence")
-            if self.slot_index < 0:
+                if self.reconciled:
+                    raise PlanningStateError("Acknowledged locks require slot evidence")
+            elif self.slot_index < 0:
                 raise PlanningStateError("Acknowledged lock slot indices must be non-negative")
             if self.accepted_fantasy_score is None or not isfinite(self.accepted_fantasy_score):
-                raise PlanningStateError("Acknowledged locks require a finite accepted score")
+                if self.reconciled:
+                    raise PlanningStateError("Acknowledged locks require a finite accepted score")
             return
         if (
             self.slot_index is not None
