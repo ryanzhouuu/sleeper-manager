@@ -279,3 +279,32 @@ def test_acknowledged_decision_preserves_reconciliation_state() -> None:
         reconciled=False,
     )
     assert evidence.reconciled is False
+
+
+def test_unreconciled_lock_may_omit_incomplete_slot_evidence() -> None:
+    evidence = AcknowledgedDecisionEvidence(
+        decision_id="rec-5",
+        player_id="p1",
+        game_id="g1",
+        action=AcknowledgedAction.LOCK,
+        decided_at=NOW - timedelta(hours=1),
+        provenance="repository-query",
+        reconciled=False,
+    )
+    assert evidence.slot_index is None
+    assert evidence.slot_position is None
+    assert evidence.accepted_fantasy_score is None
+    assert evidence.reconciled is False
+
+
+def test_reconciled_lock_still_requires_complete_slot_evidence() -> None:
+    with pytest.raises(PlanningStateError, match="slot evidence"):
+        AcknowledgedDecisionEvidence(
+            decision_id="rec-6",
+            player_id="p1",
+            game_id="g1",
+            action=AcknowledgedAction.LOCK,
+            decided_at=NOW - timedelta(hours=1),
+            provenance="repository-query",
+            reconciled=True,
+        )
