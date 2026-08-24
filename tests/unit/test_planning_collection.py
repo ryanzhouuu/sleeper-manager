@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -27,6 +28,19 @@ from sleeper_manager.domain.planning import (
     PlanningReasonCode,
 )
 from sleeper_manager.domain.scoring import ScoringPolicy
+from sleeper_manager.persistence.acknowledgements import (
+    ACKNOWLEDGEMENT_PROVENANCE,
+    LOCK_IN_DECISION_TYPE,
+    AcknowledgementQueryError,
+)
+from sleeper_manager.persistence.async_sqlite import AsyncSQLiteStateRepository
+from sleeper_manager.persistence.base import (
+    AcknowledgementAction,
+    AcknowledgementOutcome,
+    ActionTokenRecord,
+    RecommendationRecord,
+)
+from sleeper_manager.persistence.tokens import hash_action_token
 from sleeper_manager.projections.live_baseline import LiveProjectionTarget
 from sleeper_manager.workflows.planning_collection import (
     PlanningCollectionError,
@@ -437,8 +451,10 @@ class _StaticAcknowledgements:
         self.records = records
         self.requested: tuple[str, int] | None = None
 
-    async def load(self, league_id: str, week: int, *, as_of: datetime):
-        self.requested = (league_id, week)
+    async def load_acknowledged_decisions(
+        self, league_id: str, fantasy_week: int, *, as_of: datetime
+    ):
+        self.requested = (league_id, fantasy_week)
         return self.records
 
 
@@ -463,6 +479,157 @@ def test_acknowledgement_source_feeds_the_bundle() -> None:
     assert ("p1", "g1") not in {
         (item.sleeper_player_id, item.game_id) for item in state.unpassed_opportunities
     }
+
+
+def _lock_in_recommendation(**overrides: object) -> RecommendationRecord:
+    values: dict[str, object] = {
+        "recommendation_id": "rec-live-1",
+        "idempotency_key": "idemp-live-1",
+        "league_id": "league-1",
+        "fantasy_week": 1,
+        "player_id": "p1",
+        "game_id": "g1",
+        "decision_type": LOCK_IN_DECISION_TYPE,
+        "title": "Decision",
+        "message": "Decide",
+        "deadline": NOW + timedelta(hours=1),
+        "policy_version": "v1",
+        "created_at": NOW - timedelta(hours=3),
+        "trace_json": (
+            '{"acknowledgement":{"schema_version":1,'
+            '"slot_index":0,"slot_position":"PG","accepted_fantasy_score":24}}'
+        ),
+    }
+    values.update(overrides)
+    return RecommendationRecord(**values)  # type: ignore[arg-type]
+
+
+async def _seed_acknowledgement(
+    repository: AsyncSQLiteStateRepository,
+    record: RecommendationRecord,
+    action: AcknowledgementAction,
+    *,
+    token: str,
+    at: datetime,
+) -> None:
+    await repository.create_recommendation(record)
+    await repository.create_action_token(
+        ActionTokenRecord(
+            token_hash=hash_action_token(token),
+            recommendation_id=record.recommendation_id,
+            action=action,
+            created_at=record.created_at,
+            expires_at=record.deadline or at,
+        )
+    )
+    result = await repository.consume_action_token(hash_action_token(token), action, at)
+    assert result.outcome is AcknowledgementOutcome.APPLIED
+
+
+def test_async_sqlite_pass_survives_reopen_into_live_state(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    writer = AsyncSQLiteStateRepository(path)
+    asyncio_run(writer.initialize())
+    asyncio_run(
+        _seed_acknowledgement(
+            writer,
+            _lock_in_recommendation(
+                trace_json='{"acknowledgement":{"schema_version":1}}',
+            ),
+            AcknowledgementAction.PASSED,
+            token="pass-live",
+            at=NOW - timedelta(hours=2),
+        )
+    )
+    source = AsyncSQLiteStateRepository(path)
+
+    async def run() -> object:
+        return await _collect(_nba(), _RecordingProjections(), acknowledgement_source=source)
+
+    evidence = asyncio_run(run())
+    state = build_live_team_week_state(evidence.inputs, decision_time=evidence.decision_time)
+    remaining = {(item.sleeper_player_id, item.game_id) for item in state.unpassed_opportunities}
+    assert ("p1", "g1") not in remaining
+    assert ("p1", "g2") in remaining
+    assert state.passed_opportunities[0].decision_time == NOW - timedelta(hours=2)
+    assert not state.is_blocked
+
+
+def test_async_sqlite_lock_round_trips_into_fixed_slot(tmp_path: Path) -> None:
+    path = tmp_path / "state.db"
+    writer = AsyncSQLiteStateRepository(path)
+    asyncio_run(writer.initialize())
+    asyncio_run(
+        _seed_acknowledgement(
+            writer,
+            _lock_in_recommendation(),
+            AcknowledgementAction.LOCKED,
+            token="lock-live",
+            at=NOW - timedelta(hours=2),
+        )
+    )
+    source = AsyncSQLiteStateRepository(path)
+
+    async def run() -> object:
+        return await _collect(_nba(), _RecordingProjections(), acknowledgement_source=source)
+
+    evidence = asyncio_run(run())
+    state = build_live_team_week_state(evidence.inputs, decision_time=evidence.decision_time)
+    assert len(state.fixed_slots) == 1
+    fixed = state.fixed_slots[0]
+    assert fixed.slot_index == 0
+    assert fixed.slot_position == "PG"
+    assert fixed.accepted_fantasy_score == 24
+    assert fixed.decision_time == NOW - timedelta(hours=2)
+    assert fixed.provenance == ACKNOWLEDGEMENT_PROVENANCE
+    assert not state.is_blocked
+
+
+def test_malformed_repository_trace_blocks_without_becoming_a_constraint(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "state.db"
+    writer = AsyncSQLiteStateRepository(path)
+    asyncio_run(writer.initialize())
+    asyncio_run(
+        _seed_acknowledgement(
+            writer,
+            _lock_in_recommendation(trace_json="{"),
+            AcknowledgementAction.LOCKED,
+            token="bad-live",
+            at=NOW - timedelta(hours=2),
+        )
+    )
+    source = AsyncSQLiteStateRepository(path)
+
+    async def run() -> object:
+        return await _collect(_nba(), _RecordingProjections(), acknowledgement_source=source)
+
+    evidence = asyncio_run(run())
+    assert len(evidence.inputs.acknowledgements) == 1
+    assert evidence.inputs.acknowledgements[0].reconciled is False
+    state = build_live_team_week_state(evidence.inputs, decision_time=evidence.decision_time)
+    assert PlanningReasonCode.ACKNOWLEDGEMENT_CONFLICT in state.blocking_reasons
+    assert state.fixed_slots == ()
+    assert state.passed_opportunities == ()
+
+
+def test_repository_acknowledgement_errors_propagate() -> None:
+    class _BrokenSource:
+        async def load_acknowledged_decisions(
+            self, league_id: str, fantasy_week: int, *, as_of: datetime
+        ) -> tuple[AcknowledgedDecisionEvidence, ...]:
+            raise AcknowledgementQueryError("unexpected D1 result envelope")
+
+    async def run() -> object:
+        return await _collect(
+            _nba(),
+            _RecordingProjections(),
+            acknowledgement_source=_BrokenSource(),
+        )
+
+    with pytest.raises(AcknowledgementQueryError, match="envelope"):
+        asyncio_run(run())
 
 
 def asyncio_run(awaitable):  # noqa: ANN001

@@ -63,9 +63,9 @@ class _EmptyProjectionHistory:
 
 
 class _NoAcknowledgements:
-    """Replaced by the repository query in Task 5.2."""
-
-    async def load(self, league_id: str, week: int, *, as_of: datetime) -> tuple:  # noqa: ANN401
+    async def load_acknowledged_decisions(
+        self, league_id: str, fantasy_week: int, *, as_of: datetime
+    ) -> tuple:  # noqa: ANN401
         return ()
 
 

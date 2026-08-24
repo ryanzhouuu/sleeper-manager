@@ -56,10 +56,10 @@ class SleeperPlayerCatalogSource(Protocol):
 
 
 class AcknowledgementSource(Protocol):
-    """Supplies durable manager decisions; the real repository query lands in Task 5.2."""
+    """Supplies durable manager decisions from the acknowledgement repository."""
 
-    async def load(
-        self, league_id: str, week: int, *, as_of: datetime
+    async def load_acknowledged_decisions(
+        self, league_id: str, fantasy_week: int, *, as_of: datetime
     ) -> tuple[AcknowledgedDecisionEvidence, ...]: ...
 
 
@@ -141,7 +141,9 @@ async def collect_live_planning_inputs(
         decision_time=decision_time,
     )
     acknowledgements = (
-        await acknowledgement_source.load(profile.league_id, week_window.week, as_of=decision_time)
+        await acknowledgement_source.load_acknowledged_decisions(
+            profile.league_id, week_window.week, as_of=decision_time
+        )
         if acknowledgement_source is not None
         else ()
     )
