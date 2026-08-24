@@ -25,7 +25,9 @@ class FakeStatement:
         self.params = params
 
     def bind(self, *params: object) -> "FakeStatement":
-        return FakeStatement(self.database, self.query, params)
+        bound = FakeStatement(self.database, self.query, params)
+        self.database.last_bound = params
+        return bound
 
     def execute(self) -> sqlite3.Cursor:
         return self.database.connection.execute(self.query, self.params)
@@ -40,11 +42,16 @@ class FakeStatement:
         row = cursor.fetchone()
         return dict(row) if row is not None else None
 
+    async def all(self) -> dict[str, Any]:
+        cursor = self.execute()
+        return {"results": [dict(row) for row in cursor.fetchall()]}
+
 
 class FakeD1:
     def __init__(self) -> None:
         self.connection = sqlite3.connect(":memory:")
         self.connection.row_factory = sqlite3.Row
+        self.last_bound: tuple[object, ...] = ()
 
     def prepare(self, query: str) -> FakeStatement:
         return FakeStatement(self, query)

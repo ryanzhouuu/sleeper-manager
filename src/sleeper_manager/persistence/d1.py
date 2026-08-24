@@ -5,6 +5,15 @@ from hashlib import sha256
 from typing import Any
 
 from sleeper_manager.domain.nba import DataQualityState
+from sleeper_manager.domain.planning import AcknowledgedDecisionEvidence
+from sleeper_manager.persistence.acknowledgements import (
+    ACKNOWLEDGED_DECISIONS_QUERY,
+    LOCK_IN_DECISION_TYPE,
+    AcknowledgementQueryError,
+    decode_acknowledged_decisions,
+    raw_row_from_mapping,
+    raw_row_from_sequence,
+)
 from sleeper_manager.persistence.base import (
     AcknowledgementAction,
     AcknowledgementOutcome,
@@ -103,6 +112,9 @@ CREATE TABLE IF NOT EXISTS lock_acknowledgements (
     player_id TEXT NOT NULL,
     acknowledged_at TEXT NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS recommendations_league_week_decision_status_idx
+ON recommendations (league_id, fantasy_week, decision_type, status);
 """
 
 
@@ -122,6 +134,15 @@ class D1StateRepository(AsyncStateRepository):
     async def _first(self, query: str, *params: object) -> dict[str, Any] | None:
         row = await self._statement(query, params).first()
         return dict(row) if isinstance(row, Mapping) else None
+
+    async def _all(self, query: str, *params: object) -> Sequence[object]:
+        result = await self._statement(query, params).all()
+        if not isinstance(result, Mapping):
+            raise AcknowledgementQueryError("unexpected D1 result envelope")
+        rows = result.get("results")
+        if isinstance(rows, str | bytes) or not isinstance(rows, Sequence):
+            raise AcknowledgementQueryError("unexpected D1 result envelope")
+        return rows
 
     async def _run(self, query: str, *params: object) -> Any:
         return await self._statement(query, params).run()
@@ -493,3 +514,26 @@ class D1StateRepository(AsyncStateRepository):
             )
             is not None
         )
+
+    async def load_acknowledged_decisions(
+        self,
+        league_id: str,
+        fantasy_week: int,
+        *,
+        as_of: datetime,
+    ) -> tuple[AcknowledgedDecisionEvidence, ...]:
+        rows = await self._all(
+            ACKNOWLEDGED_DECISIONS_QUERY,
+            league_id,
+            fantasy_week,
+            LOCK_IN_DECISION_TYPE,
+        )
+        decoded_rows = []
+        for row in rows:
+            if isinstance(row, Mapping):
+                decoded_rows.append(raw_row_from_mapping(row))
+            elif isinstance(row, Sequence) and not isinstance(row, str | bytes):
+                decoded_rows.append(raw_row_from_sequence(row))
+            else:
+                raise AcknowledgementQueryError("unexpected D1 result envelope")
+        return decode_acknowledged_decisions(tuple(decoded_rows), as_of=as_of)

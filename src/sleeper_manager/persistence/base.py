@@ -4,6 +4,7 @@ from enum import StrEnum
 from typing import Protocol
 
 from sleeper_manager.domain.nba import DataQualityState
+from sleeper_manager.domain.planning import AcknowledgedDecisionEvidence
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,6 +182,14 @@ class StateRepository(Protocol):
 
     def is_locked(self, recommendation_id: str) -> bool: ...
 
+    def load_acknowledged_decisions(
+        self,
+        league_id: str,
+        fantasy_week: int,
+        *,
+        as_of: datetime,
+    ) -> tuple[AcknowledgedDecisionEvidence, ...]: ...
+
 
 class AsyncStateRepository(Protocol):
     async def initialize(self) -> None: ...
@@ -224,3 +233,11 @@ class AsyncStateRepository(Protocol):
     ) -> None: ...
 
     async def is_locked(self, recommendation_id: str) -> bool: ...
+
+    async def load_acknowledged_decisions(
+        self,
+        league_id: str,
+        fantasy_week: int,
+        *,
+        as_of: datetime,
+    ) -> tuple[AcknowledgedDecisionEvidence, ...]: ...
