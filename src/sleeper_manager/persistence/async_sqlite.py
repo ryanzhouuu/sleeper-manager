@@ -52,6 +52,12 @@ class AsyncSQLiteStateRepository(AsyncStateRepository):
     async def has_successful_delivery(self, recommendation_id: str) -> bool:
         return self._repository.has_successful_delivery(recommendation_id)
 
+    async def claim_delivery(self, recommendation_id: str, claimed_at: datetime) -> bool:
+        return self._repository.claim_delivery(recommendation_id, claimed_at)
+
+    async def release_delivery_claim(self, recommendation_id: str) -> bool:
+        return self._repository.release_delivery_claim(recommendation_id)
+
     async def create_action_token(self, token: ActionTokenRecord) -> None:
         self._repository.create_action_token(token)
 
@@ -65,6 +71,22 @@ class AsyncSQLiteStateRepository(AsyncStateRepository):
 
     async def expire_recommendations(self, now: datetime) -> int:
         return self._repository.expire_recommendations(now)
+
+    async def list_pending_recommendations(
+        self,
+        league_id: str,
+        fantasy_week: int,
+        *,
+        decision_type: str,
+    ) -> tuple[RecommendationRecord, ...]:
+        return self._repository.list_pending_recommendations(
+            league_id,
+            fantasy_week,
+            decision_type=decision_type,
+        )
+
+    async def supersede_recommendation(self, recommendation_id: str, now: datetime) -> bool:
+        return self._repository.supersede_recommendation(recommendation_id, now)
 
     async def record_lock_acknowledgement(
         self,

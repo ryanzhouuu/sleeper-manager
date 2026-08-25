@@ -150,7 +150,12 @@ class D1StateRepository(AsyncStateRepository):
 
     async def _first(self, query: str, *params: object) -> dict[str, Any] | None:
         row = await self._statement(query, params).first()
-        return dict(row) if isinstance(row, Mapping) else None
+        if row is None:
+            return None
+        payload = _js_to_python(row)
+        if isinstance(payload, Mapping):
+            return {str(key): _js_to_python(value) for key, value in payload.items()}
+        raise AcknowledgementQueryError("unexpected D1 result envelope")
 
     async def _all(self, query: str, *params: object) -> Sequence[object]:
         result = await self._statement(query, params).all()
@@ -158,23 +163,34 @@ class D1StateRepository(AsyncStateRepository):
         rows = _d1_field(result, payload, "results")
         if rows is _MISSING or isinstance(rows, str | bytes) or not isinstance(rows, Sequence):
             raise AcknowledgementQueryError("unexpected D1 result envelope")
-        success = _d1_field(result, payload, "success")
+        self._require_success(result, payload)
+        return tuple(_js_to_python(row) for row in rows)
+
+    async def _run(self, query: str, *params: object) -> Any:
+        result = await self._statement(query, params).run()
+        payload = _js_to_python(result)
+        self._require_success(result, payload)
+        return result
+
+    @staticmethod
+    def _require_success(original: object, payload: object) -> None:
+        success = _d1_field(original, payload, "success")
         if success is False:
             raise AcknowledgementQueryError("unsuccessful D1 query")
         if success is not True:
             raise AcknowledgementQueryError("unexpected D1 result envelope")
-        return tuple(_js_to_python(row) for row in rows)
-
-    async def _run(self, query: str, *params: object) -> Any:
-        return await self._statement(query, params).run()
 
     @staticmethod
     def _changes(result: Any) -> int:
-        if isinstance(result, Mapping):
-            meta = result.get("meta")
-            if isinstance(meta, Mapping):
-                return int(meta.get("changes", 0))
-        return 0
+        payload = _js_to_python(result)
+        meta = _d1_field(result, payload, "meta")
+        if meta is _MISSING:
+            return 0
+        meta_payload = _js_to_python(meta)
+        changes = _d1_field(meta, meta_payload, "changes")
+        if changes is _MISSING:
+            return 0
+        return int(str(changes))
 
     @staticmethod
     def _recommendation(row: Mapping[str, Any]) -> RecommendationRecord:
@@ -357,6 +373,39 @@ class D1StateRepository(AsyncStateRepository):
             is not None
         )
 
+    @staticmethod
+    def _delivery_claim_id(recommendation_id: str) -> str:
+        return sha256(f"{recommendation_id}:delivery-claim".encode()).hexdigest()
+
+    async def claim_delivery(self, recommendation_id: str, claimed_at: datetime) -> bool:
+        result = await self._run(
+            """
+            INSERT OR IGNORE INTO delivery_attempts (
+                delivery_id, recommendation_id, provider, attempt_number,
+                attempted_at, succeeded, error
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            self._delivery_claim_id(recommendation_id),
+            recommendation_id,
+            "_delivery_claim",
+            0,
+            claimed_at.isoformat(),
+            0,
+            None,
+        )
+        return self._changes(result) == 1
+
+    async def release_delivery_claim(self, recommendation_id: str) -> bool:
+        result = await self._run(
+            """
+            DELETE FROM delivery_attempts
+            WHERE delivery_id = ? AND succeeded = 0 AND provider = ?
+            """,
+            self._delivery_claim_id(recommendation_id),
+            "_delivery_claim",
+        )
+        return self._changes(result) == 1
+
     async def create_action_token(self, token: ActionTokenRecord) -> None:
         await self._run(
             """
@@ -500,6 +549,53 @@ class D1StateRepository(AsyncStateRepository):
             now.isoformat(),
         )
         return self._changes(result)
+
+    async def list_pending_recommendations(
+        self,
+        league_id: str,
+        fantasy_week: int,
+        *,
+        decision_type: str,
+    ) -> tuple[RecommendationRecord, ...]:
+        rows = await self._all(
+            """
+            SELECT recommendation_id, idempotency_key, league_id, fantasy_week,
+                   player_id, game_id, decision_type, title, message, deadline,
+                   policy_version, created_at, status, acknowledged_action,
+                   acknowledged_at, trace_json
+            FROM recommendations
+            WHERE league_id = ?
+              AND fantasy_week = ?
+              AND decision_type = ?
+              AND status = ?
+            ORDER BY created_at ASC, recommendation_id ASC
+            """,
+            league_id,
+            fantasy_week,
+            decision_type,
+            RecommendationStatus.PENDING.value,
+        )
+        records: list[RecommendationRecord] = []
+        for row in rows:
+            if isinstance(row, Mapping):
+                records.append(self._recommendation(row))
+            else:
+                raise AcknowledgementQueryError("unexpected D1 result envelope")
+        return tuple(records)
+
+    async def supersede_recommendation(self, recommendation_id: str, now: datetime) -> bool:
+        del now
+        result = await self._run(
+            """
+            UPDATE recommendations
+            SET status = ?
+            WHERE recommendation_id = ? AND status = ?
+            """,
+            RecommendationStatus.SUPERSEDED.value,
+            recommendation_id,
+            RecommendationStatus.PENDING.value,
+        )
+        return self._changes(result) == 1
 
     async def record_lock_acknowledgement(
         self,

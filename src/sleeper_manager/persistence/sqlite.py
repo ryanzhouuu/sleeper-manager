@@ -390,6 +390,42 @@ class SQLiteStateRepository:
             ).fetchone()
         return row is not None
 
+    @staticmethod
+    def _delivery_claim_id(recommendation_id: str) -> str:
+        return sha256(f"{recommendation_id}:delivery-claim".encode()).hexdigest()
+
+    def claim_delivery(self, recommendation_id: str, claimed_at: datetime) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT OR IGNORE INTO delivery_attempts (
+                    delivery_id, recommendation_id, provider, attempt_number,
+                    attempted_at, succeeded, error
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    self._delivery_claim_id(recommendation_id),
+                    recommendation_id,
+                    "_delivery_claim",
+                    0,
+                    claimed_at.isoformat(),
+                    0,
+                    None,
+                ),
+            )
+        return cursor.rowcount == 1
+
+    def release_delivery_claim(self, recommendation_id: str) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                DELETE FROM delivery_attempts
+                WHERE delivery_id = ? AND succeeded = 0 AND provider = ?
+                """,
+                (self._delivery_claim_id(recommendation_id), "_delivery_claim"),
+            )
+        return cursor.rowcount == 1
+
     def create_action_token(self, token: ActionTokenRecord) -> None:
         with self._connect() as connection:
             connection.execute(
@@ -533,6 +569,53 @@ class SQLiteStateRepository:
                 ),
             )
         return cursor.rowcount
+
+    def list_pending_recommendations(
+        self,
+        league_id: str,
+        fantasy_week: int,
+        *,
+        decision_type: str,
+    ) -> tuple[RecommendationRecord, ...]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT recommendation_id, idempotency_key, league_id, fantasy_week,
+                       player_id, game_id, decision_type, title, message, deadline,
+                       policy_version, created_at, status, acknowledged_action,
+                       acknowledged_at, trace_json
+                FROM recommendations
+                WHERE league_id = ?
+                  AND fantasy_week = ?
+                  AND decision_type = ?
+                  AND status = ?
+                ORDER BY created_at ASC, recommendation_id ASC
+                """,
+                (
+                    league_id,
+                    fantasy_week,
+                    decision_type,
+                    RecommendationStatus.PENDING.value,
+                ),
+            ).fetchall()
+        return tuple(self._recommendation(row) for row in rows)
+
+    def supersede_recommendation(self, recommendation_id: str, now: datetime) -> bool:
+        del now
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE recommendations
+                SET status = ?
+                WHERE recommendation_id = ? AND status = ?
+                """,
+                (
+                    RecommendationStatus.SUPERSEDED.value,
+                    recommendation_id,
+                    RecommendationStatus.PENDING.value,
+                ),
+            )
+        return cursor.rowcount == 1
 
     def record_lock_acknowledgement(
         self,

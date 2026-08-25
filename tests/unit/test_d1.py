@@ -35,7 +35,7 @@ class FakeStatement:
     async def run(self) -> dict[str, Any]:
         cursor = self.execute()
         self.database.connection.commit()
-        return {"meta": {"changes": cursor.rowcount}}
+        return {"success": True, "meta": {"changes": cursor.rowcount}}
 
     async def first(self) -> dict[str, Any] | None:
         cursor = self.execute()
@@ -65,7 +65,7 @@ class FakeD1:
         try:
             for statement in statements:
                 cursor = statement.execute()
-                results.append({"meta": {"changes": cursor.rowcount}})
+                results.append({"success": True, "meta": {"changes": cursor.rowcount}})
             self.connection.commit()
         except Exception:
             self.connection.rollback()
@@ -168,3 +168,87 @@ def test_d1_repository_round_trips_snapshot_and_freshness() -> None:
 
     assert asyncio.run(repository.load_league_snapshot("league-1", 1)) == snapshot
     assert asyncio.run(repository.load_data_freshness("scoreboard")) == freshness
+
+
+class _JsProxy:
+    """Minimal Python Worker D1 proxy: not a Mapping, convertible via to_py()."""
+
+    def __init__(self, value: object) -> None:
+        self._value = value
+
+    def to_py(self) -> object:
+        return self._value
+
+
+def test_d1_create_recommendation_counts_proxy_run_changes() -> None:
+    class _Statement:
+        def bind(self, *params: object) -> object:
+            return self
+
+        async def run(self) -> object:
+            return _JsProxy({"success": True, "meta": _JsProxy({"changes": 1})})
+
+    class _Database:
+        def prepare(self, query: str) -> object:
+            return _Statement()
+
+    repository = D1StateRepository(_Database())
+    assert asyncio.run(repository.create_recommendation(recommendation())) is True
+
+
+def test_d1_get_recommendation_decodes_proxy_first_row() -> None:
+    record = recommendation()
+    row = {
+        "recommendation_id": record.recommendation_id,
+        "idempotency_key": record.idempotency_key,
+        "league_id": record.league_id,
+        "fantasy_week": record.fantasy_week,
+        "player_id": record.player_id,
+        "game_id": record.game_id,
+        "decision_type": record.decision_type,
+        "title": record.title,
+        "message": record.message,
+        "deadline": record.deadline.isoformat() if record.deadline else None,
+        "policy_version": record.policy_version,
+        "created_at": record.created_at.isoformat(),
+        "status": record.status.value,
+        "acknowledged_action": None,
+        "acknowledged_at": None,
+        "trace_json": record.trace_json,
+    }
+
+    class _Statement:
+        def bind(self, *params: object) -> object:
+            return self
+
+        async def first(self) -> object:
+            return _JsProxy(row)
+
+    class _Database:
+        def prepare(self, query: str) -> object:
+            return _Statement()
+
+    repository = D1StateRepository(_Database())
+    loaded = asyncio.run(repository.get_recommendation(record.recommendation_id))
+    assert loaded == record
+
+
+def test_d1_unsuccessful_run_raises() -> None:
+    import pytest
+
+    from sleeper_manager.persistence.acknowledgements import AcknowledgementQueryError
+
+    class _Statement:
+        def bind(self, *params: object) -> object:
+            return self
+
+        async def run(self) -> object:
+            return _JsProxy({"success": False, "meta": {"changes": 0}})
+
+    class _Database:
+        def prepare(self, query: str) -> object:
+            return _Statement()
+
+    repository = D1StateRepository(_Database())
+    with pytest.raises(AcknowledgementQueryError, match="unsuccessful"):
+        asyncio.run(repository.create_recommendation(recommendation()))
