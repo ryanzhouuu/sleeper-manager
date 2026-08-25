@@ -79,7 +79,7 @@ class NotificationLoop:
 
     @staticmethod
     def _recommendation_id(idempotency_key: str) -> str:
-        return sha256(idempotency_key.encode("utf-8")).hexdigest()[:32]
+        return recommendation_id_for(idempotency_key)
 
     async def run(self, request: RecommendationRequest) -> NotificationLoopResult:
         now = self._clock()
@@ -113,7 +113,18 @@ class NotificationLoop:
             if recommendation.deadline is not None and recommendation.deadline <= now:
                 return NotificationLoopResult("duplicate", recommendation, None, None)
 
-        return await self._deliver(recommendation, request, now)
+        claimed = await self._repository.claim_delivery(recommendation.recommendation_id, now)
+        if not claimed:
+            return NotificationLoopResult("duplicate", recommendation, None, None)
+
+        try:
+            result = await self._deliver(recommendation, request, now)
+        except Exception:
+            await self._repository.release_delivery_claim(recommendation.recommendation_id)
+            raise
+        if result.status == "delivery_failed":
+            await self._repository.release_delivery_claim(recommendation.recommendation_id)
+        return result
 
     async def _deliver(
         self,
@@ -192,6 +203,10 @@ class NotificationLoop:
                 request.policy_version,
             )
         )
+
+
+def recommendation_id_for(idempotency_key: str) -> str:
+    return sha256(idempotency_key.encode("utf-8")).hexdigest()[:32]
 
 
 def default_placeholder_request(

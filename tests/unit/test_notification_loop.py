@@ -163,3 +163,38 @@ def test_configured_acknowledgement_kinds_keep_creating_actions(tmp_path) -> Non
         "Passed",
         "Open Sleeper",
     ]
+
+
+def test_concurrent_identical_runs_send_one_notification(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    class RaceSender:
+        def __init__(self) -> None:
+            self.messages: list[Notification] = []
+            self.entered = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def send(self, notification: Notification) -> None:
+            self.entered.set()
+            await self.release.wait()
+            self.messages.append(notification)
+
+    async def exercise() -> None:
+        repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
+        await repository.initialize()
+        sender = RaceSender()
+        workflow = NotificationLoop(
+            repository,
+            NotificationDispatcher(sender),
+            acknowledgement_base_url="https://example.test/ack",
+            clock=lambda: NOW,
+        )
+        first_task = asyncio.create_task(workflow.run(request()))
+        await sender.entered.wait()
+        second_task = asyncio.create_task(workflow.run(request()))
+        await asyncio.sleep(0)
+        sender.release.set()
+        first, second = await asyncio.gather(first_task, second_task)
+        statuses = sorted([first.status, second.status])
+        assert statuses == ["created", "duplicate"]
+        assert len(sender.messages) == 1
+
+    asyncio.run(exercise())

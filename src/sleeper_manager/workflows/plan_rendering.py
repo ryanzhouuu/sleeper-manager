@@ -1,7 +1,9 @@
+import json
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, tzinfo
+from typing import Literal
 
 from sleeper_manager.domain.planning import (
     PlanningReasonCode,
@@ -239,8 +241,110 @@ def _player_name(player_id: str, names: Mapping[str, str] | None) -> str:
     return names.get(player_id, player_id)
 
 
+def serialize_weekly_plan_trace(
+    plan: WeeklyPlan,
+    *,
+    trigger: Literal["daily", "pre_tipoff"] | None = None,
+) -> str:
+    payload: dict[str, object] = {
+        "schema_version": 1,
+        "kind": WEEKLY_LINEUP_DECISION_TYPE,
+        "plan_id": plan.plan_id,
+        "material_hash": plan.material_hash,
+        "status": plan.status.value,
+        "planner_version": plan.planner_version,
+        "manager_policy_version": plan.manager_policy_version,
+        "scoring_policy_version": plan.scoring_policy_version,
+        "league_configuration_version": plan.league_configuration_version,
+        "projection_model_version": plan.projection_model_version,
+        "input_version": plan.input_version,
+        "decision_time": plan.decision_time.isoformat(),
+        "expected_terminal_score": plan.expected_terminal_score,
+        "best_alternative_score": plan.best_alternative_score,
+        "observed_terminal_score": plan.observed_terminal_score,
+        "decision_margin": plan.decision_margin,
+        "confidence": plan.confidence.value,
+        "observed_assignments": [
+            {
+                "slot_index": assignment.slot_index,
+                "slot_position": assignment.slot_position,
+                "player_id": assignment.player_id,
+            }
+            for assignment in plan.observed_assignments
+        ],
+        "desired_assignments": [
+            {
+                "slot_index": assignment.slot_index,
+                "slot_position": assignment.slot_position,
+                "player_id": assignment.player_id,
+            }
+            for assignment in plan.desired_assignments
+        ],
+        "moves": [
+            {
+                "player_id": move.player_id,
+                "source_slot_index": move.source_slot_index,
+                "target_slot_index": move.target_slot_index,
+                "deadline": move.deadline.isoformat(),
+            }
+            for move in plan.moves
+        ],
+        "fixed_slots": [
+            {
+                "slot_index": fixed.slot_index,
+                "slot_position": fixed.slot_position,
+                "player_id": fixed.player_id,
+                "game_id": fixed.game_id,
+                "accepted_fantasy_score": fixed.accepted_fantasy_score,
+                "decision_time": fixed.decision_time.isoformat(),
+                "decision_id": fixed.decision_id,
+                "provenance": fixed.provenance,
+            }
+            for fixed in plan.fixed_slots
+        ],
+        "passed_opportunities": [
+            {
+                "player_id": passed.player_id,
+                "game_id": passed.game_id,
+                "decision_time": passed.decision_time.isoformat(),
+                "decision_id": passed.decision_id,
+                "provenance": passed.provenance,
+            }
+            for passed in plan.passed_opportunities
+        ],
+        "freshness": {
+            "sources": [
+                {
+                    "source": source.source,
+                    "version": source.version,
+                    "available_as_of": source.available_as_of.isoformat(),
+                    "retrieved_at": (
+                        source.retrieved_at.isoformat() if source.retrieved_at is not None else None
+                    ),
+                }
+                for source in plan.freshness.sources
+            ]
+        },
+        "blocking_reasons": [reason.value for reason in plan.blocking_reasons],
+        "warnings": [reason.value for reason in plan.warnings],
+        "explanation_reasons": [reason.value for reason in plan.explanation_reasons],
+        "schedule_assumptions": list(plan.schedule_assumptions),
+    }
+    if trigger is not None:
+        payload["trigger"] = trigger
+    if plan.distribution_summary is not None:
+        payload["distribution_summary"] = {
+            "scenario_count": plan.distribution_summary.scenario_count,
+            "seed": plan.distribution_summary.seed,
+            "approximation": plan.distribution_summary.approximation,
+            "perfect_information_bound": plan.distribution_summary.perfect_information_bound,
+        }
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
 __all__ = (
     "WEEKLY_LINEUP_DECISION_TYPE",
     "RenderedPlanNotification",
     "render_weekly_plan",
+    "serialize_weekly_plan_trace",
 )
