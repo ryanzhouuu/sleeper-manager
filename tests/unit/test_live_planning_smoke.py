@@ -111,6 +111,8 @@ def test_live_providers_build_a_shared_state_read_only(tmp_path: Path) -> None:
                     max_nba_schedule_age=timedelta(hours=12),
                     max_availability_age=timedelta(hours=12),
                 ),
+                runtime_policy_version="live-smoke-policy-v1",
+                move_lead_time=timedelta(minutes=10),
                 acknowledgement_source=_NoAcknowledgements(),
                 mapping_overrides=mapping_overrides,
             )

@@ -181,6 +181,8 @@ def test_recorded_fixtures_build_state_and_cache_serves_repeat_runs(tmp_path) ->
                 ),
                 week_window=FantasyWeekWindow(1, WINDOW_START, WINDOW_END),
                 freshness_policy=_freshness_policy(),
+                runtime_policy_version="runtime-policy-v7",
+                move_lead_time=timedelta(minutes=10),
                 clock=lambda: NOW,
             )
             state_first = build_live_team_week_state(
@@ -194,6 +196,8 @@ def test_recorded_fixtures_build_state_and_cache_serves_repeat_runs(tmp_path) ->
                 projection_provider=DirectBaselineProjectionProvider(_StaticHistory()),
                 week_window=FantasyWeekWindow(1, WINDOW_START, WINDOW_END),
                 freshness_policy=_freshness_policy(),
+                runtime_policy_version="runtime-policy-v7",
+                move_lead_time=timedelta(minutes=10),
                 clock=lambda: NOW,
             )
             state_second = build_live_team_week_state(

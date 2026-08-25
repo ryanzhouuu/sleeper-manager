@@ -101,7 +101,7 @@ class Settings(BaseSettings):
 
     sleeper_league_id: str = ""
     sleeper_user_id: str = ""
-    timezone: str = "Pacific/Honolulu"
+    timezone: str = "America/Chicago"
     manager_policy_path: Path = Path(".local/policy.toml")
 
     ntfy_base_url: str = "https://ntfy.sh"

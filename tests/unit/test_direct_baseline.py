@@ -213,7 +213,9 @@ def test_pregame_request_excludes_same_tipoff_and_future_outcomes() -> None:
 
     assert snapshot.distribution == reference.distribution
     assert snapshot.input_version == reference.input_version
-    assert request.history == (prior,)
+    assert tuple((item.player_id, item.game_id) for item in request.history) == (
+        (prior.player_id, prior.game_id),
+    )
 
 
 def test_pregame_projection_reports_stable_missing_warmup_reason() -> None:

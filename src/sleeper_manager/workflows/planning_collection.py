@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 from sleeper_manager.domain.league import LeagueProfile
@@ -78,6 +78,8 @@ async def collect_live_planning_inputs(
     projection_provider: LiveProjectionProvider,
     week_window: FantasyWeekWindow,
     freshness_policy: PlanningFreshnessPolicy,
+    runtime_policy_version: str,
+    move_lead_time: timedelta,
     acknowledgement_source: AcknowledgementSource | None = None,
     mapping_overrides: Mapping[str, str] | None = None,
     clock: Callable[[], datetime] | None = None,
@@ -152,6 +154,8 @@ async def collect_live_planning_inputs(
             league_profile=profile,
             week_window=week_window,
             freshness_policy=freshness_policy,
+            runtime_policy_version=runtime_policy_version,
+            move_lead_time=move_lead_time,
             player_eligibility=eligibility,
             identities=identities,
             schedule_results=tuple(schedule_results),

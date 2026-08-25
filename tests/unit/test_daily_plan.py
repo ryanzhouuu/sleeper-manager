@@ -153,6 +153,8 @@ def _inputs(
     profile: LeagueProfile | None = None,
     *,
     projections: tuple[LiveProjectionResult, ...],
+    runtime_policy_version: str = "runtime-policy-v7",
+    move_lead_time: timedelta = timedelta(minutes=10),
 ) -> LivePlanningInputs:
     return LivePlanningInputs(
         league_profile=profile or _profile(),
@@ -162,6 +164,8 @@ def _inputs(
             max_nba_schedule_age=timedelta(hours=6),
             max_availability_age=timedelta(hours=3),
         ),
+        runtime_policy_version=runtime_policy_version,
+        move_lead_time=move_lead_time,
         player_eligibility=(
             PlayerEligibilityEvidence("p1", ("PG", "SG"), RETRIEVED_AT, "sleeper-players"),
             PlayerEligibilityEvidence("p2", ("C", "UTIL"), RETRIEVED_AT, "sleeper-players"),
@@ -278,6 +282,32 @@ def test_one_required_move_sends_one_notification(tmp_path) -> None:  # type: ig
     assert result.notification is not None
     assert [action.label for action in result.notification.actions] == ["Open Sleeper"]
     assert "Start Ben in UTIL." in sender.messages[0].message
+    assert result.plan.manager_policy_version == "runtime-policy-v7"
+    assert result.plan.moves[0].deadline == GAME_START - timedelta(minutes=10)
+    trace = json.loads(result.recommendation.trace_json)
+    assert trace["manager_policy_version"] == "runtime-policy-v7"
+
+
+def test_runtime_policy_controls_move_lead_and_material_identity(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    (tmp_path / "standard").mkdir()
+    (tmp_path / "conservative").mkdir()
+    profile = _profile(starter_ids=("p1", None))
+    standard = _inputs(
+        profile,
+        projections=_projections(p1_expected=10.0, p2_expected=30.0),
+    )
+    conservative = _inputs(
+        profile,
+        projections=_projections(p1_expected=10.0, p2_expected=30.0),
+        runtime_policy_version="runtime-policy-v8",
+        move_lead_time=timedelta(minutes=30),
+    )
+
+    standard_result, _, _, _ = asyncio.run(_run_async(tmp_path / "standard", standard))
+    conservative_result, _, _, _ = asyncio.run(_run_async(tmp_path / "conservative", conservative))
+
+    assert conservative_result.plan.moves[0].deadline == GAME_START - timedelta(minutes=30)
+    assert standard_result.plan.material_hash != conservative_result.plan.material_hash
 
 
 def test_scheduler_retry_sends_no_duplicate(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -366,6 +396,8 @@ def test_material_revision_supersedes_previous_recommendation(tmp_path) -> None:
                 max_nba_schedule_age=timedelta(hours=6),
                 max_availability_age=timedelta(hours=3),
             ),
+            runtime_policy_version=first_inputs.runtime_policy_version,
+            move_lead_time=first_inputs.move_lead_time,
             player_eligibility=(
                 PlayerEligibilityEvidence("p1", ("PG", "SG"), RETRIEVED_AT, "sleeper-players"),
                 PlayerEligibilityEvidence("p2", ("C", "UTIL"), RETRIEVED_AT, "sleeper-players"),
@@ -432,6 +464,8 @@ def test_aba_lifecycle_reactivates_superseded_material_plan(tmp_path) -> None:  
                 max_nba_schedule_age=timedelta(hours=6),
                 max_availability_age=timedelta(hours=3),
             ),
+            runtime_policy_version=plan_a.runtime_policy_version,
+            move_lead_time=plan_a.move_lead_time,
             player_eligibility=(
                 PlayerEligibilityEvidence("p1", ("PG", "SG"), RETRIEVED_AT, "sleeper-players"),
                 PlayerEligibilityEvidence("p2", ("C", "UTIL"), RETRIEVED_AT, "sleeper-players"),

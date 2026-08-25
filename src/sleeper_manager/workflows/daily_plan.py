@@ -103,7 +103,11 @@ async def _run_weekly_lineup_workflow(
     now = (clock or _utc_now)()
     await repository.expire_recommendations(now)
     state = build_live_team_week_state(inputs, decision_time=decision_time)
-    plan = build_weekly_plan(state, policy=policy or _DEFAULT_POLICY)
+    plan = build_weekly_plan(
+        state,
+        lead_time=inputs.move_lead_time,
+        policy=policy or _DEFAULT_POLICY,
+    )
     rendered = render_weekly_plan(
         plan,
         player_names=player_names,

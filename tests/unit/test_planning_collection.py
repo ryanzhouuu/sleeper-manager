@@ -265,6 +265,8 @@ async def _collect(nba: _FakeNBA, projections: _RecordingProjections, **override
         "projection_provider": projections,
         "week_window": FantasyWeekWindow(1, WINDOW_START, WINDOW_END),
         "freshness_policy": _freshness_policy(),
+        "runtime_policy_version": "runtime-policy-v7",
+        "move_lead_time": timedelta(minutes=10),
         "clock": lambda: NOW,
     }
     kwargs.update(overrides)

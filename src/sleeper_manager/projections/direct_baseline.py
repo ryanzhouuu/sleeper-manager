@@ -14,7 +14,7 @@ from sleeper_manager.domain.projection import (
     ProjectionReason,
     ProjectionSnapshot,
 )
-from sleeper_manager.domain.scoring import ScoringPolicy, calculate_fantasy_points
+from sleeper_manager.domain.scoring import BoxScoreLine, ScoringPolicy, calculate_fantasy_points
 from sleeper_manager.domain.statistics import weighted_mean
 from sleeper_manager.integrations.nba.historical_feature_models import (
     DatasetSourceVersion,
@@ -33,6 +33,65 @@ MISSING_WARMUP_REASON = "missing_warmup_history"
 
 
 _DISABLED_ADJUSTMENTS = ("opponent", "pace", "rest", "travel", "injury")
+
+
+@dataclass(frozen=True, slots=True)
+class DirectBaselineObservation:
+    """Outcome data retained by the production direct-baseline history."""
+
+    player_id: str
+    game_id: str
+    game_start: datetime
+    outcome_finalized_at: datetime | None
+    minutes: float | None
+    started: bool
+    did_not_play: bool
+    box_score: BoxScoreLine
+    source_version: str
+
+    def __post_init__(self) -> None:
+        if not self.player_id.strip() or not self.game_id.strip():
+            raise ProjectionBaselineError("Projection observations require player and game IDs")
+        _validate_timestamp(self.game_start, "observation game_start")
+        if self.outcome_finalized_at is not None:
+            _validate_timestamp(self.outcome_finalized_at, "observation outcome_finalized_at")
+        if self.minutes is not None and (not isfinite(self.minutes) or self.minutes < 0):
+            raise ProjectionBaselineError("Projection observation minutes must be non-negative")
+        if not self.source_version.strip():
+            raise ProjectionBaselineError("Projection observations require a source version")
+
+    @classmethod
+    def from_historical_row(cls, row: HistoricalFeatureRow) -> DirectBaselineObservation:
+        source_version = hashlib.sha256(
+            repr(
+                tuple(
+                    (source.provider, source.provider_id, source.content_hash)
+                    for source in row.source_lineage
+                )
+            ).encode()
+        ).hexdigest()
+        return cls(
+            player_id=row.player_id,
+            game_id=row.game_id,
+            game_start=row.game_start,
+            outcome_finalized_at=row.outcome_finalized_at,
+            minutes=row.target_minutes,
+            started=row.target_started,
+            did_not_play=not row.target_did_play,
+            box_score=row.target_box_score,
+            source_version=source_version,
+        )
+
+
+def compact_direct_baseline_observations(
+    rows: Iterable[DirectBaselineObservation | HistoricalFeatureRow],
+) -> tuple[DirectBaselineObservation, ...]:
+    return tuple(
+        row
+        if isinstance(row, DirectBaselineObservation)
+        else DirectBaselineObservation.from_historical_row(row)
+        for row in rows
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,11 +145,16 @@ class PregameProjectionRequest:
     game_id: str
     game_start: datetime
     available_as_of: datetime
-    history: tuple[HistoricalFeatureRow, ...]
+    history: tuple[DirectBaselineObservation, ...]
     history_player_id: str | None = None
     source_versions: tuple[DatasetSourceVersion, ...] = ()
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "history",
+            compact_direct_baseline_observations(self.history),
+        )
         for label, value in (
             ("dataset_version", self.dataset_version),
             ("feature_schema_version", self.feature_schema_version),
@@ -147,7 +211,11 @@ class DirectFantasyPointBaseline:
             game_id=target.game_id,
             game_start=target.game_start,
             available_as_of=target.available_as_of,
-            history=tuple(row for row in dataset.rows if row.game_start < target.game_start),
+            history=tuple(
+                DirectBaselineObservation.from_historical_row(row)
+                for row in dataset.rows
+                if row.game_start < target.game_start
+            ),
             history_player_id=target.player_id,
             source_versions=dataset.source_versions,
         )
@@ -268,7 +336,7 @@ class DirectFantasyPointBaseline:
 @dataclass(slots=True)
 class _SeasonIndex:
     origin: datetime
-    rows: list[HistoricalFeatureRow] = field(default_factory=list)
+    rows: list[DirectBaselineObservation] = field(default_factory=list)
     starts: list[datetime] = field(default_factory=list)
     scores: list[float] = field(default_factory=list)
     cumulative_weights: list[float] = field(default_factory=list)
@@ -280,13 +348,13 @@ class _HistoricalIndex:
     scoring_policy: ScoringPolicy
     half_life_days: float
     processed_count: int = 0
-    rows: list[HistoricalFeatureRow] = field(default_factory=list)
+    rows: list[DirectBaselineObservation] = field(default_factory=list)
     starts: list[datetime] = field(default_factory=list)
     prefix_fingerprints: list[str] = field(default_factory=list)
     seasons: dict[int, _SeasonIndex] = field(default_factory=dict)
-    players: dict[tuple[str, int], list[HistoricalFeatureRow]] = field(default_factory=dict)
+    players: dict[tuple[str, int], list[DirectBaselineObservation]] = field(default_factory=dict)
 
-    def extend(self, rows: Sequence[HistoricalFeatureRow], prior_count: int) -> None:
+    def extend(self, rows: Sequence[DirectBaselineObservation], prior_count: int) -> None:
         if prior_count < self.processed_count:
             return
         if prior_count == self.processed_count:
@@ -302,7 +370,7 @@ class _HistoricalIndex:
             season_index = self.seasons.setdefault(season, _SeasonIndex(row.game_start))
             season_index.rows.append(row)
             season_index.starts.append(row.game_start)
-            score = calculate_fantasy_points(row.target_box_score, self.scoring_policy)
+            score = calculate_fantasy_points(row.box_score, self.scoring_policy)
             season_index.scores.append(score)
             age_from_origin = (row.game_start - season_index.origin).total_seconds() / 86400
             transformed_weight = exp(log(2) * age_from_origin / self.half_life_days)
@@ -330,7 +398,7 @@ class _HistoricalIndex:
         player_id: str,
         season: int,
         game_start: datetime,
-    ) -> tuple[HistoricalFeatureRow, ...]:
+    ) -> tuple[DirectBaselineObservation, ...]:
         return tuple(
             row for row in self.players.get((player_id, season), ()) if row.game_start < game_start
         )
@@ -339,7 +407,7 @@ class _HistoricalIndex:
         self,
         season: int,
         game_start: datetime,
-    ) -> tuple[HistoricalFeatureRow, ...]:
+    ) -> tuple[DirectBaselineObservation, ...]:
         index = self.seasons.get(season)
         if index is None:
             return ()
@@ -383,20 +451,20 @@ def _validate_timestamp(value: datetime, field: str) -> None:
         raise ProjectionBaselineError(f"{field} must be timezone-aware")
 
 
-def _weight(target_start: datetime, row: HistoricalFeatureRow, half_life: float) -> float:
+def _weight(target_start: datetime, row: DirectBaselineObservation, half_life: float) -> float:
     age_days = max((target_start - row.game_start).total_seconds() / 86400, 0.0)
     return exp(-log(2) * age_days / half_life)
 
 
 def _direct_observations(
-    rows: Iterable[HistoricalFeatureRow],
+    rows: Iterable[DirectBaselineObservation],
     target_start: datetime,
     policy: ScoringPolicy,
     config: ProjectionBaselineConfig,
 ) -> tuple[tuple[float, float], ...]:
     return tuple(
         (
-            calculate_fantasy_points(row.target_box_score, policy),
+            calculate_fantasy_points(row.box_score, policy),
             _weight(target_start, row, config.recency_half_life_days),
         )
         for row in rows
@@ -404,7 +472,7 @@ def _direct_observations(
 
 
 def _production_observations(
-    rows: Iterable[HistoricalFeatureRow],
+    rows: Iterable[DirectBaselineObservation],
     target_start: datetime,
     policy: ScoringPolicy,
     config: ProjectionBaselineConfig,
@@ -413,13 +481,13 @@ def _production_observations(
     played = tuple(
         row
         for row in records
-        if row.target_did_play and row.target_minutes is not None and row.target_minutes > 0
+        if not row.did_not_play and row.minutes is not None and row.minutes > 0
     )
     if not played:
         return ()
     minute_observations = tuple(
         (
-            row.target_minutes or 0.0,
+            row.minutes or 0.0,
             _weight(target_start, row, config.recency_half_life_days),
         )
         for row in played
@@ -428,9 +496,9 @@ def _production_observations(
     result: list[tuple[float, float]] = []
     for row in records:
         weight = _weight(target_start, row, config.recency_half_life_days)
-        score = calculate_fantasy_points(row.target_box_score, policy)
-        if row.target_did_play and row.target_minutes and row.target_minutes > 0:
-            role_score = score / row.target_minutes * expected_minutes
+        score = calculate_fantasy_points(row.box_score, policy)
+        if not row.did_not_play and row.minutes and row.minutes > 0:
+            role_score = score / row.minutes * expected_minutes
             score = (1 - config.role_blend) * score + config.role_blend * role_score
         result.append((score, weight))
     return tuple(result)
@@ -447,7 +515,7 @@ def _weighted_mean(observations: Iterable[tuple[float, float]]) -> float:
 def _reasons(
     *,
     target_start: datetime,
-    prior_rows: tuple[HistoricalFeatureRow, ...],
+    prior_rows: tuple[DirectBaselineObservation, ...],
     scoring_policy: ScoringPolicy,
     config: ProjectionBaselineConfig,
     history_message: str,
@@ -459,19 +527,19 @@ def _reasons(
     played = tuple(
         row
         for row in prior_rows
-        if row.target_did_play and row.target_minutes is not None and row.target_minutes > 0
+        if not row.did_not_play and row.minutes is not None and row.minutes > 0
     )
     if played:
         weighted_minutes = _weighted_mean(
             (
-                row.target_minutes or 0.0,
+                row.minutes or 0.0,
                 _weight(target_start, row, config.recency_half_life_days),
             )
             for row in played
         )
         starts = _weighted_mean(
             (
-                float(row.target_started),
+                float(row.started),
                 _weight(target_start, row, config.recency_half_life_days),
             )
             for row in played
@@ -542,43 +610,40 @@ def _pregame_input_version(
     return f"projection-input-v3-{hashlib.sha256(encoded).hexdigest()[:12]}"
 
 
-def _history_sort_key(row: HistoricalFeatureRow) -> tuple[datetime, str, str]:
+def _history_sort_key(row: DirectBaselineObservation) -> tuple[datetime, str, str]:
     return row.game_start, row.game_id, row.player_id
 
 
-def _history_fingerprint(rows: Sequence[HistoricalFeatureRow]) -> str:
+def _history_fingerprint(rows: Sequence[DirectBaselineObservation]) -> str:
     fingerprint = "empty"
     for row in rows:
         fingerprint = hashlib.sha256(f"{fingerprint}:{_row_fingerprint(row)}".encode()).hexdigest()
     return fingerprint
 
 
-def _row_fingerprint(row: HistoricalFeatureRow) -> str:
+def _row_fingerprint(row: DirectBaselineObservation) -> str:
     payload = {
         "game_id": row.game_id,
         "player_id": row.player_id,
         "game_start": row.game_start.isoformat(),
-        "target_minutes": row.target_minutes,
-        "target_started": row.target_started,
-        "target_did_play": row.target_did_play,
+        "target_minutes": row.minutes,
+        "target_started": row.started,
+        "target_did_play": not row.did_not_play,
         "outcome_finalized_at": (
             row.outcome_finalized_at.isoformat() if row.outcome_finalized_at is not None else None
         ),
         "target_box_score": (
-            row.target_box_score.points,
-            row.target_box_score.rebounds,
-            row.target_box_score.assists,
-            row.target_box_score.steals,
-            row.target_box_score.blocks,
-            row.target_box_score.turnovers,
-            row.target_box_score.three_pointers_made,
-            row.target_box_score.technical_fouls,
-            row.target_box_score.flagrant_fouls,
+            row.box_score.points,
+            row.box_score.rebounds,
+            row.box_score.assists,
+            row.box_score.steals,
+            row.box_score.blocks,
+            row.box_score.turnovers,
+            row.box_score.three_pointers_made,
+            row.box_score.technical_fouls,
+            row.box_score.flagrant_fouls,
         ),
-        "source_lineage": [
-            (source.provider, source.provider_id, source.content_hash)
-            for source in row.source_lineage
-        ],
+        "source_version": row.source_version,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()

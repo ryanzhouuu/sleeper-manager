@@ -11,6 +11,7 @@ from sleeper_manager.integrations.nba.historical_feature_models import (
 )
 from sleeper_manager.projections.direct_baseline import ProjectionBaselineError
 from sleeper_manager.projections.live_baseline import (
+    DirectBaselineObservation,
     DirectBaselineProjectionProvider,
     HistoricalFeatureSlice,
     LiveProjectionTarget,
@@ -103,6 +104,22 @@ def _target() -> LiveProjectionTarget:
 
 def _provider(rows: tuple[HistoricalFeatureRow, ...]) -> DirectBaselineProjectionProvider:
     return DirectBaselineProjectionProvider(_StaticHistory(rows))
+
+
+def test_historical_rows_are_compacted_at_the_live_history_boundary() -> None:
+    row = _row("old", "401", NOW - timedelta(days=3), 20, 20, sleeper_id="p1")
+
+    history = _slice(row)
+
+    assert len(history.rows) == 1
+    observation = history.rows[0]
+    assert isinstance(observation, DirectBaselineObservation)
+    assert observation.player_id == "401"
+    assert observation.game_id == "old"
+    assert observation.minutes == 20
+    assert not observation.did_not_play
+    assert observation.box_score == row.target_box_score
+    assert observation.source_version
 
 
 def test_projects_snapshot_from_provider_history() -> None:

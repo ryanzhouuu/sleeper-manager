@@ -233,11 +233,14 @@ def _inputs(
     projections: tuple[LiveProjectionResult, ...] = (),
     acknowledgements: tuple[AcknowledgedDecisionEvidence, ...] = (),
     freshness_policy: PlanningFreshnessPolicy | None = None,
+    runtime_policy_version: str = "runtime-policy-v7",
 ) -> LivePlanningInputs:
     return LivePlanningInputs(
         league_profile=profile or _profile(),
         week_window=FantasyWeekWindow(1, WINDOW_START, WINDOW_END),
         freshness_policy=freshness_policy or _freshness_policy(),
+        runtime_policy_version=runtime_policy_version,
+        move_lead_time=timedelta(minutes=10),
         player_eligibility=(_eligibility("p1"), _eligibility("p2", ("C",))),
         identities=(
             _identity("p1"),
@@ -273,6 +276,7 @@ def test_complete_inputs_build_validated_state() -> None:
         ),
     )
     state = build_live_team_week_state(inputs, decision_time=NOW)
+    assert state.manager_policy_version == "runtime-policy-v7"
 
     assert not state.is_blocked
     assert state.eligibility_quality is PlanningQuality.EXACT
@@ -310,6 +314,8 @@ def test_bundle_rejects_window_profile_mismatch() -> None:
             league_profile=profile,
             week_window=stale_window,
             freshness_policy=_freshness_policy(),
+            runtime_policy_version="runtime-policy-v7",
+            move_lead_time=timedelta(minutes=10),
         )
 
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Protocol
+from typing import Protocol, cast
 
 from sleeper_manager.domain.projection import ProjectionSnapshot
 from sleeper_manager.domain.scoring import ScoringPolicy
@@ -14,10 +14,12 @@ from sleeper_manager.integrations.nba.historical_feature_models import (
 )
 from sleeper_manager.projections.direct_baseline import (
     MISSING_WARMUP_REASON,
+    DirectBaselineObservation,
     DirectFantasyPointBaseline,
     PregameProjectionRequest,
     ProjectionBaselineConfig,
     ProjectionBaselineError,
+    compact_direct_baseline_observations,
 )
 
 
@@ -44,7 +46,14 @@ class HistoricalFeatureSlice:
     dataset_version: str
     feature_schema_version: str
     source_versions: tuple[DatasetSourceVersion, ...]
-    rows: tuple[HistoricalFeatureRow, ...]
+    rows: tuple[DirectBaselineObservation | HistoricalFeatureRow, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "rows",
+            compact_direct_baseline_observations(self.rows),
+        )
 
 
 class ProjectionHistoryError(ValueError):
@@ -91,7 +100,7 @@ class DirectBaselineProjectionProvider:
                 game_id=target.game_id,
                 game_start=target.game_start,
                 available_as_of=decision_time,
-                history=history_slice.rows,
+                history=cast(tuple[DirectBaselineObservation, ...], history_slice.rows),
                 history_player_id=target.provider_player_id or target.sleeper_player_id,
                 source_versions=history_slice.source_versions,
             )
@@ -103,6 +112,7 @@ class DirectBaselineProjectionProvider:
 
 
 __all__ = (
+    "DirectBaselineObservation",
     "DirectBaselineProjectionProvider",
     "HistoricalFeatureSlice",
     "LiveProjectionTarget",

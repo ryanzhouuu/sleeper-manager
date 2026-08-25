@@ -171,6 +171,8 @@ class LivePlanningInputs:
     league_profile: LeagueProfile
     week_window: FantasyWeekWindow
     freshness_policy: PlanningFreshnessPolicy
+    runtime_policy_version: str
+    move_lead_time: timedelta
     player_eligibility: tuple[PlayerEligibilityEvidence, ...] = ()
     identities: tuple[ResolvedPlayerIdentity, ...] = ()
     schedule_results: tuple[ScheduleResourceResult, ...] = ()
@@ -182,6 +184,9 @@ class LivePlanningInputs:
     def __post_init__(self) -> None:
         if self.week_window.week != self.league_profile.fantasy_week.week:
             raise PlanningInputsError("Fantasy-week window does not match the league profile")
+        _require_text(self.runtime_policy_version, "Runtime policy version")
+        if self.move_lead_time < timedelta(0):
+            raise PlanningInputsError("Move lead time must be non-negative")
 
 
 def build_live_team_week_state(
@@ -291,7 +296,7 @@ def build_live_team_week_state(
             passed_opportunities=passed_opportunities,
             scoring_policy_version=profile.scoring.version,
             league_configuration_version=profile.configuration_fingerprint,
-            manager_policy_version=f"live-policy:{profile.mode.value}",
+            manager_policy_version=inputs.runtime_policy_version,
             projection_model_version=_combined_version(projection_versions),
             input_version="live-inputs-v1",
             freshness=_freshness_summary(inputs),
