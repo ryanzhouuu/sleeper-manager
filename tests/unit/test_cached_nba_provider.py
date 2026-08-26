@@ -14,7 +14,11 @@ from sleeper_manager.domain.nba import (
     ScheduledGame,
     SourceMetadata,
 )
-from sleeper_manager.integrations.nba.cached_provider import CachedNBAProvider
+from sleeper_manager.integrations.nba.cached_provider import (
+    AsyncCachedNBAProvider,
+    CachedNBAProvider,
+)
+from sleeper_manager.persistence.async_sqlite import AsyncSQLiteStateRepository
 from sleeper_manager.persistence.base import CachedNBARecord
 from sleeper_manager.persistence.nba_cache import SQLiteNBADataCache
 
@@ -187,3 +191,44 @@ def test_expired_cache_refresh_errors_propagate(tmp_path) -> None:
         run(provider.injuries())
 
     assert inner.injury_calls == 1
+
+
+def test_async_cache_hits_and_expired_refresh_are_fail_closed(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    async def exercise() -> None:
+        repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
+        await repository.initialize()
+        inner = _CountingNBA()
+        provider = AsyncCachedNBAProvider(inner, repository, clock=lambda: NOW)
+
+        first = await provider.injuries()
+        second = await provider.injuries()
+        assert first.records == second.records
+        assert inner.injury_calls == 1
+
+        expired = CachedNBARecord(
+            cache_key="nba:injuries",
+            provider="nba",
+            resource="injuries",
+            schema_version="1",
+            payload_json=(
+                '[{"player_id":"401","status":"questionable","detail":"ankle",'
+                '"source":{"provider":"espn","provider_id":"x",'
+                f'"retrieved_at":"{NOW.isoformat()}","source_updated_at":null,'
+                '"schema_version":"1","content_hash":null}}]'
+            ),
+            retrieved_at=NOW,
+            source_updated_at=None,
+            expires_at=NOW - timedelta(minutes=1),
+            quality=DataQualityState.FRESH,
+        )
+        await repository.put(expired)
+        inner.injury_error = RuntimeError("refresh unavailable")
+        stale_provider = AsyncCachedNBAProvider(
+            inner,
+            repository,
+            clock=lambda: NOW + timedelta(minutes=2),
+        )
+        with pytest.raises(RuntimeError, match="refresh unavailable"):
+            await stale_provider.injuries()
+
+    run(exercise())

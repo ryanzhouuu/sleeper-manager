@@ -18,7 +18,7 @@ from sleeper_manager.domain.nba import (
     ScheduledGame,
     SourceMetadata,
 )
-from sleeper_manager.persistence.base import CachedNBARecord, NBADataCache
+from sleeper_manager.persistence.base import AsyncNBADataCache, CachedNBARecord, NBADataCache
 
 RecordT = TypeVar("RecordT")
 
@@ -85,6 +85,88 @@ class CachedNBAProvider:
             return _result_from_record(cached, decode)
         result = await fetch()
         self._cache.put(
+            CachedNBARecord(
+                cache_key=cache_key,
+                provider=self._provider_name,
+                resource=resource_key.split(":", 1)[0],
+                schema_version="1",
+                payload_json=_dump_json(encode(result.records)),
+                retrieved_at=result.quality.retrieved_at,
+                source_updated_at=result.quality.source_updated_at,
+                expires_at=result.quality.expires_at,
+                quality=result.quality.state,
+                warnings=result.quality.warnings,
+                errors=result.quality.errors,
+            )
+        )
+        return result
+
+
+class AsyncCachedNBAProvider:
+    """Cloud runtime cache-through provider backed by an async state repository."""
+
+    def __init__(
+        self,
+        inner: Any,
+        cache: AsyncNBADataCache,
+        *,
+        clock: Callable[[], datetime] | None = None,
+        provider_name: str = "nba",
+    ) -> None:
+        self._inner = inner
+        self._cache = cache
+        self._clock = clock or (lambda: datetime.now(UTC))
+        self._provider_name = provider_name
+
+    async def scoreboard(self, game_date: date):  # type: ignore[no-untyped-def]
+        return await self._inner.scoreboard(game_date)
+
+    async def game_summary(self, game_id: str):  # type: ignore[no-untyped-def]
+        return await self._inner.game_summary(game_id)
+
+    async def team_roster(self, team_id: str) -> ProviderResult[tuple[ProviderPlayer, ...]]:
+        return await self._through(
+            f"team-roster:{team_id}",
+            lambda: self._inner.team_roster(team_id),
+            _encode_players,
+            _decode_players,
+        )
+
+    async def team_schedule(
+        self, team_id: str, season: int
+    ) -> ProviderResult[tuple[ScheduledGame, ...]]:
+        return await self._through(
+            f"team-schedule:{team_id}:{season}",
+            lambda: self._inner.team_schedule(team_id, season),
+            _encode_games,
+            _decode_games,
+        )
+
+    async def injuries(self) -> ProviderResult[tuple[PlayerAvailability, ...]]:
+        return await self._through(
+            "injuries",
+            lambda: self._inner.injuries(),
+            _encode_availability,
+            _decode_availability,
+        )
+
+    async def _through(
+        self,
+        resource_key: str,
+        fetch: Callable[[], Awaitable[ProviderResult[tuple[RecordT, ...]]]],
+        encode: Callable[[tuple[RecordT, ...]], list[dict[str, Any]]],
+        decode: Callable[[list[dict[str, Any]]], tuple[RecordT, ...]],
+    ) -> ProviderResult[tuple[RecordT, ...]]:
+        now = self._clock()
+        cache_key = f"{self._provider_name}:{resource_key}"
+        cached = await self._cache.get(cache_key, now=now)
+        if cached is not None and cached.quality in {
+            DataQualityState.FRESH,
+            DataQualityState.PARTIAL,
+        }:
+            return _result_from_record(cached, decode)
+        result = await fetch()
+        await self._cache.put(
             CachedNBARecord(
                 cache_key=cache_key,
                 provider=self._provider_name,
@@ -259,4 +341,4 @@ def _decode_availability(payload: list[dict[str, Any]]) -> tuple[PlayerAvailabil
     )
 
 
-__all__ = ("CachedNBAProvider",)
+__all__ = ("AsyncCachedNBAProvider", "CachedNBAProvider")
