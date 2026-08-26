@@ -6,10 +6,18 @@ lineup plans while private sibling modules own the extracted implementation.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import timedelta
 
+from sleeper_manager.decisions._weekly_plan_inputs import (
+    fixed_assignments,
+    future_opportunities,
+    next_actionable_batch,
+    opportunity_id,
+    option_candidates,
+    scenario_input,
+)
 from sleeper_manager.decisions._weekly_plan_models import (
     DEFAULT_MOVE_LEAD_TIME,
     WEEKLY_PLANNER_VERSION,
@@ -36,13 +44,11 @@ from sleeper_manager.decisions.simulation import (
     stable_scenario_seed,
 )
 from sleeper_manager.domain.planning import (
-    FixedSlot,
     GameOpportunity,
     PassedOpportunity,
     PlanConfidence,
     PlanDistributionSummary,
     PlannedAssignment,
-    PlanningGameStatus,
     PlanningQuality,
     PlanningReasonCode,
     PlanStatus,
@@ -70,16 +76,16 @@ def score_weekly_options(
         reasons = ", ".join(reason.value for reason in state.blocking_reasons)
         raise WeeklyPlanError(f"Cannot score a blocked team-week state: {reasons}")
 
-    batch = _next_actionable_batch(state)
+    batch = next_actionable_batch(state)
     if batch is None:
         raise WeeklyPlanError("No actionable pre-tipoff opportunity remains")
     batch_start = batch[0].scheduled_start
-    future = _future_opportunities(state, batch_start)
-    fixed_assignments = _fixed_assignments(state.fixed_slots)
+    future = future_opportunities(state, batch_start)
+    fixed_assignment_candidates = fixed_assignments(state.fixed_slots)
     open_slots: tuple[StarterSlot, ...] = tuple(
         slot for slot in state.starter_slots if slot.index in state.open_slot_indices
     )
-    scenario_inputs = tuple(_scenario_input(opportunity) for opportunity in (*batch, *future))
+    scenario_inputs = tuple(scenario_input(opportunity) for opportunity in (*batch, *future))
     seed = stable_scenario_seed(
         policy_config.seed,
         league_id=state.league_id,
@@ -93,34 +99,34 @@ def score_weekly_options(
         count=policy_config.scenario_count,
         seed=seed,
     )
-    future_inputs = tuple(_scenario_input(opportunity) for opportunity in future)
+    future_inputs = tuple(scenario_input(opportunity) for opportunity in future)
     continuation_assignments = rollout_scenario_assignments(
-        fixed_assignments=fixed_assignments,
+        fixed_assignments=fixed_assignment_candidates,
         remaining_inputs=future_inputs,
         open_slots=tuple(slot.position for slot in open_slots),
         scenarios=scenarios,
         slot_indices=tuple(slot.index for slot in open_slots),
     )
     baseline = _mean_terminal_value(
-        fixed_assignments=fixed_assignments,
+        fixed_assignments=fixed_assignment_candidates,
         continuation_assignments=continuation_assignments,
     )
     perfect_information_bound = _terminal_value(
-        fixed_assignments=fixed_assignments,
-        remaining_inputs=tuple(_scenario_input(opportunity) for opportunity in (*batch, *future)),
+        fixed_assignments=fixed_assignment_candidates,
+        remaining_inputs=tuple(scenario_input(opportunity) for opportunity in (*batch, *future)),
         open_slots=open_slots,
         scenarios=scenarios,
     )
-    option_candidates = _option_candidates(batch, open_slots)
-    assignments = _enumerate_current_assignments(option_candidates, open_slots)
+    candidates = option_candidates(batch, open_slots)
+    assignments = _enumerate_current_assignments(candidates, open_slots)
     tie_key = _tie_key(state)
     evaluated = tuple(
         _EvaluatedAssignment(
             assignment,
             _assignment_terminal_value(
                 assignment,
-                candidates=option_candidates,
-                fixed_assignments=fixed_assignments,
+                candidates=candidates,
+                fixed_assignments=fixed_assignment_candidates,
                 future_inputs=future_inputs,
                 open_slots=open_slots,
                 scenarios=scenarios,
@@ -152,18 +158,18 @@ def score_weekly_options(
     evaluations = _placement_evaluations(
         batch,
         open_slots,
-        option_candidates,
+        candidates,
         evaluated,
         baseline,
         tie_key=tie_key,
         tie_tolerance=policy_config.tie_tolerance,
     )
-    observed_result = _observed_assignment_result(state, open_slots, option_candidates)
+    observed_result = _observed_assignment_result(state, open_slots, candidates)
     observed_value = (
         _assignment_terminal_value(
             observed_result,
-            candidates=option_candidates,
-            fixed_assignments=fixed_assignments,
+            candidates=candidates,
+            fixed_assignments=fixed_assignment_candidates,
             future_inputs=future_inputs,
             open_slots=open_slots,
             scenarios=scenarios,
@@ -206,7 +212,7 @@ def build_weekly_plan(
             planner_version,
         )
 
-    batch = _next_actionable_batch(state)
+    batch = next_actionable_batch(state)
     if batch is None:
         return _static_plan(
             state,
@@ -216,7 +222,7 @@ def build_weekly_plan(
             (),
             planner_version,
         )
-    future = _future_opportunities(state, batch[0].scheduled_start)
+    future = future_opportunities(state, batch[0].scheduled_start)
     if any(opportunity.projection is None for opportunity in (*batch, *future)):
         return _static_plan(
             state,
@@ -363,7 +369,7 @@ def _schedule_assumptions(
 ) -> tuple[str, ...]:
     assumptions = [
         f"game {opportunity.game_id} assumed to start {opportunity.scheduled_start.isoformat()}"
-        for opportunity in sorted(batch, key=_opportunity_id)
+        for opportunity in sorted(batch, key=opportunity_id)
     ]
     assumptions.append(f"{len(future)} later opportunities remain replannable")
     return tuple(assumptions)
@@ -371,31 +377,6 @@ def _schedule_assumptions(
 
 def _passed_sort_key(passed: PassedOpportunity) -> tuple[str, str]:
     return passed.player_id, passed.game_id
-
-
-def _option_candidates(
-    batch: tuple[GameOpportunity, ...],
-    open_slots: tuple[StarterSlot, ...],
-) -> tuple[AssignmentCandidate, ...]:
-    candidates: list[AssignmentCandidate] = []
-    for opportunity in batch:
-        assert opportunity.projection is not None
-        for slot in open_slots:
-            slot_index = slot.index
-            if slot_index not in opportunity.eligible_slot_indices:
-                continue
-            candidate_id = f"{_opportunity_id(opportunity)}@slot-{slot_index}"
-            candidates.append(
-                AssignmentCandidate(
-                    candidate_id=candidate_id,
-                    player_id=opportunity.sleeper_player_id,
-                    score=opportunity.projection.distribution.expected_value,
-                    eligible_positions=opportunity.eligible_positions,
-                    game_id=opportunity.game_id,
-                    eligible_slot_indices=(slot_index,),
-                )
-            )
-    return tuple(candidates)
 
 
 def _mean_terminal_value(
@@ -527,7 +508,7 @@ def _placement_evaluations(
     tie_key: AssignmentTieKey,
     tie_tolerance: float,
 ) -> tuple[PlacementEvaluation, ...]:
-    opportunities = {_opportunity_id(opportunity): opportunity for opportunity in batch}
+    opportunities = {opportunity_id(opportunity): opportunity for opportunity in batch}
     slots = {slot.index: slot for slot in open_slots}
     results: list[PlacementEvaluation] = []
     for candidate in candidates:
@@ -545,8 +526,8 @@ def _placement_evaluations(
             tie_key=tie_key,
             tie_tolerance=tie_tolerance,
         )[0]
-        opportunity_id = candidate.candidate_id.rsplit("@slot-", 1)[0]
-        opportunity = opportunities[opportunity_id]
+        source_opportunity_id = candidate.candidate_id.rsplit("@slot-", 1)[0]
+        opportunity = opportunities[source_opportunity_id]
         expected_terminal = best.expected_terminal_value
         results.append(
             PlacementEvaluation(
@@ -698,86 +679,6 @@ def _retained_observed_count(assignments: tuple[SlotAssignment, ...], state: Tea
         assignment.player_id is not None
         and assignment.player_id == observed.get(assignment.slot_index)
         for assignment in assignments
-    )
-
-
-def _next_actionable_batch(state: TeamWeekState) -> tuple[GameOpportunity, ...] | None:
-    passed = {(item.player_id, item.game_id) for item in state.passed_opportunities}
-    candidates = tuple(
-        opportunity
-        for opportunity in state.opportunities
-        if opportunity.status is PlanningGameStatus.SCHEDULED
-        and opportunity.scheduled_start > state.decision_time
-        and opportunity.rostered_at_tipoff is True
-        and (opportunity.sleeper_player_id, opportunity.game_id) not in passed
-    )
-    if not candidates:
-        return None
-    batch_start = min(opportunity.scheduled_start for opportunity in candidates)
-    return tuple(
-        sorted(
-            (
-                opportunity
-                for opportunity in candidates
-                if opportunity.scheduled_start == batch_start
-            ),
-            key=_opportunity_id,
-        )
-    )
-
-
-def _future_opportunities(
-    state: TeamWeekState, batch_start: datetime
-) -> tuple[GameOpportunity, ...]:
-    passed = {(item.player_id, item.game_id) for item in state.passed_opportunities}
-    return tuple(
-        sorted(
-            (
-                opportunity
-                for opportunity in state.opportunities
-                if opportunity.scheduled_start > batch_start
-                and opportunity.status in (PlanningGameStatus.SCHEDULED, PlanningGameStatus.ACTIVE)
-                and opportunity.rostered_at_tipoff is True
-                and (opportunity.sleeper_player_id, opportunity.game_id) not in passed
-            ),
-            key=_opportunity_id,
-        )
-    )
-
-
-def _scenario_input(opportunity: GameOpportunity) -> ScenarioInput:
-    if opportunity.projection is None:
-        raise WeeklyPlanError(
-            f"Missing projection for {opportunity.sleeper_player_id}:{opportunity.game_id}"
-        )
-    return ScenarioInput(
-        candidate_id=_opportunity_id(opportunity),
-        player_id=opportunity.sleeper_player_id,
-        game_id=opportunity.game_id,
-        eligible_positions=opportunity.eligible_positions,
-        projection=opportunity.projection,
-        eligible_slot_indices=opportunity.eligible_slot_indices,
-    )
-
-
-def _fixed_assignments(fixed_slots: Iterable[FixedSlot]) -> tuple[AssignmentCandidate, ...]:
-    return tuple(
-        AssignmentCandidate(
-            candidate_id=f"fixed:{fixed.slot_index}:{fixed.player_id}:{fixed.game_id}",
-            player_id=fixed.player_id,
-            score=fixed.accepted_fantasy_score,
-            eligible_positions=(fixed.slot_position,),
-            game_id=fixed.game_id,
-            eligible_slot_indices=(fixed.slot_index,),
-        )
-        for fixed in fixed_slots
-    )
-
-
-def _opportunity_id(opportunity: GameOpportunity) -> str:
-    return (
-        f"{opportunity.sleeper_player_id}:{opportunity.game_id}:"
-        f"{opportunity.membership_segment or opportunity.roster_id}"
     )
 
 
