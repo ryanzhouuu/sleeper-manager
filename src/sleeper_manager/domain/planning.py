@@ -21,6 +21,7 @@ class PlanningGameStatus(StrEnum):
     FINAL = "final"
     POSTPONED = "postponed"
     CANCELED = "canceled"
+    UNKNOWN = "unknown"
 
 
 class PlanningQuality(StrEnum):

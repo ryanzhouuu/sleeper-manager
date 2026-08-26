@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
+from hashlib import sha256
 from typing import Any, Protocol
 
 from sleeper_manager.domain.league import LeagueProfile
@@ -80,6 +82,8 @@ async def collect_live_planning_inputs(
     freshness_policy: PlanningFreshnessPolicy,
     runtime_policy_version: str,
     move_lead_time: timedelta,
+    projection_history_version: str | None = None,
+    projection_history_retrieved_at: datetime | None = None,
     acknowledgement_source: AcknowledgementSource | None = None,
     mapping_overrides: Mapping[str, str] | None = None,
     clock: Callable[[], datetime] | None = None,
@@ -163,6 +167,10 @@ async def collect_live_planning_inputs(
             projections=tuple(projections),
             acknowledgements=acknowledgements,
             identity_quality_reports=tuple(identity_reports),
+            catalog_version=_catalog_version(catalog),
+            catalog_retrieved_at=catalog_retrieved_at,
+            projection_history_version=projection_history_version,
+            projection_history_retrieved_at=projection_history_retrieved_at,
         )
     except PlanningInputsError as error:
         raise PlanningCollectionError(str(error)) from error
@@ -181,6 +189,11 @@ def _manager_roster(profile: LeagueProfile) -> Roster:
             f"Manager roster {profile.manager_roster_id} is missing from the league profile"
         )
     return roster
+
+
+def _catalog_version(catalog: Mapping[str, Mapping[str, Any]]) -> str:
+    encoded = json.dumps(catalog, sort_keys=True, separators=(",", ":"), default=str).encode()
+    return f"sleeper-catalog-v1-{sha256(encoded).hexdigest()[:12]}"
 
 
 def _sleeper_identities(

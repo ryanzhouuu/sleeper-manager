@@ -297,6 +297,18 @@ def test_complete_inputs_build_validated_state() -> None:
     assert state.scoring_policy_version.startswith("scoring-policy-v1-")
 
 
+def test_unknown_games_are_not_treated_as_scheduled() -> None:
+    unknown = _game("g-unknown", status=GameStatus.UNKNOWN)
+    inputs = _inputs(schedule_results=(_schedule_result(unknown, _game()),))
+    state = build_live_team_week_state(inputs, decision_time=NOW)
+    unknown_opportunity = next(
+        opportunity for opportunity in state.opportunities if opportunity.game_id == "g-unknown"
+    )
+
+    assert unknown_opportunity.status is PlanningGameStatus.UNKNOWN
+    assert unknown_opportunity not in state.remaining_opportunities
+
+
 def test_week_window_scopes_games_to_the_fantasy_week() -> None:
     inside = _game()
     outside = _game("g9", start=WINDOW_END + timedelta(days=1))

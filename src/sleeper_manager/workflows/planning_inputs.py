@@ -180,6 +180,10 @@ class LivePlanningInputs:
     projections: tuple[LiveProjectionResult, ...] = ()
     acknowledgements: tuple[AcknowledgedDecisionEvidence, ...] = ()
     identity_quality_reports: tuple[DataQualityReport, ...] = ()
+    catalog_version: str | None = None
+    catalog_retrieved_at: datetime | None = None
+    projection_history_version: str | None = None
+    projection_history_retrieved_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if self.week_window.week != self.league_profile.fantasy_week.week:
@@ -187,6 +191,20 @@ class LivePlanningInputs:
         _require_text(self.runtime_policy_version, "Runtime policy version")
         if self.move_lead_time < timedelta(0):
             raise PlanningInputsError("Move lead time must be non-negative")
+        if (self.catalog_version is None) != (self.catalog_retrieved_at is None):
+            raise PlanningInputsError(
+                "Catalog version and retrieval time must be provided together"
+            )
+        if (self.projection_history_version is None) != (
+            self.projection_history_retrieved_at is None
+        ):
+            raise PlanningInputsError(
+                "Projection history version and retrieval time must be provided together"
+            )
+        if self.catalog_retrieved_at is not None:
+            _require_aware(self.catalog_retrieved_at, "Catalog retrieval")
+        if self.projection_history_retrieved_at is not None:
+            _require_aware(self.projection_history_retrieved_at, "Projection history retrieval")
 
 
 def build_live_team_week_state(
@@ -588,7 +606,7 @@ def _planning_status(game: ScheduledGame) -> PlanningGameStatus:
         GameStatus.FINAL: PlanningGameStatus.FINAL,
         GameStatus.POSTPONED: PlanningGameStatus.POSTPONED,
         GameStatus.CANCELED: PlanningGameStatus.CANCELED,
-        GameStatus.UNKNOWN: PlanningGameStatus.SCHEDULED,
+        GameStatus.UNKNOWN: PlanningGameStatus.UNKNOWN,
     }[game.status]
 
 
@@ -745,6 +763,27 @@ def _freshness_summary(inputs: LivePlanningInputs) -> FreshnessSummary:
         )
         for report in inputs.identity_quality_reports
     )
+    if inputs.catalog_version is not None and inputs.catalog_retrieved_at is not None:
+        sources.append(
+            SourceLineage(
+                source="sleeper-player-catalog",
+                version=inputs.catalog_version,
+                available_as_of=inputs.catalog_retrieved_at,
+                retrieved_at=inputs.catalog_retrieved_at,
+            )
+        )
+    if (
+        inputs.projection_history_version is not None
+        and inputs.projection_history_retrieved_at is not None
+    ):
+        sources.append(
+            SourceLineage(
+                source="projection-history",
+                version=inputs.projection_history_version,
+                available_as_of=inputs.projection_history_retrieved_at,
+                retrieved_at=inputs.projection_history_retrieved_at,
+            )
+        )
     return FreshnessSummary(tuple(sources))
 
 
