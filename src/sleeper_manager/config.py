@@ -1,3 +1,10 @@
+"""Environment settings and the optional local manager-policy TOML file.
+
+`Settings` is the local CLI surface (`STATE_BACKEND` is sqlite-only). The
+Cloudflare Worker reads destination URLs and the D1 binding from its env, not
+this class. Missing policy files resolve to `ManagerPolicy` defaults.
+"""
+
 import json
 import tomllib
 from hashlib import sha256
@@ -45,6 +52,7 @@ class ManagerPolicy(BaseModel):
 
     @property
     def version(self) -> str:
+        """Stable 16-hex digest of the canonical JSON payload."""
         payload = self.model_dump(mode="json")
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         return sha256(encoded).hexdigest()[:16]
@@ -70,6 +78,11 @@ _PRESET_VALUES: dict[PolicyPreset, dict[str, Any]] = {
 
 
 def load_manager_policy(path: Path) -> ManagerPolicy:
+    """Load policy TOML, applying preset defaults then file overrides.
+
+    Missing files return defaults. Unknown presets raise ValueError. Extra keys
+    inside known tables are rejected.
+    """
     if not path.exists():
         return ManagerPolicy()
 

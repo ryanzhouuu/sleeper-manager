@@ -1,3 +1,5 @@
+"""Build local CLI notification senders from `Settings`."""
+
 from sleeper_manager.config import Settings
 from sleeper_manager.notifications.discord import DiscordSender
 from sleeper_manager.notifications.dispatcher import NotificationDispatcher
@@ -5,6 +7,7 @@ from sleeper_manager.notifications.ntfy import NtfySender
 
 
 def build_notification_dispatcher(settings: Settings) -> NotificationDispatcher:
+    """Require at least one of ntfy or Discord. Raises ValueError when neither is set."""
     if not settings.notifications_configured:
         raise ValueError("At least one notification destination is required")
     ntfy = (

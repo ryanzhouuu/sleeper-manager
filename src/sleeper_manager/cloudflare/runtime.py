@@ -1,3 +1,9 @@
+"""Compose D1, notifications, and planning collection for one scheduled wake.
+
+`run_scheduled` returns a blocked summary dict when the acknowledgement URL or
+notification destinations are missing instead of raising.
+"""
+
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -29,6 +35,7 @@ def _value(env: Any, name: str, default: str = "") -> str:
 
 
 def build_dispatcher(env: Any, fetcher: Any) -> NotificationDispatcher:
+    """Build Worker notification senders. Raises ValueError when none are configured."""
     ntfy_topic = _value(env, "NTFY_TOPIC")
     discord_url = _value(env, "DISCORD_WEBHOOK_URL")
     if not ntfy_topic and not discord_url:
@@ -59,6 +66,10 @@ async def run_scheduled(
     scheduled_at: datetime | None = None,
     correlation_id: str | None = None,
 ) -> dict[str, Any]:
+    """Run one Worker wake against D1.
+
+    Prefer `scheduled_at`, then the Cron controller, then UTC now.
+    """
     now = scheduled_at or scheduled_at_from_controller(controller) or datetime.now(UTC)
     correlation = correlation_id or uuid4().hex
     acknowledgement_base_url = _value(env, "ACKNOWLEDGEMENT_BASE_URL").rstrip("?")

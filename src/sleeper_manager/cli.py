@@ -1,3 +1,11 @@
+"""Local operator CLI for Sleeper Manager.
+
+Commands here use `Settings` and SQLite. Cloudflare Cron and `/ack` enter
+through `sleeper_manager.cloudflare.worker.Default`, not this module.
+`main` returns 0 on success, 1 on operational failure, and 2 on config or
+input errors. Unknown commands fail closed via argparse.
+"""
+
 import argparse
 import asyncio
 import json
@@ -53,6 +61,7 @@ from sleeper_manager.workflows.notification_loop import (
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the required-subcommand parser. `parse_args` raises SystemExit on bad input."""
     parser = argparse.ArgumentParser(description="Sleeper fantasy basketball decision assistant")
     parser.add_argument("--version", action="version", version=__version__)
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -312,6 +321,7 @@ async def _test_notification(settings: Settings) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Dispatch one operator command. `argv` None reads `sys.argv`."""
     args = build_parser().parse_args(argv)
     if args.command == "check-config":
         settings = Settings()

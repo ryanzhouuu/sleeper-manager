@@ -1,3 +1,9 @@
+"""Cloudflare Worker fetch and Cron entrypoint.
+
+`fetch` serves `/health` and `/ack` only. `scheduled` runs one due-work wake
+and prints the JSON summary. Bindings and secrets come from the Worker env.
+"""
+
 import json
 from urllib.parse import parse_qs, urlparse
 
@@ -25,6 +31,8 @@ def _query_values(url: str) -> dict[str, str]:
 
 
 class Default(_WorkerEntrypoint):  # type: ignore[misc]
+    """Workers SDK entry: acknowledgement HTTP plus the five-minute Cron."""
+
     async def fetch(self, request):  # type: ignore[no-untyped-def]
         parsed = urlparse(request.url)
         if parsed.path == "/health":

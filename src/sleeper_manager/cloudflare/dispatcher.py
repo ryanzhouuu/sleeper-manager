@@ -1,3 +1,9 @@
+"""Claim due scheduled work and run at most one planning cycle per wake.
+
+Loads runtime policy, ensures today's daily row, then claims. Provider collection
+runs only after a successful claim. `scheduled_at` must be timezone-aware.
+"""
+
 from __future__ import annotations
 
 import json
@@ -44,6 +50,8 @@ _WORKFLOW_STATUS = {
 
 
 class PlanningCollector(Protocol):
+    """Collects live planning evidence for one scheduled wake."""
+
     async def __call__(
         self,
         *,
@@ -64,6 +72,7 @@ async def dispatch_due_work(
     plan_policy: WeeklyPlanPolicyConfig | None = None,
     clock: Callable[[], datetime] | None = None,
 ) -> ScheduledRunSummary:
+    """Dispatch claimed daily, pre-tipoff, and delivery-retry rows for this wake."""
     if scheduled_at.tzinfo is None or scheduled_at.utcoffset() is None:
         raise ValueError("Scheduled time must be timezone-aware")
     tick = clock or (lambda: scheduled_at)
@@ -542,6 +551,7 @@ def _work_id(dedupe_key: str) -> str:
 
 
 def scheduled_at_from_controller(controller: object | None) -> datetime | None:
+    """Read Cron `scheduledTime` as UTC. Values are milliseconds since epoch."""
     if controller is None:
         return None
     value = getattr(controller, "scheduledTime", None)

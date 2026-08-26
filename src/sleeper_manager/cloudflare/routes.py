@@ -1,3 +1,9 @@
+"""HTTP acknowledgement route for `/ack`.
+
+Hashes the raw token before lookup. Maps `AcknowledgementOutcome` to status
+codes without exposing stored hashes.
+"""
+
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -17,6 +23,7 @@ class RouteResponse:
 
 
 def parse_action(value: str | None) -> AcknowledgementAction | None:
+    """Accept `lock`/`locked` and `pass`/`passed`. Anything else is invalid."""
     if value is None:
         return None
     normalized = value.strip().casefold()
@@ -33,6 +40,7 @@ async def acknowledge(
     *,
     now: datetime | None = None,
 ) -> RouteResponse:
+    """Consume `token` and `action` query values. Empty or oversized tokens are 400."""
     raw_token = values.get("token", "")
     action = parse_action(values.get("action"))
     if not raw_token or len(raw_token) > 256 or action is None:
