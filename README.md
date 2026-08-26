@@ -66,6 +66,7 @@ Settings load from environment variables or the ignored `.env` file.
 | `SLEEPER_USER_ID` | Manager account used to identify the roster | Required for live commands |
 | `TIMEZONE` | Local display and scheduling timezone | `America/Chicago` |
 | `MANAGER_POLICY_PATH` | Manager policy TOML file | `.local/policy.toml` |
+| `STATE_BACKEND` | Local persistence backend | `sqlite` |
 | `SQLITE_PATH` | Local state and NBA cache database | `.local/state.db` |
 | `NTFY_TOPIC` | Enables ntfy delivery | Empty |
 | `NTFY_BASE_URL` | ntfy service root | `https://ntfy.sh` |
@@ -75,6 +76,8 @@ Settings load from environment variables or the ignored `.env` file.
 
 At least one of `NTFY_TOPIC` or `DISCORD_WEBHOOK_URL` is required for notification commands.
 `ACKNOWLEDGEMENT_BASE_URL` is also required for interactive notifications and scheduled work.
+Local commands persist in SQLite; only `STATE_BACKEND=sqlite` is supported. The Cloudflare
+Worker uses D1 and does not read this variable.
 
 ## Commands
 
