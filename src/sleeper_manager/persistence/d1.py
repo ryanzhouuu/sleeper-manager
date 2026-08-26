@@ -1,10 +1,7 @@
-import json
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
-from hashlib import sha256
 from typing import Any
 
-from sleeper_manager.domain.nba import DataQualityState
 from sleeper_manager.domain.planning import AcknowledgedDecisionEvidence
 from sleeper_manager.persistence.acknowledgements import (
     ACKNOWLEDGED_DECISIONS_QUERY,
@@ -34,163 +31,65 @@ from sleeper_manager.persistence.base import (
     ScheduledWorkRecord,
     ScheduledWorkStatus,
 )
-
-D1_SCHEMA = """
-PRAGMA foreign_keys = ON;
-
-CREATE TABLE IF NOT EXISTS league_profiles (
-    league_id TEXT PRIMARY KEY,
-    fingerprint TEXT NOT NULL,
-    retrieved_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS league_snapshots (
-    snapshot_id TEXT PRIMARY KEY,
-    league_id TEXT NOT NULL,
-    fantasy_week INTEGER NOT NULL,
-    payload_json TEXT NOT NULL,
-    retrieved_at TEXT NOT NULL,
-    UNIQUE (league_id, fantasy_week)
-);
-
-CREATE TABLE IF NOT EXISTS data_freshness (
-    resource TEXT PRIMARY KEY,
-    retrieved_at TEXT NOT NULL,
-    expires_at TEXT,
-    quality TEXT NOT NULL,
-    warnings_json TEXT NOT NULL,
-    errors_json TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS recommendations (
-    recommendation_id TEXT PRIMARY KEY,
-    idempotency_key TEXT NOT NULL UNIQUE,
-    league_id TEXT NOT NULL,
-    fantasy_week INTEGER NOT NULL,
-    player_id TEXT NOT NULL,
-    game_id TEXT,
-    decision_type TEXT NOT NULL,
-    title TEXT NOT NULL,
-    message TEXT NOT NULL,
-    deadline TEXT,
-    policy_version TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    status TEXT NOT NULL,
-    acknowledged_action TEXT,
-    acknowledged_at TEXT,
-    trace_json TEXT NOT NULL,
-    revision INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS recommendations_revision_idx
-ON recommendations (league_id, fantasy_week, decision_type, revision);
-
-CREATE TABLE IF NOT EXISTS delivery_attempts (
-    delivery_id TEXT PRIMARY KEY,
-    recommendation_id TEXT NOT NULL,
-    provider TEXT NOT NULL,
-    attempt_number INTEGER NOT NULL,
-    attempted_at TEXT NOT NULL,
-    succeeded INTEGER NOT NULL,
-    error TEXT,
-    FOREIGN KEY (recommendation_id) REFERENCES recommendations(recommendation_id)
-);
-
-CREATE INDEX IF NOT EXISTS delivery_attempts_recommendation_idx
-    ON delivery_attempts (recommendation_id, succeeded);
-
-CREATE TABLE IF NOT EXISTS action_tokens (
-    token_hash TEXT PRIMARY KEY,
-    recommendation_id TEXT NOT NULL,
-    action TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    used_at TEXT,
-    FOREIGN KEY (recommendation_id) REFERENCES recommendations(recommendation_id)
-);
-
-CREATE TABLE IF NOT EXISTS acknowledgements (
-    acknowledgement_id TEXT PRIMARY KEY,
-    recommendation_id TEXT NOT NULL UNIQUE,
-    action TEXT NOT NULL,
-    acknowledged_at TEXT NOT NULL,
-    token_hash TEXT NOT NULL,
-    FOREIGN KEY (recommendation_id) REFERENCES recommendations(recommendation_id),
-    FOREIGN KEY (token_hash) REFERENCES action_tokens(token_hash)
-);
-
-CREATE TABLE IF NOT EXISTS lock_acknowledgements (
-    recommendation_id TEXT PRIMARY KEY,
-    player_id TEXT NOT NULL,
-    acknowledged_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS recommendations_league_week_decision_status_idx
-ON recommendations (league_id, fantasy_week, decision_type, status);
-
-CREATE TABLE IF NOT EXISTS runtime_policy (
-    singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
-    version TEXT NOT NULL UNIQUE,
-    payload_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS nba_cache (
-    cache_key TEXT PRIMARY KEY,
-    provider TEXT NOT NULL,
-    resource TEXT NOT NULL,
-    schema_version TEXT NOT NULL,
-    payload_json TEXT NOT NULL,
-    retrieved_at TEXT NOT NULL,
-    source_updated_at TEXT,
-    expires_at TEXT,
-    quality TEXT NOT NULL,
-    warnings_json TEXT NOT NULL,
-    errors_json TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS projection_observations (
-    history_version TEXT NOT NULL,
-    player_id TEXT NOT NULL,
-    game_id TEXT NOT NULL,
-    game_start TEXT NOT NULL,
-    outcome_finalized_at TEXT,
-    minutes REAL,
-    started INTEGER NOT NULL,
-    did_not_play INTEGER NOT NULL,
-    box_score_json TEXT NOT NULL,
-    source_version TEXT NOT NULL,
-    PRIMARY KEY (history_version, player_id, game_id)
-);
-
-CREATE INDEX IF NOT EXISTS projection_observations_version_start_idx
-ON projection_observations (history_version, game_start, player_id);
-
-CREATE TABLE IF NOT EXISTS scheduled_work (
-    work_id TEXT PRIMARY KEY,
-    dedupe_key TEXT NOT NULL UNIQUE,
-    kind TEXT NOT NULL CHECK (kind IN ('daily', 'pre_tipoff', 'delivery_retry')),
-    due_at TEXT NOT NULL,
-    status TEXT NOT NULL CHECK (
-        status IN ('pending', 'running', 'retry', 'completed', 'canceled')
-    ),
-    local_day TEXT,
-    game_id TEXT,
-    recommendation_id TEXT,
-    deadline TEXT,
-    lease_expires_at TEXT,
-    attempt_count INTEGER NOT NULL DEFAULT 0,
-    correlation_id TEXT,
-    failure_category TEXT,
-    terminal_summary_json TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    FOREIGN KEY (recommendation_id) REFERENCES recommendations(recommendation_id)
-);
-
-CREATE INDEX IF NOT EXISTS scheduled_work_due_idx
-ON scheduled_work (status, due_at, lease_expires_at);
-"""
+from sleeper_manager.persistence.rows import (
+    acknowledgement_id,
+    cached_nba_as_of,
+    cached_nba_from_mapping,
+    delivery_claim_id,
+    freshness_from_mapping,
+    freshness_insert_params,
+    nba_cache_put_params,
+    projection_from_mapping,
+    projection_observation_params,
+    recommendation_from_mapping,
+    recommendation_insert_params,
+    require_terminal_scheduled_status,
+    runtime_policy_from_mapping,
+    scheduled_work_from_mapping,
+    scheduled_work_values,
+    snapshot_from_mapping,
+    snapshot_insert_params,
+)
+from sleeper_manager.persistence.statements import (
+    CANCEL_EXPIRED_SCHEDULED_WORK_SQL,
+    CLAIM_DELIVERY_SQL,
+    CLAIM_DUE_WORK_SQL,
+    CONSUME_ACKNOWLEDGEMENT_INSERT_SQL,
+    CONSUME_LOCK_ACK_SQL,
+    CONSUME_RECOMMENDATION_ACK_SQL,
+    CONSUME_TOKEN_MARK_USED_SQL,
+    D1_SCHEMA,
+    DELIVERY_CLAIM_PROVIDER,
+    EXPIRE_RECOMMENDATIONS_SQL,
+    FINISH_SCHEDULED_WORK_SQL,
+    HAS_SUCCESSFUL_DELIVERY_SQL,
+    INSERT_DELIVERY_ATTEMPT_SQL,
+    INSERT_OR_IGNORE_ACTION_TOKEN_SQL,
+    INSERT_RECOMMENDATION_SQL,
+    IS_LOCKED_SQL,
+    LIST_PENDING_RECOMMENDATIONS_SQL,
+    LIST_SCHEDULED_WORK_SQL,
+    LOAD_ACTION_TOKEN_ID_SQL,
+    LOAD_ACTION_TOKEN_SQL,
+    LOAD_DATA_FRESHNESS_SQL,
+    LOAD_LEAGUE_SNAPSHOT_SQL,
+    LOAD_NBA_CACHE_SQL,
+    LOAD_PROJECTION_OBSERVATIONS_SQL,
+    LOAD_RECOMMENDATION_SQL,
+    LOAD_RUNTIME_POLICY_SQL,
+    NEXT_DELIVERY_ATTEMPT_SQL,
+    RELEASE_DELIVERY_CLAIM_SQL,
+    SUPERSEDE_RECOMMENDATION_SQL,
+    UPSERT_DATA_FRESHNESS_SQL,
+    UPSERT_LEAGUE_SNAPSHOT_SQL,
+    UPSERT_LOCK_ACKNOWLEDGEMENT_SQL,
+    UPSERT_NBA_CACHE_SQL,
+    UPSERT_PROJECTION_OBSERVATION_SQL,
+    UPSERT_RUNTIME_POLICY_SQL,
+    UPSERT_SCHEDULED_WORK_SQL,
+    projection_observation_filters,
+    scheduled_work_filters,
+)
 
 _MISSING = object()
 
@@ -268,172 +167,43 @@ class D1StateRepository(AsyncRuntimeStateRepository):
         return int(str(changes))
 
     @staticmethod
-    def _recommendation(row: Mapping[str, Any]) -> RecommendationRecord:
-        return RecommendationRecord(
-            recommendation_id=str(row["recommendation_id"]),
-            idempotency_key=str(row["idempotency_key"]),
-            league_id=str(row["league_id"]),
-            fantasy_week=int(row["fantasy_week"]),
-            player_id=str(row["player_id"]),
-            game_id=str(row["game_id"]) if row.get("game_id") is not None else None,
-            decision_type=str(row["decision_type"]),
-            title=str(row["title"]),
-            message=str(row["message"]),
-            deadline=(
-                datetime.fromisoformat(str(row["deadline"])) if row.get("deadline") else None
-            ),
-            policy_version=str(row["policy_version"]),
-            created_at=datetime.fromisoformat(str(row["created_at"])),
-            status=RecommendationStatus(str(row["status"])),
-            acknowledged_action=(
-                AcknowledgementAction(str(row["acknowledged_action"]))
-                if row.get("acknowledged_action")
-                else None
-            ),
-            acknowledged_at=(
-                datetime.fromisoformat(str(row["acknowledged_at"]))
-                if row.get("acknowledged_at")
-                else None
-            ),
-            trace_json=str(row.get("trace_json", "{}")),
-            revision=int(row.get("revision", 0)),
-        )
+    def _mapping(row: object) -> Mapping[str, Any]:
+        if isinstance(row, Mapping):
+            return row
+        raise AcknowledgementQueryError("unexpected D1 result envelope")
 
     async def save_league_snapshot(self, snapshot: LeagueSnapshotRecord) -> None:
-        await self._run(
-            """
-            INSERT INTO league_snapshots (
-                snapshot_id, league_id, fantasy_week, payload_json, retrieved_at
-            ) VALUES (?, ?, ?, ?, ?)
-            ON CONFLICT(league_id, fantasy_week) DO UPDATE SET
-                snapshot_id = excluded.snapshot_id,
-                payload_json = excluded.payload_json,
-                retrieved_at = excluded.retrieved_at
-            """,
-            snapshot.snapshot_id,
-            snapshot.league_id,
-            snapshot.fantasy_week,
-            snapshot.payload_json,
-            snapshot.retrieved_at.isoformat(),
-        )
+        await self._run(UPSERT_LEAGUE_SNAPSHOT_SQL, *snapshot_insert_params(snapshot))
 
     async def load_league_snapshot(
         self,
         league_id: str,
         fantasy_week: int,
     ) -> LeagueSnapshotRecord | None:
-        row = await self._first(
-            """
-            SELECT snapshot_id, league_id, fantasy_week, payload_json, retrieved_at
-            FROM league_snapshots WHERE league_id = ? AND fantasy_week = ?
-            """,
-            league_id,
-            fantasy_week,
-        )
-        if row is None:
-            return None
-        return LeagueSnapshotRecord(
-            snapshot_id=str(row["snapshot_id"]),
-            league_id=str(row["league_id"]),
-            fantasy_week=int(row["fantasy_week"]),
-            payload_json=str(row["payload_json"]),
-            retrieved_at=datetime.fromisoformat(str(row["retrieved_at"])),
-        )
+        row = await self._first(LOAD_LEAGUE_SNAPSHOT_SQL, league_id, fantasy_week)
+        return snapshot_from_mapping(row) if row is not None else None
 
     async def save_data_freshness(self, freshness: DataFreshnessRecord) -> None:
-        await self._run(
-            """
-            INSERT INTO data_freshness (
-                resource, retrieved_at, expires_at, quality, warnings_json, errors_json
-            ) VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(resource) DO UPDATE SET
-                retrieved_at = excluded.retrieved_at,
-                expires_at = excluded.expires_at,
-                quality = excluded.quality,
-                warnings_json = excluded.warnings_json,
-                errors_json = excluded.errors_json
-            """,
-            freshness.resource,
-            freshness.retrieved_at.isoformat(),
-            freshness.expires_at.isoformat() if freshness.expires_at else None,
-            freshness.quality.value,
-            json.dumps(freshness.warnings),
-            json.dumps(freshness.errors),
-        )
+        await self._run(UPSERT_DATA_FRESHNESS_SQL, *freshness_insert_params(freshness))
 
     async def load_data_freshness(self, resource: str) -> DataFreshnessRecord | None:
-        row = await self._first(
-            """
-            SELECT resource, retrieved_at, expires_at, quality, warnings_json, errors_json
-            FROM data_freshness WHERE resource = ?
-            """,
-            resource,
-        )
-        if row is None:
-            return None
-        return DataFreshnessRecord(
-            resource=str(row["resource"]),
-            retrieved_at=datetime.fromisoformat(str(row["retrieved_at"])),
-            expires_at=(
-                datetime.fromisoformat(str(row["expires_at"])) if row.get("expires_at") else None
-            ),
-            quality=DataQualityState(str(row["quality"])),
-            warnings=tuple(json.loads(str(row["warnings_json"]))),
-            errors=tuple(json.loads(str(row["errors_json"]))),
-        )
+        row = await self._first(LOAD_DATA_FRESHNESS_SQL, resource)
+        return freshness_from_mapping(row) if row is not None else None
 
     async def create_recommendation(self, recommendation: RecommendationRecord) -> bool:
         result = await self._run(
-            """
-            INSERT OR IGNORE INTO recommendations (
-                recommendation_id, idempotency_key, league_id, fantasy_week,
-                player_id, game_id, decision_type, title, message, deadline,
-                policy_version, created_at, status, acknowledged_action,
-                acknowledged_at, trace_json, revision
-            ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                     COALESCE(MAX(revision), 0) + 1
-              FROM recommendations
-              WHERE league_id = ? AND fantasy_week = ? AND decision_type = ?
-            """,
-            recommendation.recommendation_id,
-            recommendation.idempotency_key,
-            recommendation.league_id,
-            recommendation.fantasy_week,
-            recommendation.player_id,
-            recommendation.game_id,
-            recommendation.decision_type,
-            recommendation.title,
-            recommendation.message,
-            recommendation.deadline.isoformat() if recommendation.deadline else None,
-            recommendation.policy_version,
-            recommendation.created_at.isoformat(),
-            recommendation.status.value,
-            recommendation.acknowledged_action.value
-            if recommendation.acknowledged_action
-            else None,
-            recommendation.acknowledged_at.isoformat() if recommendation.acknowledged_at else None,
-            recommendation.trace_json,
-            recommendation.league_id,
-            recommendation.fantasy_week,
-            recommendation.decision_type,
+            INSERT_RECOMMENDATION_SQL,
+            *recommendation_insert_params(recommendation),
         )
         return self._changes(result) == 1
 
     async def get_recommendation(self, recommendation_id: str) -> RecommendationRecord | None:
-        row = await self._first(
-            "SELECT * FROM recommendations WHERE recommendation_id = ?",
-            recommendation_id,
-        )
-        return self._recommendation(row) if row is not None else None
+        row = await self._first(LOAD_RECOMMENDATION_SQL, recommendation_id)
+        return recommendation_from_mapping(row) if row is not None else None
 
     async def record_delivery_attempt(self, attempt: DeliveryAttemptRecord) -> None:
         await self._run(
-            """
-            INSERT INTO delivery_attempts (
-                delivery_id, recommendation_id, provider, attempt_number,
-                attempted_at, succeeded, error
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
+            INSERT_DELIVERY_ATTEMPT_SQL,
             attempt.delivery_id,
             attempt.recommendation_id,
             attempt.provider,
@@ -444,31 +214,11 @@ class D1StateRepository(AsyncRuntimeStateRepository):
         )
 
     async def next_delivery_attempt_number(self, recommendation_id: str) -> int:
-        row = await self._first(
-            """
-            SELECT COALESCE(MAX(attempt_number), 0) + 1 AS attempt_number
-            FROM delivery_attempts
-            WHERE recommendation_id = ? AND provider != '_delivery_claim'
-            """,
-            recommendation_id,
-        )
+        row = await self._first(NEXT_DELIVERY_ATTEMPT_SQL, recommendation_id)
         return int(row["attempt_number"]) if row is not None else 1
 
     async def has_successful_delivery(self, recommendation_id: str) -> bool:
-        return (
-            await self._first(
-                """
-                SELECT 1 AS found FROM delivery_attempts
-                WHERE recommendation_id = ? AND succeeded = 1 LIMIT 1
-                """,
-                recommendation_id,
-            )
-            is not None
-        )
-
-    @staticmethod
-    def _delivery_claim_id(recommendation_id: str) -> str:
-        return sha256(f"{recommendation_id}:delivery-claim".encode()).hexdigest()
+        return await self._first(HAS_SUCCESSFUL_DELIVERY_SQL, recommendation_id) is not None
 
     async def claim_delivery(
         self,
@@ -478,20 +228,10 @@ class D1StateRepository(AsyncRuntimeStateRepository):
         lease_duration: timedelta = timedelta(minutes=2),
     ) -> bool:
         result = await self._run(
-            """
-            INSERT INTO delivery_attempts (
-                delivery_id, recommendation_id, provider, attempt_number,
-                attempted_at, succeeded, error
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(delivery_id) DO UPDATE SET
-                attempted_at = excluded.attempted_at
-            WHERE delivery_attempts.provider = '_delivery_claim'
-              AND delivery_attempts.succeeded = 0
-              AND delivery_attempts.attempted_at <= ?
-            """,
-            self._delivery_claim_id(recommendation_id),
+            CLAIM_DELIVERY_SQL,
+            delivery_claim_id(recommendation_id),
             recommendation_id,
-            "_delivery_claim",
+            DELIVERY_CLAIM_PROVIDER,
             0,
             claimed_at.isoformat(),
             0,
@@ -502,22 +242,15 @@ class D1StateRepository(AsyncRuntimeStateRepository):
 
     async def release_delivery_claim(self, recommendation_id: str) -> bool:
         result = await self._run(
-            """
-            DELETE FROM delivery_attempts
-            WHERE delivery_id = ? AND succeeded = 0 AND provider = ?
-            """,
-            self._delivery_claim_id(recommendation_id),
-            "_delivery_claim",
+            RELEASE_DELIVERY_CLAIM_SQL,
+            delivery_claim_id(recommendation_id),
+            DELIVERY_CLAIM_PROVIDER,
         )
         return self._changes(result) == 1
 
     async def create_action_token(self, token: ActionTokenRecord) -> None:
         await self._run(
-            """
-            INSERT OR IGNORE INTO action_tokens (
-                token_hash, recommendation_id, action, created_at, expires_at, used_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
-            """,
+            INSERT_OR_IGNORE_ACTION_TOKEN_SQL,
             token.token_hash,
             token.recommendation_id,
             token.action.value,
@@ -532,13 +265,7 @@ class D1StateRepository(AsyncRuntimeStateRepository):
         action: AcknowledgementAction,
         acknowledged_at: datetime,
     ) -> AcknowledgementResult:
-        token = await self._first(
-            """
-            SELECT recommendation_id, action, expires_at, used_at
-            FROM action_tokens WHERE token_hash = ?
-            """,
-            token_hash,
-        )
+        token = await self._first(LOAD_ACTION_TOKEN_SQL, token_hash)
         if token is None:
             return AcknowledgementResult(AcknowledgementOutcome.INVALID)
         recommendation = await self.get_recommendation(str(token["recommendation_id"]))
@@ -563,28 +290,16 @@ class D1StateRepository(AsyncRuntimeStateRepository):
         action: AcknowledgementAction,
         acknowledged_at: datetime,
     ) -> AcknowledgementResult:
-        token = await self._first(
-            "SELECT recommendation_id FROM action_tokens WHERE token_hash = ?",
-            token_hash,
-        )
+        token = await self._first(LOAD_ACTION_TOKEN_ID_SQL, token_hash)
         if token is None:
             return AcknowledgementResult(AcknowledgementOutcome.INVALID)
         recommendation_id = str(token["recommendation_id"])
-        acknowledgement_id = sha256(f"{recommendation_id}:{token_hash}".encode()).hexdigest()
+        ack_id = acknowledgement_id(recommendation_id, token_hash)
         statements = [
             self._statement(
-                """
-                INSERT OR IGNORE INTO acknowledgements (
-                    acknowledgement_id, recommendation_id, action, acknowledged_at, token_hash
-                )
-                SELECT ?, r.recommendation_id, ?, ?, t.token_hash
-                FROM action_tokens t
-                JOIN recommendations r ON r.recommendation_id = t.recommendation_id
-                WHERE t.token_hash = ? AND t.action = ? AND t.used_at IS NULL
-                  AND t.expires_at > ? AND r.status = ?
-                """,
+                CONSUME_ACKNOWLEDGEMENT_INSERT_SQL,
                 (
-                    acknowledgement_id,
+                    ack_id,
                     action.value,
                     acknowledged_at.isoformat(),
                     token_hash,
@@ -594,43 +309,25 @@ class D1StateRepository(AsyncRuntimeStateRepository):
                 ),
             ),
             self._statement(
-                """
-                UPDATE action_tokens SET used_at = ?
-                WHERE token_hash = ? AND used_at IS NULL AND EXISTS (
-                    SELECT 1 FROM acknowledgements WHERE acknowledgement_id = ?
-                )
-                """,
-                (acknowledged_at.isoformat(), token_hash, acknowledgement_id),
+                CONSUME_TOKEN_MARK_USED_SQL,
+                (acknowledged_at.isoformat(), token_hash, ack_id),
             ),
             self._statement(
-                """
-                UPDATE recommendations
-                SET status = ?, acknowledged_action = ?, acknowledged_at = ?
-                WHERE recommendation_id = ? AND status = ? AND EXISTS (
-                    SELECT 1 FROM acknowledgements WHERE acknowledgement_id = ?
-                )
-                """,
+                CONSUME_RECOMMENDATION_ACK_SQL,
                 (
                     RecommendationStatus.ACKNOWLEDGED.value,
                     action.value,
                     acknowledged_at.isoformat(),
                     recommendation_id,
                     RecommendationStatus.PENDING.value,
-                    acknowledgement_id,
+                    ack_id,
                 ),
             ),
             self._statement(
-                """
-                INSERT OR IGNORE INTO lock_acknowledgements
-                    (recommendation_id, player_id, acknowledged_at)
-                SELECT r.recommendation_id, r.player_id, ?
-                FROM recommendations r
-                JOIN acknowledgements a ON a.recommendation_id = r.recommendation_id
-                WHERE a.acknowledgement_id = ? AND a.action = ?
-                """,
+                CONSUME_LOCK_ACK_SQL,
                 (
                     acknowledged_at.isoformat(),
-                    acknowledgement_id,
+                    ack_id,
                     AcknowledgementAction.LOCKED.value,
                 ),
             ),
@@ -645,10 +342,7 @@ class D1StateRepository(AsyncRuntimeStateRepository):
 
     async def expire_recommendations(self, now: datetime) -> int:
         result = await self._run(
-            """
-            UPDATE recommendations SET status = ?
-            WHERE status = ? AND deadline IS NOT NULL AND deadline <= ?
-            """,
+            EXPIRE_RECOMMENDATIONS_SQL,
             RecommendationStatus.EXPIRED.value,
             RecommendationStatus.PENDING.value,
             now.isoformat(),
@@ -663,18 +357,7 @@ class D1StateRepository(AsyncRuntimeStateRepository):
         decision_type: str,
     ) -> tuple[RecommendationRecord, ...]:
         rows = await self._all(
-            """
-            SELECT recommendation_id, idempotency_key, league_id, fantasy_week,
-                   player_id, game_id, decision_type, title, message, deadline,
-                   policy_version, created_at, status, acknowledged_action,
-                   acknowledged_at, trace_json, revision
-            FROM recommendations
-            WHERE league_id = ?
-              AND fantasy_week = ?
-              AND decision_type = ?
-              AND status = ?
-            ORDER BY created_at ASC, recommendation_id ASC
-            """,
+            LIST_PENDING_RECOMMENDATIONS_SQL,
             league_id,
             fantasy_week,
             decision_type,
@@ -683,7 +366,7 @@ class D1StateRepository(AsyncRuntimeStateRepository):
         records: list[RecommendationRecord] = []
         for row in rows:
             if isinstance(row, Mapping):
-                records.append(self._recommendation(row))
+                records.append(recommendation_from_mapping(row))
             else:
                 raise AcknowledgementQueryError("unexpected D1 result envelope")
         return tuple(records)
@@ -691,11 +374,7 @@ class D1StateRepository(AsyncRuntimeStateRepository):
     async def supersede_recommendation(self, recommendation_id: str, now: datetime) -> bool:
         del now
         result = await self._run(
-            """
-            UPDATE recommendations
-            SET status = ?
-            WHERE recommendation_id = ? AND status = ?
-            """,
+            SUPERSEDE_RECOMMENDATION_SQL,
             RecommendationStatus.SUPERSEDED.value,
             recommendation_id,
             RecommendationStatus.PENDING.value,
@@ -709,11 +388,7 @@ class D1StateRepository(AsyncRuntimeStateRepository):
         acknowledged_at: datetime,
     ) -> None:
         await self._run(
-            """
-            INSERT OR REPLACE INTO lock_acknowledgements
-                (recommendation_id, player_id, acknowledged_at)
-            VALUES (?, ?, ?)
-            """,
+            UPSERT_LOCK_ACKNOWLEDGEMENT_SQL,
             recommendation_id,
             player_id,
             acknowledged_at.isoformat(),
@@ -722,13 +397,7 @@ class D1StateRepository(AsyncRuntimeStateRepository):
     async def is_locked(self, recommendation_id: str) -> bool:
         return (
             await self._first(
-                """
-                SELECT 1 AS found FROM lock_acknowledgements WHERE recommendation_id = ?
-                UNION ALL
-                SELECT 1 AS found FROM recommendations
-                WHERE recommendation_id = ? AND status = ? AND acknowledged_action = ?
-                LIMIT 1
-                """,
+                IS_LOCKED_SQL,
                 recommendation_id,
                 recommendation_id,
                 RecommendationStatus.ACKNOWLEDGED.value,
@@ -761,148 +430,33 @@ class D1StateRepository(AsyncRuntimeStateRepository):
         return decode_acknowledged_decisions(tuple(decoded_rows), as_of=as_of)
 
     async def load_runtime_policy(self) -> RuntimePolicyRecord | None:
-        row = await self._first(
-            "SELECT version, payload_json, updated_at FROM runtime_policy WHERE singleton_id = 1"
-        )
-        if row is None:
-            return None
-        return RuntimePolicyRecord(
-            version=str(row["version"]),
-            payload_json=str(row["payload_json"]),
-            updated_at=datetime.fromisoformat(str(row["updated_at"])),
-        )
+        row = await self._first(LOAD_RUNTIME_POLICY_SQL)
+        return runtime_policy_from_mapping(row) if row is not None else None
 
     async def save_runtime_policy(self, policy: RuntimePolicyRecord) -> None:
         await self._run(
-            """
-            INSERT INTO runtime_policy (singleton_id, version, payload_json, updated_at)
-            VALUES (1, ?, ?, ?)
-            ON CONFLICT(singleton_id) DO UPDATE SET
-                version = excluded.version,
-                payload_json = excluded.payload_json,
-                updated_at = excluded.updated_at
-            """,
+            UPSERT_RUNTIME_POLICY_SQL,
             policy.version,
             policy.payload_json,
             policy.updated_at.isoformat(),
         )
 
     async def get(self, cache_key: str, *, now: datetime) -> CachedNBARecord | None:
-        row = await self._first(
-            """
-            SELECT cache_key, provider, resource, schema_version, payload_json,
-                   retrieved_at, source_updated_at, expires_at, quality,
-                   warnings_json, errors_json
-            FROM nba_cache WHERE cache_key = ?
-            """,
-            cache_key,
-        )
+        row = await self._first(LOAD_NBA_CACHE_SQL, cache_key)
         if row is None:
             return None
-        record = CachedNBARecord(
-            cache_key=str(row["cache_key"]),
-            provider=str(row["provider"]),
-            resource=str(row["resource"]),
-            schema_version=str(row["schema_version"]),
-            payload_json=str(row["payload_json"]),
-            retrieved_at=datetime.fromisoformat(str(row["retrieved_at"])),
-            source_updated_at=(
-                datetime.fromisoformat(str(row["source_updated_at"]))
-                if row.get("source_updated_at")
-                else None
-            ),
-            expires_at=(
-                datetime.fromisoformat(str(row["expires_at"])) if row.get("expires_at") else None
-            ),
-            quality=DataQualityState(str(row["quality"])),
-            warnings=tuple(json.loads(str(row["warnings_json"]))),
-            errors=tuple(json.loads(str(row["errors_json"]))),
-        )
-        if record.expires_at is not None and record.expires_at <= now:
-            return CachedNBARecord(
-                cache_key=record.cache_key,
-                provider=record.provider,
-                resource=record.resource,
-                schema_version=record.schema_version,
-                payload_json=record.payload_json,
-                retrieved_at=record.retrieved_at,
-                source_updated_at=record.source_updated_at,
-                expires_at=record.expires_at,
-                quality=DataQualityState.STALE,
-                warnings=record.warnings + ("Cached record has exceeded its freshness window",),
-                errors=record.errors,
-            )
-        return record
+        return cached_nba_as_of(cached_nba_from_mapping(row), now)
 
     async def put(self, record: CachedNBARecord) -> None:
-        await self._run(
-            """
-            INSERT INTO nba_cache (
-                cache_key, provider, resource, schema_version, payload_json,
-                retrieved_at, source_updated_at, expires_at, quality,
-                warnings_json, errors_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(cache_key) DO UPDATE SET
-                provider = excluded.provider,
-                resource = excluded.resource,
-                schema_version = excluded.schema_version,
-                payload_json = excluded.payload_json,
-                retrieved_at = excluded.retrieved_at,
-                source_updated_at = excluded.source_updated_at,
-                expires_at = excluded.expires_at,
-                quality = excluded.quality,
-                warnings_json = excluded.warnings_json,
-                errors_json = excluded.errors_json
-            """,
-            record.cache_key,
-            record.provider,
-            record.resource,
-            record.schema_version,
-            record.payload_json,
-            record.retrieved_at.isoformat(),
-            record.source_updated_at.isoformat() if record.source_updated_at else None,
-            record.expires_at.isoformat() if record.expires_at else None,
-            record.quality.value,
-            json.dumps(record.warnings),
-            json.dumps(record.errors),
-        )
+        await self._run(UPSERT_NBA_CACHE_SQL, *nba_cache_put_params(record))
 
     async def save_projection_observations(
         self, observations: tuple[ProjectionObservationRecord, ...]
     ) -> None:
         if not observations:
             return
-        query = """
-            INSERT INTO projection_observations (
-                history_version, player_id, game_id, game_start,
-                outcome_finalized_at, minutes, started, did_not_play,
-                box_score_json, source_version
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(history_version, player_id, game_id) DO UPDATE SET
-                game_start = excluded.game_start,
-                outcome_finalized_at = excluded.outcome_finalized_at,
-                minutes = excluded.minutes,
-                started = excluded.started,
-                did_not_play = excluded.did_not_play,
-                box_score_json = excluded.box_score_json,
-                source_version = excluded.source_version
-        """
         statements = [
-            self._statement(
-                query,
-                (
-                    item.history_version,
-                    item.player_id,
-                    item.game_id,
-                    item.game_start.isoformat(),
-                    item.outcome_finalized_at.isoformat() if item.outcome_finalized_at else None,
-                    item.minutes,
-                    int(item.started),
-                    int(item.did_not_play),
-                    item.box_score_json,
-                    item.source_version,
-                ),
-            )
+            self._statement(UPSERT_PROJECTION_OBSERVATION_SQL, projection_observation_params(item))
             for item in observations
         ]
         results = await self._database.batch(statements)
@@ -919,65 +473,20 @@ class D1StateRepository(AsyncRuntimeStateRepository):
     ) -> tuple[ProjectionObservationRecord, ...]:
         if page_size <= 0:
             raise ValueError("Projection observation page size must be positive")
-        conditions = ["history_version = ?"]
-        params: list[object] = [history_version]
-        if before is not None:
-            conditions.append("game_start < ?")
-            conditions.append("outcome_finalized_at IS NOT NULL")
-            conditions.append("outcome_finalized_at <= ?")
-            params.extend((before.isoformat(), before.isoformat()))
-        where = " AND ".join(conditions)
+        where, params = projection_observation_filters(history_version, before)
+        query = LOAD_PROJECTION_OBSERVATIONS_SQL.format(where=where)
         records: list[ProjectionObservationRecord] = []
         offset = 0
         while True:
-            rows = await self._all(
-                """
-                SELECT history_version, player_id, game_id, game_start,
-                       outcome_finalized_at, minutes, started, did_not_play,
-                       box_score_json, source_version
-                FROM projection_observations
-                WHERE """
-                + where
-                + """
-                ORDER BY game_start, game_id, player_id
-                LIMIT ? OFFSET ?
-                """,
-                *params,
-                page_size,
-                offset,
-            )
-            records.extend(self._projection_observation(self._mapping(row)) for row in rows)
+            rows = await self._all(query, *params, page_size, offset)
+            records.extend(projection_from_mapping(self._mapping(row)) for row in rows)
             if len(rows) < page_size:
                 break
             offset += page_size
         return tuple(records)
 
     async def upsert_scheduled_work(self, work: ScheduledWorkRecord) -> None:
-        await self._run(
-            """
-            INSERT INTO scheduled_work (
-                work_id, dedupe_key, kind, due_at, status, local_day, game_id,
-                recommendation_id, deadline, lease_expires_at, attempt_count,
-                correlation_id, failure_category, terminal_summary_json,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(dedupe_key) DO UPDATE SET
-                kind = excluded.kind,
-                due_at = excluded.due_at,
-                status = CASE
-                    WHEN scheduled_work.status IN ('completed', 'running')
-                        THEN scheduled_work.status
-                    ELSE excluded.status
-                END,
-                local_day = excluded.local_day,
-                game_id = excluded.game_id,
-                recommendation_id = excluded.recommendation_id,
-                deadline = excluded.deadline,
-                updated_at = excluded.updated_at
-            WHERE scheduled_work.status NOT IN ('completed', 'running')
-            """,
-            *self._scheduled_work_values(work),
-        )
+        await self._run(UPSERT_SCHEDULED_WORK_SQL, *scheduled_work_values(work))
 
     async def claim_due_work(
         self,
@@ -990,25 +499,7 @@ class D1StateRepository(AsyncRuntimeStateRepository):
         if limit <= 0:
             return ()
         rows = await self._all(
-            """
-            UPDATE scheduled_work
-            SET status = 'running', lease_expires_at = ?, attempt_count = attempt_count + 1,
-                correlation_id = ?, failure_category = NULL,
-                terminal_summary_json = NULL, updated_at = ?
-            WHERE work_id IN (
-                SELECT work_id FROM scheduled_work
-                WHERE due_at <= ? AND (
-                    status IN ('pending', 'retry')
-                    OR (status = 'running' AND lease_expires_at <= ?)
-                )
-                ORDER BY due_at, work_id
-                LIMIT ?
-            )
-            RETURNING work_id, dedupe_key, kind, due_at, status, local_day,
-                      game_id, recommendation_id, deadline, lease_expires_at,
-                      attempt_count, correlation_id, failure_category,
-                      terminal_summary_json, created_at, updated_at
-            """,
+            CLAIM_DUE_WORK_SQL,
             (now + lease_duration).isoformat(),
             correlation_id,
             now.isoformat(),
@@ -1016,7 +507,7 @@ class D1StateRepository(AsyncRuntimeStateRepository):
             now.isoformat(),
             limit,
         )
-        return tuple(self._scheduled_work(self._mapping(row)) for row in rows)
+        return tuple(scheduled_work_from_mapping(self._mapping(row)) for row in rows)
 
     async def finish_scheduled_work(
         self,
@@ -1029,21 +520,9 @@ class D1StateRepository(AsyncRuntimeStateRepository):
         terminal_summary_json: str | None = None,
         retry_at: datetime | None = None,
     ) -> bool:
-        if status not in {
-            ScheduledWorkStatus.COMPLETED,
-            ScheduledWorkStatus.RETRY,
-            ScheduledWorkStatus.CANCELED,
-        }:
-            raise ValueError("Claimed work must finish as completed, retry, or canceled")
-        if (status is ScheduledWorkStatus.RETRY) != (retry_at is not None):
-            raise ValueError("Retry work requires exactly one retry timestamp")
+        require_terminal_scheduled_status(status, retry_at)
         result = await self._run(
-            """
-            UPDATE scheduled_work
-            SET status = ?, due_at = COALESCE(?, due_at), lease_expires_at = NULL,
-                failure_category = ?, terminal_summary_json = ?, updated_at = ?
-            WHERE work_id = ? AND status = 'running' AND correlation_id = ?
-            """,
+            FINISH_SCHEDULED_WORK_SQL,
             status.value,
             retry_at.isoformat() if retry_at else None,
             failure_category,
@@ -1060,126 +539,19 @@ class D1StateRepository(AsyncRuntimeStateRepository):
         kind: DueWorkKind | None = None,
         statuses: tuple[ScheduledWorkStatus, ...] = (),
     ) -> tuple[ScheduledWorkRecord, ...]:
-        conditions: list[str] = []
-        params: list[object] = []
-        if kind is not None:
-            conditions.append("kind = ?")
-            params.append(kind.value)
-        if statuses:
-            placeholders = ", ".join("?" for _ in statuses)
-            conditions.append(f"status IN ({placeholders})")
-            params.extend(status.value for status in statuses)
-        where = " WHERE " + " AND ".join(conditions) if conditions else ""
-        rows = await self._all(
-            """
-            SELECT work_id, dedupe_key, kind, due_at, status, local_day,
-                   game_id, recommendation_id, deadline, lease_expires_at,
-                   attempt_count, correlation_id, failure_category,
-                   terminal_summary_json, created_at, updated_at
-            FROM scheduled_work
-            """
-            + where
-            + " ORDER BY due_at, work_id",
-            *params,
-        )
-        return tuple(self._scheduled_work(self._mapping(row)) for row in rows)
+        where, params = scheduled_work_filters(kind, statuses)
+        query = LIST_SCHEDULED_WORK_SQL.format(where=where)
+        rows = await self._all(query, *params)
+        return tuple(scheduled_work_from_mapping(self._mapping(row)) for row in rows)
 
     async def cancel_expired_scheduled_work(self, now: datetime) -> int:
         result = await self._run(
-            """
-            UPDATE scheduled_work
-            SET status = 'canceled', lease_expires_at = NULL,
-                failure_category = 'deadline_elapsed', updated_at = ?
-            WHERE deadline IS NOT NULL AND deadline <= ? AND (
-                status IN ('pending', 'retry')
-                OR (status = 'running' AND lease_expires_at <= ?)
-            )
-            """,
+            CANCEL_EXPIRED_SCHEDULED_WORK_SQL,
             now.isoformat(),
             now.isoformat(),
             now.isoformat(),
         )
         return self._changes(result)
 
-    @staticmethod
-    def _mapping(row: object) -> Mapping[str, Any]:
-        if isinstance(row, Mapping):
-            return row
-        raise AcknowledgementQueryError("unexpected D1 result envelope")
 
-    @staticmethod
-    def _projection_observation(row: Mapping[str, Any]) -> ProjectionObservationRecord:
-        return ProjectionObservationRecord(
-            history_version=str(row["history_version"]),
-            player_id=str(row["player_id"]),
-            game_id=str(row["game_id"]),
-            game_start=datetime.fromisoformat(str(row["game_start"])),
-            outcome_finalized_at=(
-                datetime.fromisoformat(str(row["outcome_finalized_at"]))
-                if row.get("outcome_finalized_at")
-                else None
-            ),
-            minutes=float(row["minutes"]) if row.get("minutes") is not None else None,
-            started=bool(row["started"]),
-            did_not_play=bool(row["did_not_play"]),
-            box_score_json=str(row["box_score_json"]),
-            source_version=str(row["source_version"]),
-        )
-
-    @staticmethod
-    def _scheduled_work_values(work: ScheduledWorkRecord) -> tuple[object, ...]:
-        return (
-            work.work_id,
-            work.dedupe_key,
-            work.kind.value,
-            work.due_at.isoformat(),
-            work.status.value,
-            work.local_day,
-            work.game_id,
-            work.recommendation_id,
-            work.deadline.isoformat() if work.deadline else None,
-            work.lease_expires_at.isoformat() if work.lease_expires_at else None,
-            work.attempt_count,
-            work.correlation_id,
-            work.failure_category,
-            work.terminal_summary_json,
-            work.created_at.isoformat(),
-            work.updated_at.isoformat(),
-        )
-
-    @staticmethod
-    def _scheduled_work(row: Mapping[str, Any]) -> ScheduledWorkRecord:
-        return ScheduledWorkRecord(
-            work_id=str(row["work_id"]),
-            dedupe_key=str(row["dedupe_key"]),
-            kind=DueWorkKind(str(row["kind"])),
-            due_at=datetime.fromisoformat(str(row["due_at"])),
-            status=ScheduledWorkStatus(str(row["status"])),
-            local_day=str(row["local_day"]) if row.get("local_day") is not None else None,
-            game_id=str(row["game_id"]) if row.get("game_id") is not None else None,
-            recommendation_id=(
-                str(row["recommendation_id"]) if row.get("recommendation_id") is not None else None
-            ),
-            deadline=(
-                datetime.fromisoformat(str(row["deadline"])) if row.get("deadline") else None
-            ),
-            lease_expires_at=(
-                datetime.fromisoformat(str(row["lease_expires_at"]))
-                if row.get("lease_expires_at")
-                else None
-            ),
-            attempt_count=int(row["attempt_count"]),
-            correlation_id=(
-                str(row["correlation_id"]) if row.get("correlation_id") is not None else None
-            ),
-            failure_category=(
-                str(row["failure_category"]) if row.get("failure_category") is not None else None
-            ),
-            terminal_summary_json=(
-                str(row["terminal_summary_json"])
-                if row.get("terminal_summary_json") is not None
-                else None
-            ),
-            created_at=datetime.fromisoformat(str(row["created_at"])),
-            updated_at=datetime.fromisoformat(str(row["updated_at"])),
-        )
+__all__ = ["D1_SCHEMA", "D1StateRepository"]
