@@ -1,6 +1,6 @@
 import json
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from hashlib import sha256
 from typing import Any
 
@@ -361,6 +361,17 @@ class D1StateRepository(AsyncStateRepository):
             attempt.error,
         )
 
+    async def next_delivery_attempt_number(self, recommendation_id: str) -> int:
+        row = await self._first(
+            """
+            SELECT COALESCE(MAX(attempt_number), 0) + 1 AS attempt_number
+            FROM delivery_attempts
+            WHERE recommendation_id = ? AND provider != '_delivery_claim'
+            """,
+            recommendation_id,
+        )
+        return int(row["attempt_number"]) if row is not None else 1
+
     async def has_successful_delivery(self, recommendation_id: str) -> bool:
         return (
             await self._first(
@@ -377,13 +388,24 @@ class D1StateRepository(AsyncStateRepository):
     def _delivery_claim_id(recommendation_id: str) -> str:
         return sha256(f"{recommendation_id}:delivery-claim".encode()).hexdigest()
 
-    async def claim_delivery(self, recommendation_id: str, claimed_at: datetime) -> bool:
+    async def claim_delivery(
+        self,
+        recommendation_id: str,
+        claimed_at: datetime,
+        *,
+        lease_duration: timedelta = timedelta(minutes=2),
+    ) -> bool:
         result = await self._run(
             """
-            INSERT OR IGNORE INTO delivery_attempts (
+            INSERT INTO delivery_attempts (
                 delivery_id, recommendation_id, provider, attempt_number,
                 attempted_at, succeeded, error
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(delivery_id) DO UPDATE SET
+                attempted_at = excluded.attempted_at
+            WHERE delivery_attempts.provider = '_delivery_claim'
+              AND delivery_attempts.succeeded = 0
+              AND delivery_attempts.attempted_at <= ?
             """,
             self._delivery_claim_id(recommendation_id),
             recommendation_id,
@@ -392,6 +414,7 @@ class D1StateRepository(AsyncStateRepository):
             claimed_at.isoformat(),
             0,
             None,
+            (claimed_at - lease_duration).isoformat(),
         )
         return self._changes(result) == 1
 

@@ -1,10 +1,13 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Protocol
 
 from sleeper_manager.domain.nba import DataQualityState
 from sleeper_manager.domain.planning import AcknowledgedDecisionEvidence
+
+DEFAULT_SCHEDULED_WORK_LEASE = timedelta(minutes=15)
+PROJECTION_OBSERVATION_PAGE_SIZE = 1000
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +44,67 @@ class NBADataCache(Protocol):
     def get(self, cache_key: str, *, now: datetime) -> CachedNBARecord | None: ...
 
     def put(self, record: CachedNBARecord) -> None: ...
+
+
+class AsyncNBADataCache(Protocol):
+    async def get(self, cache_key: str, *, now: datetime) -> CachedNBARecord | None: ...
+
+    async def put(self, record: CachedNBARecord) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimePolicyRecord:
+    version: str
+    payload_json: str
+    updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectionObservationRecord:
+    history_version: str
+    player_id: str
+    game_id: str
+    game_start: datetime
+    outcome_finalized_at: datetime | None
+    minutes: float | None
+    started: bool
+    did_not_play: bool
+    box_score_json: str
+    source_version: str
+
+
+class DueWorkKind(StrEnum):
+    DAILY = "daily"
+    PRE_TIPOFF = "pre_tipoff"
+    DELIVERY_RETRY = "delivery_retry"
+
+
+class ScheduledWorkStatus(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    RETRY = "retry"
+    COMPLETED = "completed"
+    CANCELED = "canceled"
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduledWorkRecord:
+    work_id: str
+    dedupe_key: str
+    kind: DueWorkKind
+    due_at: datetime
+    status: ScheduledWorkStatus
+    created_at: datetime
+    updated_at: datetime
+    local_day: str | None = None
+    game_id: str | None = None
+    recommendation_id: str | None = None
+    deadline: datetime | None = None
+    lease_expires_at: datetime | None = None
+    attempt_count: int = 0
+    correlation_id: str | None = None
+    failure_category: str | None = None
+    terminal_summary_json: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +165,7 @@ class RecommendationRecord:
     acknowledged_action: AcknowledgementAction | None = None
     acknowledged_at: datetime | None = None
     trace_json: str = "{}"
+    revision: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,9 +225,17 @@ class StateRepository(Protocol):
 
     def record_delivery_attempt(self, attempt: DeliveryAttemptRecord) -> None: ...
 
+    def next_delivery_attempt_number(self, recommendation_id: str) -> int: ...
+
     def has_successful_delivery(self, recommendation_id: str) -> bool: ...
 
-    def claim_delivery(self, recommendation_id: str, claimed_at: datetime) -> bool: ...
+    def claim_delivery(
+        self,
+        recommendation_id: str,
+        claimed_at: datetime,
+        *,
+        lease_duration: timedelta = timedelta(minutes=2),
+    ) -> bool: ...
 
     def release_delivery_claim(self, recommendation_id: str) -> bool: ...
 
@@ -226,9 +299,17 @@ class AsyncStateRepository(Protocol):
 
     async def record_delivery_attempt(self, attempt: DeliveryAttemptRecord) -> None: ...
 
+    async def next_delivery_attempt_number(self, recommendation_id: str) -> int: ...
+
     async def has_successful_delivery(self, recommendation_id: str) -> bool: ...
 
-    async def claim_delivery(self, recommendation_id: str, claimed_at: datetime) -> bool: ...
+    async def claim_delivery(
+        self,
+        recommendation_id: str,
+        claimed_at: datetime,
+        *,
+        lease_duration: timedelta = timedelta(minutes=2),
+    ) -> bool: ...
 
     async def release_delivery_claim(self, recommendation_id: str) -> bool: ...
 
@@ -269,3 +350,53 @@ class AsyncStateRepository(Protocol):
     ) -> tuple[RecommendationRecord, ...]: ...
 
     async def supersede_recommendation(self, recommendation_id: str, now: datetime) -> bool: ...
+
+
+class AsyncRuntimeStateRepository(AsyncStateRepository, AsyncNBADataCache, Protocol):
+    async def load_runtime_policy(self) -> RuntimePolicyRecord | None: ...
+
+    async def save_runtime_policy(self, policy: RuntimePolicyRecord) -> None: ...
+
+    async def save_projection_observations(
+        self, observations: tuple[ProjectionObservationRecord, ...]
+    ) -> None: ...
+
+    async def load_projection_observations(
+        self,
+        history_version: str,
+        *,
+        before: datetime | None = None,
+        page_size: int = PROJECTION_OBSERVATION_PAGE_SIZE,
+    ) -> tuple[ProjectionObservationRecord, ...]: ...
+
+    async def upsert_scheduled_work(self, work: ScheduledWorkRecord) -> None: ...
+
+    async def claim_due_work(
+        self,
+        now: datetime,
+        *,
+        correlation_id: str,
+        lease_duration: timedelta = DEFAULT_SCHEDULED_WORK_LEASE,
+        limit: int = 100,
+    ) -> tuple[ScheduledWorkRecord, ...]: ...
+
+    async def finish_scheduled_work(
+        self,
+        work_id: str,
+        *,
+        status: ScheduledWorkStatus,
+        finished_at: datetime,
+        correlation_id: str,
+        failure_category: str | None = None,
+        terminal_summary_json: str | None = None,
+        retry_at: datetime | None = None,
+    ) -> bool: ...
+
+    async def list_scheduled_work(
+        self,
+        *,
+        kind: DueWorkKind | None = None,
+        statuses: tuple[ScheduledWorkStatus, ...] = (),
+    ) -> tuple[ScheduledWorkRecord, ...]: ...
+
+    async def cancel_expired_scheduled_work(self, now: datetime) -> int: ...

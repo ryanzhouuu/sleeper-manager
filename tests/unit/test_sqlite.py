@@ -1,3 +1,4 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -55,7 +56,7 @@ def test_recommendation_creation_is_idempotent(tmp_path) -> None:  # type: ignor
 
     assert repository.create_recommendation(record)
     assert not repository.create_recommendation(record)
-    assert repository.get_recommendation(record.recommendation_id) == record
+    assert repository.get_recommendation(record.recommendation_id) == replace(record, revision=1)
 
 
 def test_action_token_is_consumed_once_and_locks_record(tmp_path) -> None:  # type: ignore[no-untyped-def]

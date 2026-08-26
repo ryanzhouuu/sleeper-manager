@@ -91,6 +91,18 @@ def test_notification_loop_retries_after_all_delivery_attempts_fail(tmp_path) ->
     assert first.status == "delivery_failed"
     assert second.status == "delivery_failed"
     assert len(sender.messages) == 2
+    connection = sqlite3.connect(tmp_path / "state.db")
+    try:
+        attempts = connection.execute(
+            """
+            SELECT attempt_number FROM delivery_attempts
+            WHERE provider != '_delivery_claim'
+            ORDER BY attempt_number
+            """
+        ).fetchall()
+    finally:
+        connection.close()
+    assert attempts == [(1,), (2,)]
 
 
 def test_lineup_recommendations_only_offer_open_sleeper(tmp_path) -> None:  # type: ignore[no-untyped-def]

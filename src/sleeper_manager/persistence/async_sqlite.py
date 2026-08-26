@@ -1,21 +1,29 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from sleeper_manager.domain.planning import AcknowledgedDecisionEvidence
 from sleeper_manager.persistence.base import (
+    DEFAULT_SCHEDULED_WORK_LEASE,
+    PROJECTION_OBSERVATION_PAGE_SIZE,
     AcknowledgementAction,
     AcknowledgementResult,
     ActionTokenRecord,
-    AsyncStateRepository,
+    AsyncRuntimeStateRepository,
+    CachedNBARecord,
     DataFreshnessRecord,
     DeliveryAttemptRecord,
+    DueWorkKind,
     LeagueSnapshotRecord,
+    ProjectionObservationRecord,
     RecommendationRecord,
+    RuntimePolicyRecord,
+    ScheduledWorkRecord,
+    ScheduledWorkStatus,
 )
 from sleeper_manager.persistence.sqlite import SQLiteStateRepository
 
 
-class AsyncSQLiteStateRepository(AsyncStateRepository):
+class AsyncSQLiteStateRepository(AsyncRuntimeStateRepository):
     """Async adapter for local SQLite used by the Worker-shaped test flow."""
 
     def __init__(self, path: Path) -> None:
@@ -49,11 +57,24 @@ class AsyncSQLiteStateRepository(AsyncStateRepository):
     async def record_delivery_attempt(self, attempt: DeliveryAttemptRecord) -> None:
         self._repository.record_delivery_attempt(attempt)
 
+    async def next_delivery_attempt_number(self, recommendation_id: str) -> int:
+        return self._repository.next_delivery_attempt_number(recommendation_id)
+
     async def has_successful_delivery(self, recommendation_id: str) -> bool:
         return self._repository.has_successful_delivery(recommendation_id)
 
-    async def claim_delivery(self, recommendation_id: str, claimed_at: datetime) -> bool:
-        return self._repository.claim_delivery(recommendation_id, claimed_at)
+    async def claim_delivery(
+        self,
+        recommendation_id: str,
+        claimed_at: datetime,
+        *,
+        lease_duration: timedelta = timedelta(minutes=2),
+    ) -> bool:
+        return self._repository.claim_delivery(
+            recommendation_id,
+            claimed_at,
+            lease_duration=lease_duration,
+        )
 
     async def release_delivery_claim(self, recommendation_id: str) -> bool:
         return self._repository.release_delivery_claim(recommendation_id)
@@ -115,3 +136,83 @@ class AsyncSQLiteStateRepository(AsyncStateRepository):
             fantasy_week,
             as_of=as_of,
         )
+
+    async def load_runtime_policy(self) -> RuntimePolicyRecord | None:
+        return self._repository.load_runtime_policy()
+
+    async def save_runtime_policy(self, policy: RuntimePolicyRecord) -> None:
+        self._repository.save_runtime_policy(policy)
+
+    async def get(self, cache_key: str, *, now: datetime) -> CachedNBARecord | None:
+        return self._repository.get(cache_key, now=now)
+
+    async def put(self, record: CachedNBARecord) -> None:
+        self._repository.put(record)
+
+    async def save_projection_observations(
+        self, observations: tuple[ProjectionObservationRecord, ...]
+    ) -> None:
+        self._repository.save_projection_observations(observations)
+
+    async def load_projection_observations(
+        self,
+        history_version: str,
+        *,
+        before: datetime | None = None,
+        page_size: int = PROJECTION_OBSERVATION_PAGE_SIZE,
+    ) -> tuple[ProjectionObservationRecord, ...]:
+        return self._repository.load_projection_observations(
+            history_version,
+            before=before,
+            page_size=page_size,
+        )
+
+    async def upsert_scheduled_work(self, work: ScheduledWorkRecord) -> None:
+        self._repository.upsert_scheduled_work(work)
+
+    async def claim_due_work(
+        self,
+        now: datetime,
+        *,
+        correlation_id: str,
+        lease_duration: timedelta = DEFAULT_SCHEDULED_WORK_LEASE,
+        limit: int = 100,
+    ) -> tuple[ScheduledWorkRecord, ...]:
+        return self._repository.claim_due_work(
+            now,
+            correlation_id=correlation_id,
+            lease_duration=lease_duration,
+            limit=limit,
+        )
+
+    async def finish_scheduled_work(
+        self,
+        work_id: str,
+        *,
+        status: ScheduledWorkStatus,
+        finished_at: datetime,
+        correlation_id: str,
+        failure_category: str | None = None,
+        terminal_summary_json: str | None = None,
+        retry_at: datetime | None = None,
+    ) -> bool:
+        return self._repository.finish_scheduled_work(
+            work_id,
+            status=status,
+            finished_at=finished_at,
+            correlation_id=correlation_id,
+            failure_category=failure_category,
+            terminal_summary_json=terminal_summary_json,
+            retry_at=retry_at,
+        )
+
+    async def list_scheduled_work(
+        self,
+        *,
+        kind: DueWorkKind | None = None,
+        statuses: tuple[ScheduledWorkStatus, ...] = (),
+    ) -> tuple[ScheduledWorkRecord, ...]:
+        return self._repository.list_scheduled_work(kind=kind, statuses=statuses)
+
+    async def cancel_expired_scheduled_work(self, now: datetime) -> int:
+        return self._repository.cancel_expired_scheduled_work(now)

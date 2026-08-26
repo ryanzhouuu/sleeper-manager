@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
 
@@ -14,15 +14,23 @@ from sleeper_manager.persistence.acknowledgements import (
     raw_row_from_sequence,
 )
 from sleeper_manager.persistence.base import (
+    DEFAULT_SCHEDULED_WORK_LEASE,
+    PROJECTION_OBSERVATION_PAGE_SIZE,
     AcknowledgementAction,
     AcknowledgementOutcome,
     AcknowledgementResult,
     ActionTokenRecord,
+    CachedNBARecord,
     DataFreshnessRecord,
     DeliveryAttemptRecord,
+    DueWorkKind,
     LeagueSnapshotRecord,
+    ProjectionObservationRecord,
     RecommendationRecord,
     RecommendationStatus,
+    RuntimePolicyRecord,
+    ScheduledWorkRecord,
+    ScheduledWorkStatus,
     StoredLeagueProfile,
 )
 
@@ -75,7 +83,8 @@ class SQLiteStateRepository:
                     status TEXT NOT NULL,
                     acknowledged_action TEXT,
                     acknowledged_at TEXT,
-                    trace_json TEXT NOT NULL
+                    trace_json TEXT NOT NULL,
+                    revision INTEGER NOT NULL DEFAULT 0
                 )
                 """
             )
@@ -143,6 +152,102 @@ class SQLiteStateRepository:
                 """
             )
             connection.execute(ACKNOWLEDGED_DECISIONS_INDEX_SQL)
+            columns = {
+                str(row[1]) for row in connection.execute("PRAGMA table_info(recommendations)")
+            }
+            if "revision" not in columns:
+                connection.execute(
+                    "ALTER TABLE recommendations ADD COLUMN revision INTEGER NOT NULL DEFAULT 0"
+                )
+                connection.execute(
+                    """
+                    UPDATE recommendations AS current
+                    SET revision = (
+                        SELECT COUNT(*) FROM recommendations AS earlier
+                        WHERE earlier.league_id = current.league_id
+                          AND earlier.fantasy_week = current.fantasy_week
+                          AND earlier.decision_type = current.decision_type
+                          AND (
+                              earlier.created_at < current.created_at
+                              OR (
+                                  earlier.created_at = current.created_at
+                                  AND earlier.recommendation_id <= current.recommendation_id
+                              )
+                          )
+                    )
+                    """
+                )
+            connection.execute(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS recommendations_revision_idx
+                ON recommendations (league_id, fantasy_week, decision_type, revision)
+                """
+            )
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS runtime_policy (
+                    singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+                    version TEXT NOT NULL UNIQUE,
+                    payload_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS nba_cache (
+                    cache_key TEXT PRIMARY KEY,
+                    provider TEXT NOT NULL,
+                    resource TEXT NOT NULL,
+                    schema_version TEXT NOT NULL,
+                    payload_json TEXT NOT NULL,
+                    retrieved_at TEXT NOT NULL,
+                    source_updated_at TEXT,
+                    expires_at TEXT,
+                    quality TEXT NOT NULL,
+                    warnings_json TEXT NOT NULL,
+                    errors_json TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS projection_observations (
+                    history_version TEXT NOT NULL,
+                    player_id TEXT NOT NULL,
+                    game_id TEXT NOT NULL,
+                    game_start TEXT NOT NULL,
+                    outcome_finalized_at TEXT,
+                    minutes REAL,
+                    started INTEGER NOT NULL,
+                    did_not_play INTEGER NOT NULL,
+                    box_score_json TEXT NOT NULL,
+                    source_version TEXT NOT NULL,
+                    PRIMARY KEY (history_version, player_id, game_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS projection_observations_version_start_idx
+                ON projection_observations (history_version, game_start, player_id);
+
+                CREATE TABLE IF NOT EXISTS scheduled_work (
+                    work_id TEXT PRIMARY KEY,
+                    dedupe_key TEXT NOT NULL UNIQUE,
+                    kind TEXT NOT NULL,
+                    due_at TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    local_day TEXT,
+                    game_id TEXT,
+                    recommendation_id TEXT,
+                    deadline TEXT,
+                    lease_expires_at TEXT,
+                    attempt_count INTEGER NOT NULL DEFAULT 0,
+                    correlation_id TEXT,
+                    failure_category TEXT,
+                    terminal_summary_json TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (recommendation_id)
+                        REFERENCES recommendations(recommendation_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS scheduled_work_due_idx
+                ON scheduled_work (status, due_at, lease_expires_at);
+                """
+            )
 
     def load_acknowledged_decisions(
         self,
@@ -182,6 +287,7 @@ class SQLiteStateRepository:
             ),
             acknowledged_at=datetime.fromisoformat(str(row[14])) if row[14] else None,
             trace_json=str(row[15]),
+            revision=int(str(row[16])),
         )
 
     def load_profile(self, league_id: str) -> StoredLeagueProfile | None:
@@ -313,8 +419,11 @@ class SQLiteStateRepository:
                     recommendation_id, idempotency_key, league_id, fantasy_week,
                     player_id, game_id, decision_type, title, message, deadline,
                     policy_version, created_at, status, acknowledged_action,
-                    acknowledged_at, trace_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    acknowledged_at, trace_json, revision
+                ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                         COALESCE(MAX(revision), 0) + 1
+                  FROM recommendations
+                  WHERE league_id = ? AND fantasy_week = ? AND decision_type = ?
                 """,
                 (
                     recommendation.recommendation_id,
@@ -339,6 +448,9 @@ class SQLiteStateRepository:
                     if recommendation.acknowledged_at is not None
                     else None,
                     recommendation.trace_json,
+                    recommendation.league_id,
+                    recommendation.fantasy_week,
+                    recommendation.decision_type,
                 ),
             )
         return cursor.rowcount == 1
@@ -350,7 +462,7 @@ class SQLiteStateRepository:
                 SELECT recommendation_id, idempotency_key, league_id, fantasy_week,
                        player_id, game_id, decision_type, title, message, deadline,
                        policy_version, created_at, status, acknowledged_action,
-                       acknowledged_at, trace_json
+                       acknowledged_at, trace_json, revision
                 FROM recommendations
                 WHERE recommendation_id = ?
                 """,
@@ -362,7 +474,7 @@ class SQLiteStateRepository:
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT OR REPLACE INTO delivery_attempts (
+                INSERT INTO delivery_attempts (
                     delivery_id, recommendation_id, provider, attempt_number,
                     attempted_at, succeeded, error
                 ) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -377,6 +489,18 @@ class SQLiteStateRepository:
                     attempt.error,
                 ),
             )
+
+    def next_delivery_attempt_number(self, recommendation_id: str) -> int:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT COALESCE(MAX(attempt_number), 0) + 1
+                FROM delivery_attempts
+                WHERE recommendation_id = ? AND provider != '_delivery_claim'
+                """,
+                (recommendation_id,),
+            ).fetchone()
+        return int(row[0])
 
     def has_successful_delivery(self, recommendation_id: str) -> bool:
         with self._connect() as connection:
@@ -394,14 +518,26 @@ class SQLiteStateRepository:
     def _delivery_claim_id(recommendation_id: str) -> str:
         return sha256(f"{recommendation_id}:delivery-claim".encode()).hexdigest()
 
-    def claim_delivery(self, recommendation_id: str, claimed_at: datetime) -> bool:
+    def claim_delivery(
+        self,
+        recommendation_id: str,
+        claimed_at: datetime,
+        *,
+        lease_duration: timedelta = timedelta(minutes=2),
+    ) -> bool:
+        reclaim_before = claimed_at - lease_duration
         with self._connect() as connection:
             cursor = connection.execute(
                 """
-                INSERT OR IGNORE INTO delivery_attempts (
+                INSERT INTO delivery_attempts (
                     delivery_id, recommendation_id, provider, attempt_number,
                     attempted_at, succeeded, error
                 ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(delivery_id) DO UPDATE SET
+                    attempted_at = excluded.attempted_at
+                WHERE delivery_attempts.provider = '_delivery_claim'
+                  AND delivery_attempts.succeeded = 0
+                  AND delivery_attempts.attempted_at <= ?
                 """,
                 (
                     self._delivery_claim_id(recommendation_id),
@@ -411,6 +547,7 @@ class SQLiteStateRepository:
                     claimed_at.isoformat(),
                     0,
                     None,
+                    reclaim_before.isoformat(),
                 ),
             )
         return cursor.rowcount == 1
@@ -474,7 +611,7 @@ class SQLiteStateRepository:
                 SELECT recommendation_id, idempotency_key, league_id, fantasy_week,
                        player_id, game_id, decision_type, title, message, deadline,
                        policy_version, created_at, status, acknowledged_action,
-                       acknowledged_at, trace_json
+                       acknowledged_at, trace_json, revision
                 FROM recommendations
                 WHERE recommendation_id = ?
                 """,
@@ -543,7 +680,7 @@ class SQLiteStateRepository:
                 SELECT recommendation_id, idempotency_key, league_id, fantasy_week,
                        player_id, game_id, decision_type, title, message, deadline,
                        policy_version, created_at, status, acknowledged_action,
-                       acknowledged_at, trace_json
+                       acknowledged_at, trace_json, revision
                 FROM recommendations
                 WHERE recommendation_id = ?
                 """,
@@ -583,7 +720,7 @@ class SQLiteStateRepository:
                 SELECT recommendation_id, idempotency_key, league_id, fantasy_week,
                        player_id, game_id, decision_type, title, message, deadline,
                        policy_version, created_at, status, acknowledged_action,
-                       acknowledged_at, trace_json
+                       acknowledged_at, trace_json, revision
                 FROM recommendations
                 WHERE league_id = ?
                   AND fantasy_week = ?
@@ -653,3 +790,402 @@ class SQLiteStateRepository:
                 ),
             ).fetchone()
         return row is not None
+
+    def load_runtime_policy(self) -> RuntimePolicyRecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT version, payload_json, updated_at
+                FROM runtime_policy WHERE singleton_id = 1
+                """
+            ).fetchone()
+        if row is None:
+            return None
+        return RuntimePolicyRecord(str(row[0]), str(row[1]), datetime.fromisoformat(str(row[2])))
+
+    def save_runtime_policy(self, policy: RuntimePolicyRecord) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO runtime_policy (singleton_id, version, payload_json, updated_at)
+                VALUES (1, ?, ?, ?)
+                ON CONFLICT(singleton_id) DO UPDATE SET
+                    version = excluded.version,
+                    payload_json = excluded.payload_json,
+                    updated_at = excluded.updated_at
+                """,
+                (policy.version, policy.payload_json, policy.updated_at.isoformat()),
+            )
+
+    def get(self, cache_key: str, *, now: datetime) -> CachedNBARecord | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT cache_key, provider, resource, schema_version, payload_json,
+                       retrieved_at, source_updated_at, expires_at, quality,
+                       warnings_json, errors_json
+                FROM nba_cache WHERE cache_key = ?
+                """,
+                (cache_key,),
+            ).fetchone()
+        if row is None:
+            return None
+        record = CachedNBARecord(
+            cache_key=str(row[0]),
+            provider=str(row[1]),
+            resource=str(row[2]),
+            schema_version=str(row[3]),
+            payload_json=str(row[4]),
+            retrieved_at=datetime.fromisoformat(str(row[5])),
+            source_updated_at=datetime.fromisoformat(str(row[6])) if row[6] else None,
+            expires_at=datetime.fromisoformat(str(row[7])) if row[7] else None,
+            quality=DataQualityState(str(row[8])),
+            warnings=tuple(json.loads(str(row[9]))),
+            errors=tuple(json.loads(str(row[10]))),
+        )
+        if record.expires_at is not None and record.expires_at <= now:
+            return CachedNBARecord(
+                cache_key=record.cache_key,
+                provider=record.provider,
+                resource=record.resource,
+                schema_version=record.schema_version,
+                payload_json=record.payload_json,
+                retrieved_at=record.retrieved_at,
+                source_updated_at=record.source_updated_at,
+                expires_at=record.expires_at,
+                quality=DataQualityState.STALE,
+                warnings=record.warnings + ("Cached record has exceeded its freshness window",),
+                errors=record.errors,
+            )
+        return record
+
+    def put(self, record: CachedNBARecord) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO nba_cache (
+                    cache_key, provider, resource, schema_version, payload_json,
+                    retrieved_at, source_updated_at, expires_at, quality,
+                    warnings_json, errors_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(cache_key) DO UPDATE SET
+                    provider = excluded.provider,
+                    resource = excluded.resource,
+                    schema_version = excluded.schema_version,
+                    payload_json = excluded.payload_json,
+                    retrieved_at = excluded.retrieved_at,
+                    source_updated_at = excluded.source_updated_at,
+                    expires_at = excluded.expires_at,
+                    quality = excluded.quality,
+                    warnings_json = excluded.warnings_json,
+                    errors_json = excluded.errors_json
+                """,
+                (
+                    record.cache_key,
+                    record.provider,
+                    record.resource,
+                    record.schema_version,
+                    record.payload_json,
+                    record.retrieved_at.isoformat(),
+                    record.source_updated_at.isoformat() if record.source_updated_at else None,
+                    record.expires_at.isoformat() if record.expires_at else None,
+                    record.quality.value,
+                    json.dumps(record.warnings),
+                    json.dumps(record.errors),
+                ),
+            )
+
+    def save_projection_observations(
+        self, observations: tuple[ProjectionObservationRecord, ...]
+    ) -> None:
+        with self._connect() as connection:
+            connection.executemany(
+                """
+                INSERT INTO projection_observations (
+                    history_version, player_id, game_id, game_start,
+                    outcome_finalized_at, minutes, started, did_not_play,
+                    box_score_json, source_version
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(history_version, player_id, game_id) DO UPDATE SET
+                    game_start = excluded.game_start,
+                    outcome_finalized_at = excluded.outcome_finalized_at,
+                    minutes = excluded.minutes,
+                    started = excluded.started,
+                    did_not_play = excluded.did_not_play,
+                    box_score_json = excluded.box_score_json,
+                    source_version = excluded.source_version
+                """,
+                tuple(
+                    (
+                        item.history_version,
+                        item.player_id,
+                        item.game_id,
+                        item.game_start.isoformat(),
+                        item.outcome_finalized_at.isoformat()
+                        if item.outcome_finalized_at
+                        else None,
+                        item.minutes,
+                        int(item.started),
+                        int(item.did_not_play),
+                        item.box_score_json,
+                        item.source_version,
+                    )
+                    for item in observations
+                ),
+            )
+
+    def load_projection_observations(
+        self,
+        history_version: str,
+        *,
+        before: datetime | None = None,
+        page_size: int = PROJECTION_OBSERVATION_PAGE_SIZE,
+    ) -> tuple[ProjectionObservationRecord, ...]:
+        if page_size <= 0:
+            raise ValueError("Projection observation page size must be positive")
+        conditions = ["history_version = ?"]
+        params: list[object] = [history_version]
+        if before is not None:
+            conditions.append("game_start < ?")
+            conditions.append("outcome_finalized_at IS NOT NULL")
+            conditions.append("outcome_finalized_at <= ?")
+            params.extend((before.isoformat(), before.isoformat()))
+        where = " AND ".join(conditions)
+        records: list[ProjectionObservationRecord] = []
+        offset = 0
+        with self._connect() as connection:
+            while True:
+                rows = connection.execute(
+                    """
+                    SELECT history_version, player_id, game_id, game_start,
+                           outcome_finalized_at, minutes, started, did_not_play,
+                           box_score_json, source_version
+                    FROM projection_observations
+                    WHERE """
+                    + where
+                    + """
+                    ORDER BY game_start, game_id, player_id
+                    LIMIT ? OFFSET ?
+                    """,
+                    (*params, page_size, offset),
+                ).fetchall()
+                records.extend(self._projection_observation(row) for row in rows)
+                if len(rows) < page_size:
+                    break
+                offset += page_size
+        return tuple(records)
+
+    @staticmethod
+    def _projection_observation(row: tuple[object, ...]) -> ProjectionObservationRecord:
+        return ProjectionObservationRecord(
+            history_version=str(row[0]),
+            player_id=str(row[1]),
+            game_id=str(row[2]),
+            game_start=datetime.fromisoformat(str(row[3])),
+            outcome_finalized_at=datetime.fromisoformat(str(row[4])) if row[4] else None,
+            minutes=float(str(row[5])) if row[5] is not None else None,
+            started=bool(row[6]),
+            did_not_play=bool(row[7]),
+            box_score_json=str(row[8]),
+            source_version=str(row[9]),
+        )
+
+    def upsert_scheduled_work(self, work: ScheduledWorkRecord) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO scheduled_work (
+                    work_id, dedupe_key, kind, due_at, status, local_day, game_id,
+                    recommendation_id, deadline, lease_expires_at, attempt_count,
+                    correlation_id, failure_category, terminal_summary_json,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(dedupe_key) DO UPDATE SET
+                    kind = excluded.kind,
+                    due_at = excluded.due_at,
+                    status = CASE
+                        WHEN scheduled_work.status IN ('completed', 'running')
+                            THEN scheduled_work.status
+                        ELSE excluded.status
+                    END,
+                    local_day = excluded.local_day,
+                    game_id = excluded.game_id,
+                    recommendation_id = excluded.recommendation_id,
+                    deadline = excluded.deadline,
+                    updated_at = excluded.updated_at
+                WHERE scheduled_work.status NOT IN ('completed', 'running')
+                """,
+                self._scheduled_work_values(work),
+            )
+
+    def claim_due_work(
+        self,
+        now: datetime,
+        *,
+        correlation_id: str,
+        lease_duration: timedelta = DEFAULT_SCHEDULED_WORK_LEASE,
+        limit: int = 100,
+    ) -> tuple[ScheduledWorkRecord, ...]:
+        if limit <= 0:
+            return ()
+        lease_expires_at = now + lease_duration
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            rows = connection.execute(
+                """
+                UPDATE scheduled_work
+                SET status = 'running', lease_expires_at = ?, attempt_count = attempt_count + 1,
+                    correlation_id = ?, failure_category = NULL,
+                    terminal_summary_json = NULL, updated_at = ?
+                WHERE work_id IN (
+                    SELECT work_id FROM scheduled_work
+                    WHERE due_at <= ? AND (
+                        status IN ('pending', 'retry')
+                        OR (status = 'running' AND lease_expires_at <= ?)
+                    )
+                    ORDER BY due_at, work_id
+                    LIMIT ?
+                )
+                RETURNING work_id, dedupe_key, kind, due_at, status, local_day,
+                          game_id, recommendation_id, deadline, lease_expires_at,
+                          attempt_count, correlation_id, failure_category,
+                          terminal_summary_json, created_at, updated_at
+                """,
+                (
+                    lease_expires_at.isoformat(),
+                    correlation_id,
+                    now.isoformat(),
+                    now.isoformat(),
+                    now.isoformat(),
+                    limit,
+                ),
+            ).fetchall()
+        return tuple(self._scheduled_work(row) for row in rows)
+
+    def finish_scheduled_work(
+        self,
+        work_id: str,
+        *,
+        status: ScheduledWorkStatus,
+        finished_at: datetime,
+        correlation_id: str,
+        failure_category: str | None = None,
+        terminal_summary_json: str | None = None,
+        retry_at: datetime | None = None,
+    ) -> bool:
+        if status not in {
+            ScheduledWorkStatus.COMPLETED,
+            ScheduledWorkStatus.RETRY,
+            ScheduledWorkStatus.CANCELED,
+        }:
+            raise ValueError("Claimed work must finish as completed, retry, or canceled")
+        if (status is ScheduledWorkStatus.RETRY) != (retry_at is not None):
+            raise ValueError("Retry work requires exactly one retry timestamp")
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE scheduled_work
+                SET status = ?, due_at = COALESCE(?, due_at), lease_expires_at = NULL,
+                    failure_category = ?, terminal_summary_json = ?, updated_at = ?
+                WHERE work_id = ? AND status = 'running' AND correlation_id = ?
+                """,
+                (
+                    status.value,
+                    retry_at.isoformat() if retry_at else None,
+                    failure_category,
+                    terminal_summary_json,
+                    finished_at.isoformat(),
+                    work_id,
+                    correlation_id,
+                ),
+            )
+        return cursor.rowcount == 1
+
+    def list_scheduled_work(
+        self,
+        *,
+        kind: DueWorkKind | None = None,
+        statuses: tuple[ScheduledWorkStatus, ...] = (),
+    ) -> tuple[ScheduledWorkRecord, ...]:
+        conditions: list[str] = []
+        params: list[object] = []
+        if kind is not None:
+            conditions.append("kind = ?")
+            params.append(kind.value)
+        if statuses:
+            placeholders = ", ".join("?" for _ in statuses)
+            conditions.append(f"status IN ({placeholders})")
+            params.extend(status.value for status in statuses)
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT work_id, dedupe_key, kind, due_at, status, local_day,
+                       game_id, recommendation_id, deadline, lease_expires_at,
+                       attempt_count, correlation_id, failure_category,
+                       terminal_summary_json, created_at, updated_at
+                FROM scheduled_work
+                """
+                + where
+                + " ORDER BY due_at, work_id",
+                tuple(params),
+            ).fetchall()
+        return tuple(self._scheduled_work(row) for row in rows)
+
+    def cancel_expired_scheduled_work(self, now: datetime) -> int:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE scheduled_work
+                SET status = 'canceled', lease_expires_at = NULL,
+                    failure_category = 'deadline_elapsed', updated_at = ?
+                WHERE deadline IS NOT NULL AND deadline <= ? AND (
+                    status IN ('pending', 'retry')
+                    OR (status = 'running' AND lease_expires_at <= ?)
+                )
+                """,
+                (now.isoformat(), now.isoformat(), now.isoformat()),
+            )
+        return cursor.rowcount
+
+    @staticmethod
+    def _scheduled_work_values(work: ScheduledWorkRecord) -> tuple[object, ...]:
+        return (
+            work.work_id,
+            work.dedupe_key,
+            work.kind.value,
+            work.due_at.isoformat(),
+            work.status.value,
+            work.local_day,
+            work.game_id,
+            work.recommendation_id,
+            work.deadline.isoformat() if work.deadline else None,
+            work.lease_expires_at.isoformat() if work.lease_expires_at else None,
+            work.attempt_count,
+            work.correlation_id,
+            work.failure_category,
+            work.terminal_summary_json,
+            work.created_at.isoformat(),
+            work.updated_at.isoformat(),
+        )
+
+    @staticmethod
+    def _scheduled_work(row: tuple[object, ...]) -> ScheduledWorkRecord:
+        return ScheduledWorkRecord(
+            work_id=str(row[0]),
+            dedupe_key=str(row[1]),
+            kind=DueWorkKind(str(row[2])),
+            due_at=datetime.fromisoformat(str(row[3])),
+            status=ScheduledWorkStatus(str(row[4])),
+            local_day=str(row[5]) if row[5] is not None else None,
+            game_id=str(row[6]) if row[6] is not None else None,
+            recommendation_id=str(row[7]) if row[7] is not None else None,
+            deadline=datetime.fromisoformat(str(row[8])) if row[8] else None,
+            lease_expires_at=datetime.fromisoformat(str(row[9])) if row[9] else None,
+            attempt_count=int(str(row[10])),
+            correlation_id=str(row[11]) if row[11] is not None else None,
+            failure_category=str(row[12]) if row[12] is not None else None,
+            terminal_summary_json=str(row[13]) if row[13] is not None else None,
+            created_at=datetime.fromisoformat(str(row[14])),
+            updated_at=datetime.fromisoformat(str(row[15])),
+        )

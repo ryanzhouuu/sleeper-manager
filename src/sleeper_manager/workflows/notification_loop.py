@@ -103,8 +103,11 @@ class NotificationLoop:
             trace_json=request.trace_json,
         )
         created = await self._repository.create_recommendation(recommendation)
+        stored = await self._repository.get_recommendation(recommendation.recommendation_id)
+        if stored is not None:
+            recommendation = stored
         if not created:
-            existing = await self._repository.get_recommendation(recommendation.recommendation_id)
+            existing = stored
             if existing is None:
                 return NotificationLoopResult("duplicate", recommendation, None, None)
             recommendation = existing
@@ -125,6 +128,31 @@ class NotificationLoop:
         if result.status == "delivery_failed":
             await self._repository.release_delivery_claim(recommendation.recommendation_id)
         return result
+
+    async def retry_persisted(
+        self,
+        recommendation: RecommendationRecord,
+        *,
+        open_sleeper_url: str,
+    ) -> NotificationLoopResult:
+        if recommendation.deadline is None:
+            raise ValueError("Persisted delivery retries require a deadline")
+        return await self.run(
+            RecommendationRequest(
+                league_id=recommendation.league_id,
+                fantasy_week=recommendation.fantasy_week,
+                player_id=recommendation.player_id,
+                game_id=recommendation.game_id,
+                decision_type=recommendation.decision_type,
+                title=recommendation.title,
+                message=recommendation.message,
+                deadline=recommendation.deadline,
+                policy_version=recommendation.policy_version,
+                open_sleeper_url=open_sleeper_url,
+                trace_json=recommendation.trace_json,
+                idempotency_key=recommendation.idempotency_key,
+            )
+        )
 
     async def _deliver(
         self,
@@ -170,7 +198,11 @@ class NotificationLoop:
             actions=tuple(actions),
         )
         delivery = await self._dispatcher.send_with_result(notification)
-        for index, attempt in enumerate(delivery.attempts, start=1):
+        attempt_number = await self._repository.next_delivery_attempt_number(
+            recommendation.recommendation_id
+        )
+        for offset, attempt in enumerate(delivery.attempts):
+            index = attempt_number + offset
             delivery_id = sha256(
                 f"{recommendation.recommendation_id}:{index}:{attempt.provider}".encode()
             ).hexdigest()
