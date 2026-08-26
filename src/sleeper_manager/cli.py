@@ -1,10 +1,16 @@
 import argparse
 import asyncio
+import json
+import os
 import sys
 from collections import Counter
 from dataclasses import fields
 from datetime import UTC, date, datetime
 from pathlib import Path
+from types import SimpleNamespace
+from uuid import uuid4
+
+import httpx
 
 from sleeper_manager import __version__
 from sleeper_manager.backtesting.experiments.feature_validation import run_model_feature_validation
@@ -16,6 +22,16 @@ from sleeper_manager.backtesting.experiments.projection_evaluation import (
     ProjectionEvaluationError,
     run_projection_evaluation,
 )
+from sleeper_manager.cloudflare.dispatcher import dispatch_due_work
+from sleeper_manager.cloudflare.planning import collect_cloudflare_planning_inputs
+from sleeper_manager.cloudflare.runtime_sync import (
+    RemoteD1,
+    compact_history_from_workspace,
+    d1_database_id,
+    redact_secrets,
+    runtime_policy_for_history,
+    sync_cloudflare_runtime_data,
+)
 from sleeper_manager.config import Settings
 from sleeper_manager.domain.league import LeagueProfile
 from sleeper_manager.integrations.nba.espn import ESPNAPIError, ESPNClient
@@ -26,6 +42,7 @@ from sleeper_manager.integrations.sleeper.sync import (
 )
 from sleeper_manager.notifications.factory import build_notification_dispatcher
 from sleeper_manager.persistence.async_sqlite import AsyncSQLiteStateRepository
+from sleeper_manager.persistence.d1 import D1StateRepository
 from sleeper_manager.persistence.nba_cache import SQLiteNBADataCache
 from sleeper_manager.persistence.sqlite import SQLiteStateRepository
 from sleeper_manager.workflows.nba_diagnostics import collect_nba_diagnostics
@@ -48,6 +65,37 @@ def build_parser() -> argparse.ArgumentParser:
     subcommands.add_parser(
         "phase3-test-notification",
         help="Send one idempotent placeholder notification for the Phase 3 operational test",
+    )
+    subcommands.add_parser(
+        "run-scheduled",
+        help="Run one local due-work wake against the configured SQLite state",
+    )
+    sync_runtime = subcommands.add_parser(
+        "sync-cloudflare-runtime-data",
+        help="Load compact projection history and activate Cloudflare runtime policy",
+    )
+    sync_runtime.add_argument(
+        "--workspace",
+        type=Path,
+        default=Path(".local/model-validation"),
+        help="Ignored local directory containing raw sources, injury cache, and reports",
+    )
+    sync_runtime.add_argument(
+        "--league-fixture",
+        type=Path,
+        default=Path("tests/fixtures/sleeper/current_league.json"),
+        help="Sleeper league payload providing the scoring_settings object",
+    )
+    sync_runtime.add_argument(
+        "--apply",
+        action="store_true",
+        help="Write compact history and activate runtime policy in D1",
+    )
+    sync_runtime.add_argument(
+        "--wrangler-config",
+        type=Path,
+        default=Path("wrangler.toml"),
+        help="Wrangler config used to read the D1 database id",
     )
     validation = subcommands.add_parser(
         "validate-model-features",
@@ -286,6 +334,20 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "phase3-test-notification":
         settings = Settings()
         return asyncio.run(_phase3_test_notification(settings))
+    if args.command == "run-scheduled":
+        settings = Settings()
+        return asyncio.run(_run_scheduled(settings))
+    if args.command == "sync-cloudflare-runtime-data":
+        settings = Settings()
+        return asyncio.run(
+            _sync_cloudflare_runtime_data(
+                workspace=args.workspace,
+                league_fixture=args.league_fixture,
+                apply=args.apply,
+                wrangler_config=args.wrangler_config,
+                settings=settings,
+            )
+        )
     if args.command == "validate-model-features":
         try:
             output = run_model_feature_validation(
@@ -337,10 +399,134 @@ def main(argv: list[str] | None = None) -> int:
         except (LockInExperimentError, OSError, ValueError) as error:
             print(f"Lock-In policy validation failed: {error}", file=sys.stderr)
             return 2
-        print(f"Status: {lock_output.status}")
-        print(f"JSON report: {lock_output.report_json_path}")
-        print(f"Markdown report: {lock_output.report_markdown_path}")
-        return 0 if lock_output.status == "complete" else 1
+    print(f"Status: {lock_output.status}")
+    print(f"JSON report: {lock_output.report_json_path}")
+    print(f"Markdown report: {lock_output.report_markdown_path}")
+    return 0 if lock_output.status == "complete" else 1
+
+
+class _HttpxFetchResponse:
+    def __init__(self, response: httpx.Response) -> None:
+        self.status = response.status_code
+        self._payload = response.json()
+
+    def json(self) -> object:
+        return self._payload
+
+
+async def _run_scheduled(settings: Settings) -> int:
+    if not settings.sleeper_configured:
+        print(
+            "Sleeper configuration is incomplete: set SLEEPER_LEAGUE_ID and SLEEPER_USER_ID",
+            file=sys.stderr,
+        )
+        return 2
+    if not settings.notifications_configured:
+        print("Notification configuration is incomplete", file=sys.stderr)
+        return 2
+    if not settings.acknowledgement_base_url:
+        print("Set ACKNOWLEDGEMENT_BASE_URL before running scheduled work", file=sys.stderr)
+        return 2
+    try:
+        repository = AsyncSQLiteStateRepository(settings.sqlite_path)
+        await repository.initialize()
+        notifications = NotificationLoop(
+            repository,
+            build_notification_dispatcher(settings),
+            acknowledgement_base_url=settings.acknowledgement_base_url,
+        )
+        now = datetime.now(UTC)
+        env = SimpleNamespace(
+            SLEEPER_LEAGUE_ID=settings.sleeper_league_id,
+            SLEEPER_USER_ID=settings.sleeper_user_id,
+        )
+        async with httpx.AsyncClient() as client:
+
+            async def fetch(url: str) -> _HttpxFetchResponse:
+                return _HttpxFetchResponse(await client.get(url))
+
+            async def collect(*, repository, policy, scheduled_at):  # type: ignore[no-untyped-def]
+                return await collect_cloudflare_planning_inputs(
+                    env,
+                    fetch,
+                    repository=repository,
+                    policy=policy,
+                    scheduled_at=scheduled_at,
+                    clock=lambda: now,
+                )
+
+            summary = await dispatch_due_work(
+                repository,
+                notifications=notifications,
+                collect=collect,
+                scheduled_at=now,
+                correlation_id=uuid4().hex,
+                open_sleeper_url="https://sleeper.com",
+            )
+    except (OSError, RuntimeError, ValueError) as error:
+        print(redact_secrets(f"Scheduled run failed: {error}"), file=sys.stderr)
+        return 2
+    print(json.dumps(summary.as_dict(), sort_keys=True))
+    if summary.status.value in {"failed", "blocked"}:
+        return 2
+    return 0 if summary.status.value != "delivery_failed" else 1
+
+
+async def _sync_cloudflare_runtime_data(
+    *,
+    workspace: Path,
+    league_fixture: Path,
+    apply: bool,
+    wrangler_config: Path,
+    settings: Settings,
+) -> int:
+    now = datetime.now(UTC)
+    try:
+        history = compact_history_from_workspace(
+            workspace,
+            league_fixture=league_fixture,
+            now=now,
+        )
+        policy = runtime_policy_for_history(history, policy_path=settings.manager_policy_path)
+        repository = None
+        if apply:
+            account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
+            api_token = os.environ.get("CLOUDFLARE_API_TOKEN", "").strip()
+            if not account_id or not api_token:
+                print(
+                    "Set CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN before --apply",
+                    file=sys.stderr,
+                )
+                return 2
+            async with httpx.AsyncClient() as client:
+                repository = D1StateRepository(
+                    RemoteD1(
+                        account_id,
+                        d1_database_id(wrangler_config),
+                        api_token,
+                        client,
+                    )
+                )
+                report = await sync_cloudflare_runtime_data(
+                    history,
+                    policy=policy,
+                    repository=repository,
+                    apply=True,
+                    now=now,
+                )
+        else:
+            report = await sync_cloudflare_runtime_data(
+                history,
+                policy=policy,
+                repository=None,
+                apply=False,
+                now=now,
+            )
+    except (OSError, RuntimeError, ValueError) as error:
+        print(redact_secrets(f"Runtime data sync failed: {error}"), file=sys.stderr)
+        return 2
+    print(json.dumps(report.as_dict(), sort_keys=True))
+    return 0
     return 2
 
 

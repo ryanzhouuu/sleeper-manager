@@ -23,12 +23,16 @@ Store these as Worker secrets rather than committing them:
 - `SLEEPER_LEAGUE_ID`
 - `SLEEPER_USER_ID`
 
-Apply the schema and deploy:
+Apply the schema, synchronize compact projection history, and deploy:
 
 ```bash
 npx wrangler d1 migrations apply sleeper-manager-state --remote
+uv run --extra historical sleeper-manager sync-cloudflare-runtime-data --apply
 uvx --from workers-py pywrangler deploy
 ```
+
+See `docs/cloudflare-runtime.md` for dry-run behavior, required environment variables, and the
+local `run-scheduled` command.
 
 Python Workers require the `python_workers` compatibility flag and are currently
 in beta. Use `uvx --from workers-py pywrangler dev` for local Worker development.
