@@ -1,4 +1,4 @@
-"""Pin CLI command names and fail-closed dispatch before the Phase 3 rename."""
+"""Pin CLI command names and fail-closed dispatch for local operator commands."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ OPERATIONAL_COMMANDS = (
     "check-config",
     "bootstrap",
     "check-nba-data",
-    "phase3-test-notification",
+    "test-notification",
     "run-scheduled",
     "sync-cloudflare-runtime-data",
     "validate-model-features",
@@ -44,9 +44,14 @@ def test_parser_exposes_current_command_names() -> None:
         assert name in help_text
 
 
-def test_phase3_test_notification_is_a_named_subcommand() -> None:
-    args = build_parser().parse_args(["phase3-test-notification"])
-    assert args.command == "phase3-test-notification"
+def test_notification_command_is_registered() -> None:
+    args = build_parser().parse_args(["test-notification"])
+    assert args.command == "test-notification"
+
+
+def test_legacy_phase3_command_name_is_not_registered() -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["phase3-test-notification"])
 
 
 def test_check_config_reports_unconfigured_defaults(
@@ -95,18 +100,18 @@ def test_check_nba_data_requires_sleeper_ids(
     assert "SLEEPER_LEAGUE_ID" in capsys.readouterr().err
 
 
-def test_phase3_test_notification_requires_notification_config(
+def test_notification_requires_notification_config(
     isolated_cli_settings: None, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert main(["phase3-test-notification"]) == 2
+    assert main(["test-notification"]) == 2
     assert "Notification configuration is incomplete" in capsys.readouterr().err
 
 
-def test_phase3_test_notification_requires_acknowledgement_url(
+def test_notification_requires_acknowledgement_url(
     isolated_cli_settings: None, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     monkeypatch.setenv("NTFY_TOPIC", "alerts")
-    assert main(["phase3-test-notification"]) == 2
+    assert main(["test-notification"]) == 2
     assert "ACKNOWLEDGEMENT_BASE_URL" in capsys.readouterr().err
 
 

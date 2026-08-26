@@ -85,7 +85,7 @@ Run `uv run sleeper-manager --help` for the complete argument reference.
 | `check-config` | Report sanitized configuration readiness |
 | `bootstrap` | Validate and summarize the configured Sleeper league |
 | `check-nba-data` | Report NBA provider health and player-mapping coverage |
-| `phase3-test-notification` | Send one idempotent local notification diagnostic |
+| `test-notification` | Send one idempotent local notification diagnostic |
 | `run-scheduled` | Run one local due-work wake against SQLite |
 | `validate-model-features` | Run the frozen historical feature experiment |
 | `evaluate-projections` | Evaluate the frozen projection models |

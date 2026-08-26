@@ -1,6 +1,6 @@
 # Cloudflare deployment
 
-This directory contains the D1 migration for the Phase 3 Python Worker. The
+This directory contains the D1 migration for the Python Worker. The
 canonical Wrangler configuration is `wrangler.toml` at the repository root so
 `pywrangler` can discover it from the project root.
 

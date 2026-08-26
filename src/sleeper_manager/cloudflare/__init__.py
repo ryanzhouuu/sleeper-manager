@@ -1,1 +1,1 @@
-"""Cloudflare Worker adapters for the Phase 3 operational slice."""
+"""Cloudflare Worker adapters for scheduled work and acknowledgement routes."""

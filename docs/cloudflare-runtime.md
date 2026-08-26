@@ -2,7 +2,7 @@
 
 The Worker uses one five-minute Cron Trigger. Each wake claims due daily, pre-tipoff, or
 delivery-retry work and runs the weekly lineup planner at most once. Lineup notifications
-include Open Sleeper only. The `phase3-test-notification` command remains a local diagnostic
+include Open Sleeper only. The `test-notification` command remains a local diagnostic
 and is never invoked from `scheduled()`.
 
 Projection history and the active runtime policy live in D1. They are not bundled into the

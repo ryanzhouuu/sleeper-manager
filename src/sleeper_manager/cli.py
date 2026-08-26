@@ -63,8 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     nba_data.add_argument("--date", dest="game_date", help="Scoreboard date in YYYY-MM-DD format")
     subcommands.add_parser(
-        "phase3-test-notification",
-        help="Send one idempotent placeholder notification for the Phase 3 operational test",
+        "test-notification",
+        help="Send one idempotent local notification diagnostic",
     )
     subcommands.add_parser(
         "run-scheduled",
@@ -184,7 +184,7 @@ async def _bootstrap(settings: Settings) -> int:
         )
         return 2
     if settings.state_backend != "sqlite":
-        print("Phase 1 bootstrap requires STATE_BACKEND=sqlite", file=sys.stderr)
+        print("bootstrap requires STATE_BACKEND=sqlite", file=sys.stderr)
         return 2
 
     try:
@@ -238,7 +238,7 @@ async def _check_nba_data(settings: Settings, game_date: date) -> int:
         )
         return 2
     if settings.state_backend != "sqlite":
-        print("Phase 2 NBA diagnostics require STATE_BACKEND=sqlite", file=sys.stderr)
+        print("NBA diagnostics require STATE_BACKEND=sqlite", file=sys.stderr)
         return 2
 
     try:
@@ -277,12 +277,12 @@ async def _check_nba_data(settings: Settings, game_date: date) -> int:
     return 0 if report.healthy else 1
 
 
-async def _phase3_test_notification(settings: Settings) -> int:
+async def _test_notification(settings: Settings) -> int:
     if not settings.notifications_configured:
         print("Notification configuration is incomplete", file=sys.stderr)
         return 2
     if not settings.acknowledgement_base_url:
-        print("Set ACKNOWLEDGEMENT_BASE_URL before sending a Phase 3 notification", file=sys.stderr)
+        print("Set ACKNOWLEDGEMENT_BASE_URL before sending a test notification", file=sys.stderr)
         return 2
     try:
         repository = AsyncSQLiteStateRepository(settings.sqlite_path)
@@ -295,14 +295,14 @@ async def _phase3_test_notification(settings: Settings) -> int:
             acknowledgement_base_url=settings.acknowledgement_base_url,
         ).run(
             default_placeholder_request(
-                league_id=settings.sleeper_league_id or "phase3-local",
+                league_id=settings.sleeper_league_id or "local-diagnostic",
                 now=now,
             )
         )
     except (OSError, RuntimeError, ValueError) as error:
-        print(f"Phase 3 notification failed: {error}", file=sys.stderr)
+        print(f"Test notification failed: {error}", file=sys.stderr)
         return 2
-    print(f"Phase 3 notification: {result.status}")
+    print(f"Test notification: {result.status}")
     print(f"Recommendation: {result.recommendation.recommendation_id}")
     if result.delivery is not None:
         for attempt in result.delivery.attempts:
@@ -331,9 +331,9 @@ def main(argv: list[str] | None = None) -> int:
             print(str(error), file=sys.stderr)
             return 2
         return asyncio.run(_check_nba_data(settings, game_date))
-    if args.command == "phase3-test-notification":
+    if args.command == "test-notification":
         settings = Settings()
-        return asyncio.run(_phase3_test_notification(settings))
+        return asyncio.run(_test_notification(settings))
     if args.command == "run-scheduled":
         settings = Settings()
         return asyncio.run(_run_scheduled(settings))

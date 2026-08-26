@@ -246,8 +246,8 @@ def default_placeholder_request(
     league_id: str,
     now: datetime,
     fantasy_week: int = 1,
-    player_id: str = "phase3-placeholder-player",
-    game_id: str = "phase3-placeholder-game",
+    player_id: str = "diagnostic-placeholder-player",
+    game_id: str = "diagnostic-placeholder-game",
     open_sleeper_url: str = "https://sleeper.com",
 ) -> RecommendationRequest:
     deadline = now + timedelta(hours=1)
@@ -257,12 +257,12 @@ def default_placeholder_request(
         player_id=player_id,
         game_id=game_id,
         decision_type="placeholder_lock_in",
-        title="Phase 3 notification test",
+        title="Notification diagnostic",
         message=(
             "Confirm the placeholder action only after completing the corresponding action "
             "in Sleeper."
         ),
         deadline=deadline,
-        policy_version="phase3-placeholder-v1",
+        policy_version="diagnostic-placeholder-v1",
         open_sleeper_url=open_sleeper_url,
     )
