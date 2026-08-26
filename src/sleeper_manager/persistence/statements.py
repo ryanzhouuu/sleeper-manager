@@ -2,6 +2,7 @@
 
 Schema strings stay backend-specific where CHECK constraints and bootstrap
 migrations differ. DML is the contract both executors must keep in lockstep.
+Lock-In evidence SELECT SQL stays in `acknowledgements`.
 """
 
 from __future__ import annotations

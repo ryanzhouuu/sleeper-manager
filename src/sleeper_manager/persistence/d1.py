@@ -1,3 +1,10 @@
+"""Cloudflare D1 executor over shared persistence SQL.
+
+`initialize()` is a no-op; schema is applied by D1 migrations. Token
+consumption uses `batch()`. Duplicate action tokens are ignored.
+`D1_SCHEMA` is re-exported for tests and FakeD1 bootstrap.
+"""
+
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta
 from typing import Any

@@ -1,3 +1,9 @@
+"""Async wrapper around `SQLiteStateRepository` for Worker-shaped local flows.
+
+CLI `run-scheduled` and tests that share the D1 method surface use this adapter.
+Schema bootstrap still happens in the synchronous repository.
+"""
+
 from datetime import datetime, timedelta
 from pathlib import Path
 

@@ -1,3 +1,10 @@
+"""Synchronous SQLite executor over shared persistence SQL.
+
+Owns local bootstrap, including the acknowledgement index and revision backfill
+before runtime tables. Token consumption uses `BEGIN IMMEDIATE`. Duplicate
+action tokens raise `IntegrityError`. League profile methods are SQLite-only.
+"""
+
 import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -99,6 +106,8 @@ def _mapping(row: sqlite3.Row | None) -> dict[str, Any] | None:
 
 
 class SQLiteStateRepository:
+    """Local file-backed `StateRepository` plus runtime tables and league profiles."""
+
     def __init__(self, path: Path) -> None:
         self._path = path
 

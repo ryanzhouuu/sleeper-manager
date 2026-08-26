@@ -1,7 +1,8 @@
 """Shared row codecs and bind values for SQLite and D1 state repositories.
 
 Callers pass Mapping rows (D1 dicts or sqlite3.Row converted to dict). Bind helpers
-keep INSERT/UPDATE parameter order aligned with statements.py.
+keep INSERT/UPDATE parameter order aligned with `statements`. State-repository
+cache reads use `cached_nba_as_of`, which marks any expired row STALE.
 """
 
 from __future__ import annotations

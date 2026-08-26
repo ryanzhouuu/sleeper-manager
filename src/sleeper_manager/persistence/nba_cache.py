@@ -1,3 +1,9 @@
+"""Local NBA provider cache used by CLI diagnostics.
+
+Expired rows stay at their stored quality unless that quality is FRESH or
+PARTIAL, unlike state-repository cache reads which mark any expired row STALE.
+"""
+
 import json
 import sqlite3
 from datetime import datetime
@@ -8,6 +14,8 @@ from sleeper_manager.persistence.base import CachedNBARecord, NBADataCache
 
 
 class SQLiteNBADataCache:
+    """File-backed `NBADataCache` with its own schema, independent of the state database."""
+
     def __init__(self, path: Path) -> None:
         self._path = path
 

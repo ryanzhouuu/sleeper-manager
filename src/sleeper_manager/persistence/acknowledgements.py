@@ -1,3 +1,11 @@
+"""Decode stored Lock-In acknowledgements into planning evidence.
+
+The evidence SELECT and SQLite index live here rather than in `statements`
+because both backends share the query and only SQLite bootstrap applies the
+index. `decode_acknowledged_decisions` raises `AcknowledgementQueryError` when
+rows cannot form identity-bearing evidence.
+"""
+
 from __future__ import annotations
 
 import json
@@ -94,6 +102,11 @@ def decode_acknowledged_decisions(
     *,
     as_of: datetime,
 ) -> tuple[AcknowledgedDecisionEvidence, ...]:
+    """Skip rows newer than `as_of`, then order and reconcile duplicates.
+
+    `as_of` must be timezone-aware. Corrupt identity or unknown actions raise
+    `AcknowledgementQueryError`.
+    """
     if as_of.tzinfo is None:
         raise AcknowledgementQueryError("as_of must be timezone-aware")
     decoded: list[AcknowledgedDecisionEvidence] = []

@@ -1,3 +1,11 @@
+"""Records and protocols for local SQLite and Cloudflare D1 state.
+
+Callers depend on these types; SQL and codecs live in `statements` and `rows`.
+`SQLiteStateRepository` implements the sync protocols plus league-profile
+methods that D1 does not expose. `D1StateRepository` implements
+`AsyncRuntimeStateRepository`.
+"""
+
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -18,6 +26,8 @@ class StoredLeagueProfile:
 
 
 class LeagueProfileStore(Protocol):
+    """SQLite-only league fingerprint store used by bootstrap and sync."""
+
     def load_profile(self, league_id: str) -> StoredLeagueProfile | None: ...
 
     def save_profile(self, profile: StoredLeagueProfile) -> None: ...
@@ -39,6 +49,8 @@ class CachedNBARecord:
 
 
 class NBADataCache(Protocol):
+    """Synchronous cache used by local NBA diagnostics (`SQLiteNBADataCache`)."""
+
     def initialize(self) -> None: ...
 
     def get(self, cache_key: str, *, now: datetime) -> CachedNBARecord | None: ...
@@ -47,6 +59,8 @@ class NBADataCache(Protocol):
 
 
 class AsyncNBADataCache(Protocol):
+    """Async cache surface mixed into the Worker runtime repository."""
+
     async def get(self, cache_key: str, *, now: datetime) -> CachedNBARecord | None: ...
 
     async def put(self, record: CachedNBARecord) -> None: ...
@@ -205,6 +219,13 @@ class AcknowledgementResult:
 
 
 class StateRepository(Protocol):
+    """Synchronous recommendation and delivery store.
+
+    `create_recommendation` returns True only for a new idempotency key.
+    `consume_action_token` returns an `AcknowledgementOutcome` instead of
+    raising on user-facing token failures.
+    """
+
     def initialize(self) -> None: ...
 
     def save_league_snapshot(self, snapshot: LeagueSnapshotRecord) -> None: ...
@@ -279,6 +300,8 @@ class StateRepository(Protocol):
 
 
 class AsyncStateRepository(Protocol):
+    """Async counterpart of `StateRepository` for D1 and the local Worker-shaped adapter."""
+
     async def initialize(self) -> None: ...
 
     async def save_league_snapshot(self, snapshot: LeagueSnapshotRecord) -> None: ...
@@ -353,6 +376,8 @@ class AsyncStateRepository(Protocol):
 
 
 class AsyncRuntimeStateRepository(AsyncStateRepository, AsyncNBADataCache, Protocol):
+    """Worker runtime store: recommendations, NBA cache, policy, history, and scheduled work."""
+
     async def load_runtime_policy(self) -> RuntimePolicyRecord | None: ...
 
     async def save_runtime_policy(self, policy: RuntimePolicyRecord) -> None: ...
