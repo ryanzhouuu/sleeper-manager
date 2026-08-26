@@ -1,11 +1,25 @@
+"""Public weekly-plan orchestration and compatibility exports.
+
+Callers use this module for planner configuration, option scoring, and final
+lineup plans while private sibling modules own the extracted implementation.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from enum import StrEnum
-from math import isfinite
 
+from sleeper_manager.decisions._weekly_plan_models import (
+    DEFAULT_MOVE_LEAD_TIME,
+    WEEKLY_PLANNER_VERSION,
+    PlacementEvaluation,
+    TerminalValueApproximation,
+    WeeklyPlanDecision,
+    WeeklyPlanError,
+    WeeklyPlanOption,
+    WeeklyPlanPolicyConfig,
+)
 from sleeper_manager.decisions.lineup import (
     AssignmentCandidate,
     AssignmentResult,
@@ -37,76 +51,13 @@ from sleeper_manager.domain.planning import (
     WeeklyPlan,
 )
 
-WEEKLY_PLANNER_VERSION = "weekly-planner-v1"
-DEFAULT_MOVE_LEAD_TIME = timedelta(minutes=10)
-
-
-class WeeklyPlanError(ValueError):
-    pass
-
-
 AssignmentTieKey = Callable[[tuple[SlotAssignment, ...]], tuple[object, ...]]
-
-
-class TerminalValueApproximation(StrEnum):
-    COMMON_BASELINE_MARGINAL = "common_baseline_marginal"
-    COMPLETE_ASSIGNMENT_ROLLOUT = "complete_assignment_rollout"
 
 
 @dataclass(frozen=True, slots=True)
 class _EvaluatedAssignment:
     result: AssignmentResult
     expected_terminal_value: float
-
-
-@dataclass(frozen=True, slots=True)
-class WeeklyPlanPolicyConfig:
-    scenario_count: int = 2000
-    seed: int = 0
-    tie_tolerance: float = 0.01
-
-    def __post_init__(self) -> None:
-        if self.scenario_count <= 0:
-            raise ValueError("Weekly plan scenario count must be positive")
-        if not isfinite(self.tie_tolerance) or self.tie_tolerance < 0:
-            raise ValueError("Weekly plan tie tolerance must be finite and non-negative")
-
-
-@dataclass(frozen=True, slots=True)
-class PlacementEvaluation:
-    candidate_id: str
-    player_id: str
-    game_id: str
-    slot_index: int
-    slot_position: str
-    standalone_expected_value: float
-    expected_terminal_value: float
-    marginal_terminal_value: float
-
-
-@dataclass(frozen=True, slots=True)
-class WeeklyPlanOption:
-    assignments: tuple[SlotAssignment, ...]
-    expected_terminal_value: float
-    marginal_value: float
-    move_count: int
-    retained_observed_count: int
-
-
-@dataclass(frozen=True, slots=True)
-class WeeklyPlanDecision:
-    decision_time: datetime
-    batch_start: datetime
-    batch_game_ids: tuple[str, ...]
-    baseline_terminal_value: float
-    observed_terminal_value: float
-    selected: WeeklyPlanOption
-    alternative: WeeklyPlanOption | None
-    scenario_count: int
-    seed: int
-    approximation: TerminalValueApproximation
-    evaluations: tuple[PlacementEvaluation, ...]
-    perfect_information_bound: float
 
 
 def score_weekly_options(
@@ -936,3 +887,14 @@ __all__ = (
     "build_weekly_plan",
     "score_weekly_options",
 )
+
+for _public_type in (
+    PlacementEvaluation,
+    TerminalValueApproximation,
+    WeeklyPlanDecision,
+    WeeklyPlanError,
+    WeeklyPlanOption,
+    WeeklyPlanPolicyConfig,
+):
+    _public_type.__module__ = __name__
+del _public_type

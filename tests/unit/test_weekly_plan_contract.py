@@ -33,6 +33,14 @@ EXPECTED_PUBLIC_EXPORTS = (
     "build_weekly_plan",
     "score_weekly_options",
 )
+PUBLIC_TYPE_EXPORTS = (
+    "PlacementEvaluation",
+    "TerminalValueApproximation",
+    "WeeklyPlanDecision",
+    "WeeklyPlanError",
+    "WeeklyPlanOption",
+    "WeeklyPlanPolicyConfig",
+)
 
 
 def _opportunity(player_id: str, target_slot_index: int) -> GameOpportunity:
@@ -111,6 +119,10 @@ def test_weekly_plan_public_exports_remain_stable() -> None:
     """Protect existing import paths while implementation moves to smaller modules."""
     assert weekly_plan.__all__ == EXPECTED_PUBLIC_EXPORTS
     assert all(hasattr(weekly_plan, name) for name in EXPECTED_PUBLIC_EXPORTS)
+    assert all(
+        getattr(weekly_plan, name).__module__ == weekly_plan.__name__
+        for name in PUBLIC_TYPE_EXPORTS
+    )
 
 
 def test_weekly_plan_orders_a_three_way_rotation_through_the_bench() -> None:
