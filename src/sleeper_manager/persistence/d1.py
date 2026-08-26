@@ -15,16 +15,24 @@ from sleeper_manager.persistence.acknowledgements import (
     raw_row_from_sequence,
 )
 from sleeper_manager.persistence.base import (
+    DEFAULT_SCHEDULED_WORK_LEASE,
+    PROJECTION_OBSERVATION_PAGE_SIZE,
     AcknowledgementAction,
     AcknowledgementOutcome,
     AcknowledgementResult,
     ActionTokenRecord,
-    AsyncStateRepository,
+    AsyncRuntimeStateRepository,
+    CachedNBARecord,
     DataFreshnessRecord,
     DeliveryAttemptRecord,
+    DueWorkKind,
     LeagueSnapshotRecord,
+    ProjectionObservationRecord,
     RecommendationRecord,
     RecommendationStatus,
+    RuntimePolicyRecord,
+    ScheduledWorkRecord,
+    ScheduledWorkStatus,
 )
 
 D1_SCHEMA = """
@@ -70,8 +78,12 @@ CREATE TABLE IF NOT EXISTS recommendations (
     status TEXT NOT NULL,
     acknowledged_action TEXT,
     acknowledged_at TEXT,
-    trace_json TEXT NOT NULL
+    trace_json TEXT NOT NULL,
+    revision INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS recommendations_revision_idx
+ON recommendations (league_id, fantasy_week, decision_type, revision);
 
 CREATE TABLE IF NOT EXISTS delivery_attempts (
     delivery_id TEXT PRIMARY KEY,
@@ -115,6 +127,69 @@ CREATE TABLE IF NOT EXISTS lock_acknowledgements (
 
 CREATE INDEX IF NOT EXISTS recommendations_league_week_decision_status_idx
 ON recommendations (league_id, fantasy_week, decision_type, status);
+
+CREATE TABLE IF NOT EXISTS runtime_policy (
+    singleton_id INTEGER PRIMARY KEY CHECK (singleton_id = 1),
+    version TEXT NOT NULL UNIQUE,
+    payload_json TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS nba_cache (
+    cache_key TEXT PRIMARY KEY,
+    provider TEXT NOT NULL,
+    resource TEXT NOT NULL,
+    schema_version TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    retrieved_at TEXT NOT NULL,
+    source_updated_at TEXT,
+    expires_at TEXT,
+    quality TEXT NOT NULL,
+    warnings_json TEXT NOT NULL,
+    errors_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS projection_observations (
+    history_version TEXT NOT NULL,
+    player_id TEXT NOT NULL,
+    game_id TEXT NOT NULL,
+    game_start TEXT NOT NULL,
+    outcome_finalized_at TEXT,
+    minutes REAL,
+    started INTEGER NOT NULL,
+    did_not_play INTEGER NOT NULL,
+    box_score_json TEXT NOT NULL,
+    source_version TEXT NOT NULL,
+    PRIMARY KEY (history_version, player_id, game_id)
+);
+
+CREATE INDEX IF NOT EXISTS projection_observations_version_start_idx
+ON projection_observations (history_version, game_start, player_id);
+
+CREATE TABLE IF NOT EXISTS scheduled_work (
+    work_id TEXT PRIMARY KEY,
+    dedupe_key TEXT NOT NULL UNIQUE,
+    kind TEXT NOT NULL CHECK (kind IN ('daily', 'pre_tipoff', 'delivery_retry')),
+    due_at TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+        status IN ('pending', 'running', 'retry', 'completed', 'canceled')
+    ),
+    local_day TEXT,
+    game_id TEXT,
+    recommendation_id TEXT,
+    deadline TEXT,
+    lease_expires_at TEXT,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    correlation_id TEXT,
+    failure_category TEXT,
+    terminal_summary_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (recommendation_id) REFERENCES recommendations(recommendation_id)
+);
+
+CREATE INDEX IF NOT EXISTS scheduled_work_due_idx
+ON scheduled_work (status, due_at, lease_expires_at);
 """
 
 _MISSING = object()
@@ -135,7 +210,7 @@ def _d1_field(original: object, payload: object, name: str) -> object:
     return _MISSING
 
 
-class D1StateRepository(AsyncStateRepository):
+class D1StateRepository(AsyncRuntimeStateRepository):
     """Async repository backed by a Cloudflare D1 binding."""
 
     def __init__(self, database: Any) -> None:
@@ -221,6 +296,7 @@ class D1StateRepository(AsyncStateRepository):
                 else None
             ),
             trace_json=str(row.get("trace_json", "{}")),
+            revision=int(row.get("revision", 0)),
         )
 
     async def save_league_snapshot(self, snapshot: LeagueSnapshotRecord) -> None:
@@ -313,8 +389,11 @@ class D1StateRepository(AsyncStateRepository):
                 recommendation_id, idempotency_key, league_id, fantasy_week,
                 player_id, game_id, decision_type, title, message, deadline,
                 policy_version, created_at, status, acknowledged_action,
-                acknowledged_at, trace_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                acknowledged_at, trace_json, revision
+            ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                     COALESCE(MAX(revision), 0) + 1
+              FROM recommendations
+              WHERE league_id = ? AND fantasy_week = ? AND decision_type = ?
             """,
             recommendation.recommendation_id,
             recommendation.idempotency_key,
@@ -334,6 +413,9 @@ class D1StateRepository(AsyncStateRepository):
             else None,
             recommendation.acknowledged_at.isoformat() if recommendation.acknowledged_at else None,
             recommendation.trace_json,
+            recommendation.league_id,
+            recommendation.fantasy_week,
+            recommendation.decision_type,
         )
         return self._changes(result) == 1
 
@@ -347,7 +429,7 @@ class D1StateRepository(AsyncStateRepository):
     async def record_delivery_attempt(self, attempt: DeliveryAttemptRecord) -> None:
         await self._run(
             """
-            INSERT OR REPLACE INTO delivery_attempts (
+            INSERT INTO delivery_attempts (
                 delivery_id, recommendation_id, provider, attempt_number,
                 attempted_at, succeeded, error
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -585,7 +667,7 @@ class D1StateRepository(AsyncStateRepository):
             SELECT recommendation_id, idempotency_key, league_id, fantasy_week,
                    player_id, game_id, decision_type, title, message, deadline,
                    policy_version, created_at, status, acknowledged_action,
-                   acknowledged_at, trace_json
+                   acknowledged_at, trace_json, revision
             FROM recommendations
             WHERE league_id = ?
               AND fantasy_week = ?
@@ -677,3 +759,427 @@ class D1StateRepository(AsyncStateRepository):
             else:
                 raise AcknowledgementQueryError("unexpected D1 result envelope")
         return decode_acknowledged_decisions(tuple(decoded_rows), as_of=as_of)
+
+    async def load_runtime_policy(self) -> RuntimePolicyRecord | None:
+        row = await self._first(
+            "SELECT version, payload_json, updated_at FROM runtime_policy WHERE singleton_id = 1"
+        )
+        if row is None:
+            return None
+        return RuntimePolicyRecord(
+            version=str(row["version"]),
+            payload_json=str(row["payload_json"]),
+            updated_at=datetime.fromisoformat(str(row["updated_at"])),
+        )
+
+    async def save_runtime_policy(self, policy: RuntimePolicyRecord) -> None:
+        await self._run(
+            """
+            INSERT INTO runtime_policy (singleton_id, version, payload_json, updated_at)
+            VALUES (1, ?, ?, ?)
+            ON CONFLICT(singleton_id) DO UPDATE SET
+                version = excluded.version,
+                payload_json = excluded.payload_json,
+                updated_at = excluded.updated_at
+            """,
+            policy.version,
+            policy.payload_json,
+            policy.updated_at.isoformat(),
+        )
+
+    async def get(self, cache_key: str, *, now: datetime) -> CachedNBARecord | None:
+        row = await self._first(
+            """
+            SELECT cache_key, provider, resource, schema_version, payload_json,
+                   retrieved_at, source_updated_at, expires_at, quality,
+                   warnings_json, errors_json
+            FROM nba_cache WHERE cache_key = ?
+            """,
+            cache_key,
+        )
+        if row is None:
+            return None
+        record = CachedNBARecord(
+            cache_key=str(row["cache_key"]),
+            provider=str(row["provider"]),
+            resource=str(row["resource"]),
+            schema_version=str(row["schema_version"]),
+            payload_json=str(row["payload_json"]),
+            retrieved_at=datetime.fromisoformat(str(row["retrieved_at"])),
+            source_updated_at=(
+                datetime.fromisoformat(str(row["source_updated_at"]))
+                if row.get("source_updated_at")
+                else None
+            ),
+            expires_at=(
+                datetime.fromisoformat(str(row["expires_at"])) if row.get("expires_at") else None
+            ),
+            quality=DataQualityState(str(row["quality"])),
+            warnings=tuple(json.loads(str(row["warnings_json"]))),
+            errors=tuple(json.loads(str(row["errors_json"]))),
+        )
+        if record.expires_at is not None and record.expires_at <= now:
+            return CachedNBARecord(
+                cache_key=record.cache_key,
+                provider=record.provider,
+                resource=record.resource,
+                schema_version=record.schema_version,
+                payload_json=record.payload_json,
+                retrieved_at=record.retrieved_at,
+                source_updated_at=record.source_updated_at,
+                expires_at=record.expires_at,
+                quality=DataQualityState.STALE,
+                warnings=record.warnings + ("Cached record has exceeded its freshness window",),
+                errors=record.errors,
+            )
+        return record
+
+    async def put(self, record: CachedNBARecord) -> None:
+        await self._run(
+            """
+            INSERT INTO nba_cache (
+                cache_key, provider, resource, schema_version, payload_json,
+                retrieved_at, source_updated_at, expires_at, quality,
+                warnings_json, errors_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(cache_key) DO UPDATE SET
+                provider = excluded.provider,
+                resource = excluded.resource,
+                schema_version = excluded.schema_version,
+                payload_json = excluded.payload_json,
+                retrieved_at = excluded.retrieved_at,
+                source_updated_at = excluded.source_updated_at,
+                expires_at = excluded.expires_at,
+                quality = excluded.quality,
+                warnings_json = excluded.warnings_json,
+                errors_json = excluded.errors_json
+            """,
+            record.cache_key,
+            record.provider,
+            record.resource,
+            record.schema_version,
+            record.payload_json,
+            record.retrieved_at.isoformat(),
+            record.source_updated_at.isoformat() if record.source_updated_at else None,
+            record.expires_at.isoformat() if record.expires_at else None,
+            record.quality.value,
+            json.dumps(record.warnings),
+            json.dumps(record.errors),
+        )
+
+    async def save_projection_observations(
+        self, observations: tuple[ProjectionObservationRecord, ...]
+    ) -> None:
+        if not observations:
+            return
+        query = """
+            INSERT INTO projection_observations (
+                history_version, player_id, game_id, game_start,
+                outcome_finalized_at, minutes, started, did_not_play,
+                box_score_json, source_version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(history_version, player_id, game_id) DO UPDATE SET
+                game_start = excluded.game_start,
+                outcome_finalized_at = excluded.outcome_finalized_at,
+                minutes = excluded.minutes,
+                started = excluded.started,
+                did_not_play = excluded.did_not_play,
+                box_score_json = excluded.box_score_json,
+                source_version = excluded.source_version
+        """
+        statements = [
+            self._statement(
+                query,
+                (
+                    item.history_version,
+                    item.player_id,
+                    item.game_id,
+                    item.game_start.isoformat(),
+                    item.outcome_finalized_at.isoformat() if item.outcome_finalized_at else None,
+                    item.minutes,
+                    int(item.started),
+                    int(item.did_not_play),
+                    item.box_score_json,
+                    item.source_version,
+                ),
+            )
+            for item in observations
+        ]
+        results = await self._database.batch(statements)
+        for result in results:
+            payload = _js_to_python(result)
+            self._require_success(result, payload)
+
+    async def load_projection_observations(
+        self,
+        history_version: str,
+        *,
+        before: datetime | None = None,
+        page_size: int = PROJECTION_OBSERVATION_PAGE_SIZE,
+    ) -> tuple[ProjectionObservationRecord, ...]:
+        if page_size <= 0:
+            raise ValueError("Projection observation page size must be positive")
+        conditions = ["history_version = ?"]
+        params: list[object] = [history_version]
+        if before is not None:
+            conditions.append("game_start < ?")
+            conditions.append("outcome_finalized_at IS NOT NULL")
+            conditions.append("outcome_finalized_at <= ?")
+            params.extend((before.isoformat(), before.isoformat()))
+        where = " AND ".join(conditions)
+        records: list[ProjectionObservationRecord] = []
+        offset = 0
+        while True:
+            rows = await self._all(
+                """
+                SELECT history_version, player_id, game_id, game_start,
+                       outcome_finalized_at, minutes, started, did_not_play,
+                       box_score_json, source_version
+                FROM projection_observations
+                WHERE """
+                + where
+                + """
+                ORDER BY game_start, game_id, player_id
+                LIMIT ? OFFSET ?
+                """,
+                *params,
+                page_size,
+                offset,
+            )
+            records.extend(self._projection_observation(self._mapping(row)) for row in rows)
+            if len(rows) < page_size:
+                break
+            offset += page_size
+        return tuple(records)
+
+    async def upsert_scheduled_work(self, work: ScheduledWorkRecord) -> None:
+        await self._run(
+            """
+            INSERT INTO scheduled_work (
+                work_id, dedupe_key, kind, due_at, status, local_day, game_id,
+                recommendation_id, deadline, lease_expires_at, attempt_count,
+                correlation_id, failure_category, terminal_summary_json,
+                created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(dedupe_key) DO UPDATE SET
+                kind = excluded.kind,
+                due_at = excluded.due_at,
+                status = CASE
+                    WHEN scheduled_work.status IN ('completed', 'running')
+                        THEN scheduled_work.status
+                    ELSE excluded.status
+                END,
+                local_day = excluded.local_day,
+                game_id = excluded.game_id,
+                recommendation_id = excluded.recommendation_id,
+                deadline = excluded.deadline,
+                updated_at = excluded.updated_at
+            WHERE scheduled_work.status NOT IN ('completed', 'running')
+            """,
+            *self._scheduled_work_values(work),
+        )
+
+    async def claim_due_work(
+        self,
+        now: datetime,
+        *,
+        correlation_id: str,
+        lease_duration: timedelta = DEFAULT_SCHEDULED_WORK_LEASE,
+        limit: int = 100,
+    ) -> tuple[ScheduledWorkRecord, ...]:
+        if limit <= 0:
+            return ()
+        rows = await self._all(
+            """
+            UPDATE scheduled_work
+            SET status = 'running', lease_expires_at = ?, attempt_count = attempt_count + 1,
+                correlation_id = ?, failure_category = NULL,
+                terminal_summary_json = NULL, updated_at = ?
+            WHERE work_id IN (
+                SELECT work_id FROM scheduled_work
+                WHERE due_at <= ? AND (
+                    status IN ('pending', 'retry')
+                    OR (status = 'running' AND lease_expires_at <= ?)
+                )
+                ORDER BY due_at, work_id
+                LIMIT ?
+            )
+            RETURNING work_id, dedupe_key, kind, due_at, status, local_day,
+                      game_id, recommendation_id, deadline, lease_expires_at,
+                      attempt_count, correlation_id, failure_category,
+                      terminal_summary_json, created_at, updated_at
+            """,
+            (now + lease_duration).isoformat(),
+            correlation_id,
+            now.isoformat(),
+            now.isoformat(),
+            now.isoformat(),
+            limit,
+        )
+        return tuple(self._scheduled_work(self._mapping(row)) for row in rows)
+
+    async def finish_scheduled_work(
+        self,
+        work_id: str,
+        *,
+        status: ScheduledWorkStatus,
+        finished_at: datetime,
+        correlation_id: str,
+        failure_category: str | None = None,
+        terminal_summary_json: str | None = None,
+        retry_at: datetime | None = None,
+    ) -> bool:
+        if status not in {
+            ScheduledWorkStatus.COMPLETED,
+            ScheduledWorkStatus.RETRY,
+            ScheduledWorkStatus.CANCELED,
+        }:
+            raise ValueError("Claimed work must finish as completed, retry, or canceled")
+        if (status is ScheduledWorkStatus.RETRY) != (retry_at is not None):
+            raise ValueError("Retry work requires exactly one retry timestamp")
+        result = await self._run(
+            """
+            UPDATE scheduled_work
+            SET status = ?, due_at = COALESCE(?, due_at), lease_expires_at = NULL,
+                failure_category = ?, terminal_summary_json = ?, updated_at = ?
+            WHERE work_id = ? AND status = 'running' AND correlation_id = ?
+            """,
+            status.value,
+            retry_at.isoformat() if retry_at else None,
+            failure_category,
+            terminal_summary_json,
+            finished_at.isoformat(),
+            work_id,
+            correlation_id,
+        )
+        return self._changes(result) == 1
+
+    async def list_scheduled_work(
+        self,
+        *,
+        kind: DueWorkKind | None = None,
+        statuses: tuple[ScheduledWorkStatus, ...] = (),
+    ) -> tuple[ScheduledWorkRecord, ...]:
+        conditions: list[str] = []
+        params: list[object] = []
+        if kind is not None:
+            conditions.append("kind = ?")
+            params.append(kind.value)
+        if statuses:
+            placeholders = ", ".join("?" for _ in statuses)
+            conditions.append(f"status IN ({placeholders})")
+            params.extend(status.value for status in statuses)
+        where = " WHERE " + " AND ".join(conditions) if conditions else ""
+        rows = await self._all(
+            """
+            SELECT work_id, dedupe_key, kind, due_at, status, local_day,
+                   game_id, recommendation_id, deadline, lease_expires_at,
+                   attempt_count, correlation_id, failure_category,
+                   terminal_summary_json, created_at, updated_at
+            FROM scheduled_work
+            """
+            + where
+            + " ORDER BY due_at, work_id",
+            *params,
+        )
+        return tuple(self._scheduled_work(self._mapping(row)) for row in rows)
+
+    async def cancel_expired_scheduled_work(self, now: datetime) -> int:
+        result = await self._run(
+            """
+            UPDATE scheduled_work
+            SET status = 'canceled', lease_expires_at = NULL,
+                failure_category = 'deadline_elapsed', updated_at = ?
+            WHERE deadline IS NOT NULL AND deadline <= ? AND (
+                status IN ('pending', 'retry')
+                OR (status = 'running' AND lease_expires_at <= ?)
+            )
+            """,
+            now.isoformat(),
+            now.isoformat(),
+            now.isoformat(),
+        )
+        return self._changes(result)
+
+    @staticmethod
+    def _mapping(row: object) -> Mapping[str, Any]:
+        if isinstance(row, Mapping):
+            return row
+        raise AcknowledgementQueryError("unexpected D1 result envelope")
+
+    @staticmethod
+    def _projection_observation(row: Mapping[str, Any]) -> ProjectionObservationRecord:
+        return ProjectionObservationRecord(
+            history_version=str(row["history_version"]),
+            player_id=str(row["player_id"]),
+            game_id=str(row["game_id"]),
+            game_start=datetime.fromisoformat(str(row["game_start"])),
+            outcome_finalized_at=(
+                datetime.fromisoformat(str(row["outcome_finalized_at"]))
+                if row.get("outcome_finalized_at")
+                else None
+            ),
+            minutes=float(row["minutes"]) if row.get("minutes") is not None else None,
+            started=bool(row["started"]),
+            did_not_play=bool(row["did_not_play"]),
+            box_score_json=str(row["box_score_json"]),
+            source_version=str(row["source_version"]),
+        )
+
+    @staticmethod
+    def _scheduled_work_values(work: ScheduledWorkRecord) -> tuple[object, ...]:
+        return (
+            work.work_id,
+            work.dedupe_key,
+            work.kind.value,
+            work.due_at.isoformat(),
+            work.status.value,
+            work.local_day,
+            work.game_id,
+            work.recommendation_id,
+            work.deadline.isoformat() if work.deadline else None,
+            work.lease_expires_at.isoformat() if work.lease_expires_at else None,
+            work.attempt_count,
+            work.correlation_id,
+            work.failure_category,
+            work.terminal_summary_json,
+            work.created_at.isoformat(),
+            work.updated_at.isoformat(),
+        )
+
+    @staticmethod
+    def _scheduled_work(row: Mapping[str, Any]) -> ScheduledWorkRecord:
+        return ScheduledWorkRecord(
+            work_id=str(row["work_id"]),
+            dedupe_key=str(row["dedupe_key"]),
+            kind=DueWorkKind(str(row["kind"])),
+            due_at=datetime.fromisoformat(str(row["due_at"])),
+            status=ScheduledWorkStatus(str(row["status"])),
+            local_day=str(row["local_day"]) if row.get("local_day") is not None else None,
+            game_id=str(row["game_id"]) if row.get("game_id") is not None else None,
+            recommendation_id=(
+                str(row["recommendation_id"]) if row.get("recommendation_id") is not None else None
+            ),
+            deadline=(
+                datetime.fromisoformat(str(row["deadline"])) if row.get("deadline") else None
+            ),
+            lease_expires_at=(
+                datetime.fromisoformat(str(row["lease_expires_at"]))
+                if row.get("lease_expires_at")
+                else None
+            ),
+            attempt_count=int(row["attempt_count"]),
+            correlation_id=(
+                str(row["correlation_id"]) if row.get("correlation_id") is not None else None
+            ),
+            failure_category=(
+                str(row["failure_category"]) if row.get("failure_category") is not None else None
+            ),
+            terminal_summary_json=(
+                str(row["terminal_summary_json"])
+                if row.get("terminal_summary_json") is not None
+                else None
+            ),
+            created_at=datetime.fromisoformat(str(row["created_at"])),
+            updated_at=datetime.fromisoformat(str(row["updated_at"])),
+        )

@@ -1,5 +1,6 @@
 import asyncio
 import sqlite3
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -8,9 +9,15 @@ from sleeper_manager.persistence.base import (
     AcknowledgementAction,
     AcknowledgementOutcome,
     ActionTokenRecord,
+    CachedNBARecord,
     DataFreshnessRecord,
+    DueWorkKind,
     LeagueSnapshotRecord,
+    ProjectionObservationRecord,
     RecommendationRecord,
+    RuntimePolicyRecord,
+    ScheduledWorkRecord,
+    ScheduledWorkStatus,
 )
 from sleeper_manager.persistence.d1 import D1_SCHEMA, D1StateRepository
 from sleeper_manager.persistence.tokens import hash_action_token
@@ -252,3 +259,103 @@ def test_d1_unsuccessful_run_raises() -> None:
     repository = D1StateRepository(_Database())
     with pytest.raises(AcknowledgementQueryError, match="unsuccessful"):
         asyncio.run(repository.create_recommendation(recommendation()))
+
+
+def test_d1_runtime_state_matches_sqlite_contracts() -> None:
+    database, repository = make_repository()
+    policy = RuntimePolicyRecord(
+        "policy-v1",
+        '{"manager_timezone":"America/Chicago"}',
+        NOW,
+    )
+    cache = CachedNBARecord(
+        cache_key="schedule:12",
+        provider="espn",
+        resource="team-schedule:12",
+        schema_version="1",
+        payload_json="[]",
+        retrieved_at=NOW,
+        source_updated_at=None,
+        expires_at=NOW + timedelta(hours=12),
+        quality=DataQualityState.FRESH,
+    )
+    observation = ProjectionObservationRecord(
+        history_version="history-v1",
+        player_id="401",
+        game_id="game-1",
+        game_start=NOW - timedelta(days=1),
+        outcome_finalized_at=NOW - timedelta(hours=20),
+        minutes=30,
+        started=True,
+        did_not_play=False,
+        box_score_json='{"points":20}',
+        source_version="espn-v1",
+    )
+    work = ScheduledWorkRecord(
+        work_id="work-1",
+        dedupe_key="daily:2026-08-08",
+        kind=DueWorkKind.DAILY,
+        due_at=NOW,
+        status=ScheduledWorkStatus.PENDING,
+        local_day="2026-08-08",
+        created_at=NOW,
+        updated_at=NOW,
+    )
+
+    async def exercise() -> None:
+        await repository.save_runtime_policy(policy)
+        assert await repository.load_runtime_policy() == policy
+        await repository.put(cache)
+        assert await repository.get(cache.cache_key, now=NOW) == cache
+        stale = await repository.get(cache.cache_key, now=NOW + timedelta(hours=13))
+        assert stale is not None and stale.quality is DataQualityState.STALE
+        await repository.save_projection_observations((observation,))
+        assert await repository.load_projection_observations("history-v1") == (observation,)
+        await repository.upsert_scheduled_work(work)
+        claimed = await repository.claim_due_work(NOW, correlation_id="run-1")
+        assert len(claimed) == 1
+        assert await repository.claim_due_work(NOW, correlation_id="overlap") == ()
+        assert (
+            await repository.claim_due_work(NOW + timedelta(minutes=5), correlation_id="cron") == ()
+        )
+        reclaimed = await repository.claim_due_work(
+            NOW + timedelta(minutes=15), correlation_id="run-2"
+        )
+        assert len(reclaimed) == 1 and reclaimed[0].attempt_count == 2
+        assert await repository.finish_scheduled_work(
+            work.work_id,
+            status=ScheduledWorkStatus.COMPLETED,
+            finished_at=NOW + timedelta(minutes=15),
+            correlation_id="run-2",
+        )
+        assert (await repository.list_scheduled_work())[0].status is ScheduledWorkStatus.COMPLETED
+        expired = replace(
+            work,
+            work_id="work-expired",
+            dedupe_key="delivery-retry:expired",
+            kind=DueWorkKind.DELIVERY_RETRY,
+            deadline=NOW,
+            status=ScheduledWorkStatus.PENDING,
+        )
+        await repository.upsert_scheduled_work(expired)
+        assert await repository.cancel_expired_scheduled_work(NOW) == 1
+        stored_work = await repository.list_scheduled_work()
+        assert stored_work[1].status is ScheduledWorkStatus.CANCELED
+        assert stored_work[1].failure_category == "deadline_elapsed"
+
+        first = recommendation()
+        second = replace(
+            first,
+            recommendation_id="recommendation-2",
+            idempotency_key="material-2",
+        )
+        assert await repository.create_recommendation(first)
+        assert not await repository.create_recommendation(first)
+        assert await repository.create_recommendation(second)
+        stored_first = await repository.get_recommendation(first.recommendation_id)
+        stored_second = await repository.get_recommendation(second.recommendation_id)
+        assert stored_first is not None and stored_first.revision == 1
+        assert stored_second is not None and stored_second.revision == 2
+
+    asyncio.run(exercise())
+    assert database.connection.execute("SELECT COUNT(*) FROM scheduled_work").fetchone()[0] == 2
