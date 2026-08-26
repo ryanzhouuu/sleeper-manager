@@ -1,9 +1,13 @@
+from __future__ import annotations
+
 from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import httpx
 from pydantic import BaseModel, ValidationError
+
+if TYPE_CHECKING:
+    import httpx
 
 from sleeper_manager.domain.nba import (
     AvailabilityStatus,
@@ -453,14 +457,18 @@ class ESPNClient:
         client: httpx.AsyncClient | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        self._client = client or httpx.AsyncClient(
-            base_url=base_url,
-            timeout=timeout.total_seconds(),
-        )
         self._owns_client = client is None
+        if client is None:
+            import httpx
+
+            client = httpx.AsyncClient(
+                base_url=base_url,
+                timeout=timeout.total_seconds(),
+            )
+        self._client = client
         self._clock = clock or (lambda: datetime.now(UTC))
 
-    async def __aenter__(self) -> "ESPNClient":
+    async def __aenter__(self) -> ESPNClient:
         return self
 
     async def __aexit__(self, *_: object) -> None:
@@ -468,6 +476,8 @@ class ESPNClient:
             await self._client.aclose()
 
     async def _get(self, path: str, **params: str | int) -> dict[str, Any]:
+        import httpx
+
         try:
             response = await self._client.get(path, params=params)
             response.raise_for_status()
