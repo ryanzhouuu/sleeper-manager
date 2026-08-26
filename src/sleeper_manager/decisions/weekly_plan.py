@@ -47,6 +47,13 @@ def build_weekly_plan(
     policy: WeeklyPlanPolicyConfig | None = None,
     planner_version: str = WEEKLY_PLANNER_VERSION,
 ) -> WeeklyPlan:
+    """Build the next executable lineup plan from validated team-week state.
+
+    Blocked inputs and missing projections produce a static plan. Scoreable
+    states are optimized at the next common tipoff and translated into ordered
+    moves whose deadlines account for ``lead_time``.
+    """
+
     policy_config = policy or WeeklyPlanPolicyConfig()
     observed_view, slot_positions = _observed_assignment_view(state)
     if state.is_blocked:
@@ -150,6 +157,8 @@ def _static_plan(
     extra_blocking: tuple[PlanningReasonCode, ...],
     planner_version: str,
 ) -> WeeklyPlan:
+    """Preserve observed and fixed assignments when optimization cannot run."""
+
     observed_players = {assignment.slot_index: assignment.player_id for assignment in observed_view}
     for fixed in state.fixed_slots:
         observed_players[fixed.slot_index] = fixed.player_id
@@ -181,6 +190,8 @@ def _static_plan(
 def _observed_assignment_view(
     state: TeamWeekState,
 ) -> tuple[tuple[PlannedAssignment, ...], dict[int, str]]:
+    """Normalize observed starters and retain the slot-position lookup."""
+
     slot_positions = {slot.index: slot.position for slot in state.starter_slots}
     observed_players = {
         starter.slot_index: starter.player_id for starter in state.observed_starters
@@ -192,6 +203,8 @@ def _ordered_view(
     slot_positions: dict[int, str],
     players_by_slot: Mapping[int, str | None],
 ) -> tuple[PlannedAssignment, ...]:
+    """Return one assignment per starter slot in stable index order."""
+
     return tuple(
         PlannedAssignment(index, slot_positions[index], players_by_slot.get(index))
         for index in sorted(slot_positions)
@@ -203,6 +216,8 @@ def _plan_confidence(
     margin: float,
     tie_tolerance: float,
 ) -> PlanConfidence:
+    """Combine eligibility evidence and decision separation into confidence."""
+
     if quality in (PlanningQuality.PARTIAL, PlanningQuality.UNKNOWN):
         return PlanConfidence.LOW
     if quality is PlanningQuality.BEST_KNOWN_CONSTRAINTS_ORACLE:
@@ -214,6 +229,8 @@ def _schedule_assumptions(
     batch: tuple[GameOpportunity, ...],
     future: tuple[GameOpportunity, ...],
 ) -> tuple[str, ...]:
+    """Record current tipoffs and the count of later replannable opportunities."""
+
     assumptions = [
         f"game {opportunity.game_id} assumed to start {opportunity.scheduled_start.isoformat()}"
         for opportunity in sorted(batch, key=opportunity_id)
@@ -223,6 +240,8 @@ def _schedule_assumptions(
 
 
 def _passed_sort_key(passed: PassedOpportunity) -> tuple[str, str]:
+    """Keep passed-opportunity evidence deterministic across equivalent states."""
+
     return passed.player_id, passed.game_id
 
 
