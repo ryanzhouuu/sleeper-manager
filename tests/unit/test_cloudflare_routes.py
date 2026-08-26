@@ -74,7 +74,7 @@ def test_acknowledge_route_rejects_invalid_request(tmp_path) -> None:  # type: i
 def test_scheduled_uses_entrypoint_environment(monkeypatch) -> None:
     seen: list[object] = []
 
-    async def fake_run_scheduled(env, fetcher):  # type: ignore[no-untyped-def]
+    async def fake_run_scheduled(env, fetcher, **_kwargs):  # type: ignore[no-untyped-def]
         del fetcher
         seen.append(env)
         return {"status": "created"}

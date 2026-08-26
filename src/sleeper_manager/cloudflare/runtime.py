@@ -1,16 +1,26 @@
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
+from sleeper_manager.cloudflare.dispatcher import dispatch_due_work, scheduled_at_from_controller
 from sleeper_manager.cloudflare.notifications import (
     CloudflareDiscordSender,
     CloudflareNtfySender,
 )
-from sleeper_manager.notifications.dispatcher import NotificationDispatcher
-from sleeper_manager.persistence.d1 import D1StateRepository
-from sleeper_manager.workflows.notification_loop import (
-    NotificationLoop,
-    default_placeholder_request,
+from sleeper_manager.cloudflare.planning import (
+    CloudflarePlanningAssembly,
+    collect_cloudflare_planning_inputs,
 )
+from sleeper_manager.cloudflare.scheduler_types import (
+    FailureCategory,
+    ScheduledRunStatus,
+    ScheduledRunSummary,
+)
+from sleeper_manager.domain.runtime_policy import RuntimePolicy
+from sleeper_manager.notifications.dispatcher import NotificationDispatcher
+from sleeper_manager.persistence.base import AsyncRuntimeStateRepository
+from sleeper_manager.persistence.d1 import D1StateRepository
+from sleeper_manager.workflows.notification_loop import NotificationLoop
 
 
 def _value(env: Any, name: str, default: str = "") -> str:
@@ -41,31 +51,67 @@ def build_dispatcher(env: Any, fetcher: Any) -> NotificationDispatcher:
     raise ValueError("At least one notification destination is required")
 
 
-async def run_scheduled(env: Any, fetcher: Any) -> dict[str, Any]:
+async def run_scheduled(
+    env: Any,
+    fetcher: Any,
+    *,
+    controller: Any = None,
+    scheduled_at: datetime | None = None,
+    correlation_id: str | None = None,
+) -> dict[str, Any]:
+    now = scheduled_at or scheduled_at_from_controller(controller) or datetime.now(UTC)
+    correlation = correlation_id or uuid4().hex
     acknowledgement_base_url = _value(env, "ACKNOWLEDGEMENT_BASE_URL").rstrip("?")
     if not acknowledgement_base_url:
-        return {"status": "skipped", "reason": "acknowledgement_url_missing"}
+        return ScheduledRunSummary(
+            correlation_id=correlation,
+            scheduled_at=now,
+            status=ScheduledRunStatus.BLOCKED,
+            claimed_count=0,
+            failure_category=FailureCategory.CONFIGURATION,
+            detail="acknowledgement_url_missing",
+        ).as_dict()
     try:
         dispatcher = build_dispatcher(env, fetcher)
     except ValueError:
-        return {"status": "skipped", "reason": "notifications_not_configured"}
+        return ScheduledRunSummary(
+            correlation_id=correlation,
+            scheduled_at=now,
+            status=ScheduledRunStatus.BLOCKED,
+            claimed_count=0,
+            failure_category=FailureCategory.CONFIGURATION,
+            detail="notifications_not_configured",
+        ).as_dict()
 
-    now = datetime.now(UTC)
     repository = D1StateRepository(env.sleeper_manager_state)
     await repository.initialize()
-    result = await NotificationLoop(
-        repository,
-        dispatcher,
-        acknowledgement_base_url=acknowledgement_base_url,
-    ).run(
-        default_placeholder_request(
-            league_id=_value(env, "SLEEPER_LEAGUE_ID", "phase3-cloudflare"),
-            now=now,
-            open_sleeper_url=_value(env, "OPEN_SLEEPER_URL", "https://sleeper.com"),
+
+    async def collect(
+        *,
+        repository: AsyncRuntimeStateRepository,
+        policy: RuntimePolicy,
+        scheduled_at: datetime,
+    ) -> CloudflarePlanningAssembly:
+        return await collect_cloudflare_planning_inputs(
+            env,
+            fetcher,
+            repository=repository,
+            policy=policy,
+            scheduled_at=scheduled_at,
+            clock=lambda: now,
         )
+
+    summary = await dispatch_due_work(
+        repository,
+        notifications=NotificationLoop(
+            repository,
+            dispatcher,
+            acknowledgement_base_url=acknowledgement_base_url,
+            clock=lambda: now,
+        ),
+        collect=collect,
+        scheduled_at=now,
+        correlation_id=correlation,
+        open_sleeper_url=_value(env, "OPEN_SLEEPER_URL", "https://sleeper.com"),
     )
-    return {
-        "status": result.status,
-        "recommendation_id": result.recommendation.recommendation_id,
-        "delivery_attempts": len(result.delivery.attempts) if result.delivery else 0,
-    }
+    return summary.as_dict()
