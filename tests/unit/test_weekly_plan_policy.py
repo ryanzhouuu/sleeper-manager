@@ -120,6 +120,39 @@ def _assignment_players(decision) -> tuple[str | None, ...]:
     return tuple(assignment.player_id for assignment in decision.selected.assignments)
 
 
+@pytest.mark.parametrize("scenario_count", (0, -1))
+def test_policy_config_rejects_non_positive_scenario_counts(scenario_count: int) -> None:
+    """Keep scenario generation from accepting empty or nonsensical samples."""
+    with pytest.raises(ValueError, match="scenario count must be positive"):
+        WeeklyPlanPolicyConfig(scenario_count=scenario_count)
+
+
+@pytest.mark.parametrize("tie_tolerance", (-0.1, float("inf"), float("nan")))
+def test_policy_config_rejects_invalid_tie_tolerances(tie_tolerance: float) -> None:
+    """Require a finite non-negative tolerance for deterministic comparisons."""
+    with pytest.raises(ValueError, match="tie tolerance must be finite and non-negative"):
+        WeeklyPlanPolicyConfig(tie_tolerance=tie_tolerance)
+
+
+def test_scoring_requires_an_actionable_opportunity() -> None:
+    """Distinguish an exhausted week from a scoreable planning decision."""
+    with pytest.raises(WeeklyPlanError, match="No actionable pre-tipoff opportunity remains"):
+        score_weekly_options(_state(()))
+
+
+def test_scoring_rejects_an_actionable_opportunity_without_a_projection() -> None:
+    """Fail closed if an otherwise actionable opportunity lacks scoring evidence."""
+    start = NOW + timedelta(hours=1)
+    opportunity = replace(
+        _opportunity("p1", "g1", start, ("PG",), ((10, 1),)),
+        projection=None,
+        missing_projection_reason=PlanningReasonCode.MISSING_PROJECTION,
+    )
+
+    with pytest.raises(WeeklyPlanError, match="Missing projection for p1:g1"):
+        score_weekly_options(_state((opportunity,)))
+
+
 def test_equal_terminal_values_prefer_observed_placement_and_return_alternative() -> None:
     start = NOW + timedelta(hours=1)
     state = _state(
