@@ -178,6 +178,16 @@ def run_lock_in_diagnostic(request: LockInDiagnosticRequest) -> LockInDiagnostic
     )
 
 
+def main(argv: list[str] | None = None) -> int:
+    """Delegate module-command execution to the isolated CLI boundary."""
+
+    from sleeper_manager.backtesting.experiments.lock_in_diagnostic_cli import (
+        main as cli_main,
+    )
+
+    return cli_main(argv)
+
+
 __all__ = (
     "AdmissionCheck",
     "AdmissionResult",
@@ -194,6 +204,11 @@ __all__ = (
     "admit_historical_team_week",
     "diagnostic_run_id",
     "logical_artifact_identity",
+    "main",
     "run_lock_in_diagnostic",
     "write_diagnostic_report",
 )
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

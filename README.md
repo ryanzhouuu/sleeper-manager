@@ -93,6 +93,7 @@ Run `uv run sleeper-manager --help` for the complete argument reference.
 | `validate-model-features` | Run the frozen historical feature experiment |
 | `evaluate-projections` | Evaluate the frozen projection models |
 | `python -m sleeper_manager.backtesting.replay.team_week_bundle` | Build one immutable historical team-week replay-input bundle |
+| `python -m sleeper_manager.backtesting.experiments.lock_in_diagnostic` | Run one diagnostic-only Lock-In model/oracle comparison for an existing team-week artifact |
 | `validate-lock-in-policy` | Replay historical leagues against the Lock-In policy |
 | `sync-cloudflare-runtime-data` | Prepare or apply projection history and runtime policy in D1 |
 
@@ -118,6 +119,20 @@ season metadata using SportsDataverse's ending-year convention, including
 October--December weeks. When source finalization timestamps are unavailable,
 the bundle labels a next-local-day 6:00 AM Eastern completion bound as
 approximate; only observed starters are treated as best-known eligible to lock.
+
+Run a diagnostic-only Lock-In comparison against one existing team-week artifact
+(no acquisition, refresh, or network access):
+
+```bash
+uv run python -m sleeper_manager.backtesting.experiments.lock_in_diagnostic \
+  --team-week-path .local/model-validation/team-week-inputs/<manifest-id>/team-weeks/<league-id>/week-<week>/roster-<roster-id>.json \
+  --output-root .local/model-validation/reports
+```
+
+This writes configuration-keyed JSON and Markdown under
+`.local/model-validation/reports/lock-in-diagnostics/`. The output is
+`diagnostic_only` evidence for one historical team-week; it does not validate
+release readiness and must not be treated as Phase 7 promotion evidence.
 
 ## Development
 
