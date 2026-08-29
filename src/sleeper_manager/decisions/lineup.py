@@ -55,10 +55,11 @@ def maximum_weight_assignment(
     slot_indices: tuple[int, ...] | list[int] | None = None,
     forbidden_edges: frozenset[tuple[int, str]] = frozenset(),
     required_edges: frozenset[tuple[int, str]] = frozenset(),
+    require_full_cardinality: bool = False,
     tie_break_key: Callable[[tuple[SlotAssignment, ...]], tuple[object, ...]] | None = None,
     tie_tolerance: float = 1e-9,
 ) -> AssignmentResult:
-    """Solve a small maximum-weight player/slot assignment without external solvers."""
+    """Solve a small assignment, optionally prohibiting empty starter slots."""
 
     candidate_records = tuple(candidates)
     slot_records = tuple(slot.upper() for slot in slots)
@@ -122,7 +123,7 @@ def maximum_weight_assignment(
         if slot_index == len(slot_records):
             return AssignmentResult(0.0, ())
         best: AssignmentResult | None = None
-        if slot_index_records[slot_index] not in required_by_slot:
+        if slot_index_records[slot_index] not in required_by_slot and not require_full_cardinality:
             remainder = solve(slot_index + 1, used_players)
             if remainder is not None:
                 best = AssignmentResult(
@@ -166,6 +167,8 @@ def maximum_weight_assignment(
 
     result = solve(0, 0)
     if result is None:
+        if require_full_cardinality:
+            raise ValueError("Full-cardinality assignment is infeasible")
         raise ValueError("Required assignment edges cannot be satisfied together")
     return AssignmentResult(round(result.score, 6), result.assignments)
 

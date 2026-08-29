@@ -22,6 +22,20 @@ def test_assignment_uses_dummy_for_negative_scores_and_respects_player_uniquenes
     assert [assignment.player_id for assignment in result.assignments] == ["p2", "p1"]
 
 
+def test_assignment_can_require_negative_full_cardinality() -> None:
+    result = maximum_weight_assignment(
+        [
+            AssignmentCandidate("positive", "p1", 5, ("PG",)),
+            AssignmentCandidate("negative", "p2", -3, ("C",)),
+        ],
+        ("PG", "C"),
+        require_full_cardinality=True,
+    )
+
+    assert result.score == 2
+    assert [assignment.player_id for assignment in result.assignments] == ["p1", "p2"]
+
+
 def test_assignment_supports_exact_slots_and_required_alternative_edges() -> None:
     candidates = (
         AssignmentCandidate("p1-g", "p1", 8, ("PG",), eligible_slot_indices=(2,)),

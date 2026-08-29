@@ -34,7 +34,10 @@ def optimize_oracle(
     *,
     starter_slots: tuple[str, ...],
     team_id: int | None = None,
+    require_full_cardinality: bool = False,
 ) -> AssignmentResult:
+    """Maximize realized score, optionally requiring every starter slot to be filled."""
+
     candidates = tuple(
         AssignmentCandidate(
             candidate_id=(
@@ -49,7 +52,11 @@ def optimize_oracle(
         for game in player_games
         if game.rostered_at_tipoff and (team_id is None or game.fantasy_team_id == team_id)
     )
-    return maximum_weight_assignment(candidates, starter_slots)
+    return maximum_weight_assignment(
+        candidates,
+        starter_slots,
+        require_full_cardinality=require_full_cardinality,
+    )
 
 
 def oracle_team_week_result(
@@ -57,12 +64,16 @@ def oracle_team_week_result(
     *,
     config: ReplayConfig,
     games: Iterable[ReplayGame] = (),
+    require_full_cardinality: bool = False,
 ) -> TeamWeekReplayResult:
+    """Build the realized-score oracle under the requested lineup cardinality rule."""
+
     player_game_records = tuple(player_games)
     assignment = optimize_oracle(
         player_game_records,
         starter_slots=config.starter_slots,
         team_id=config.roster_id,
+        require_full_cardinality=require_full_cardinality,
     )
     game_by_id = {game.game_id: game for game in games}
     locked: list[LockedSlot] = []
