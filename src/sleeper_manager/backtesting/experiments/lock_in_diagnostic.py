@@ -25,6 +25,12 @@ from sleeper_manager.backtesting.experiments.lock_in_diagnostic_models import (
     LockInDiagnosticRequest,
     OracleFeasibilityCheck,
 )
+from sleeper_manager.backtesting.experiments.lock_in_diagnostic_report import (
+    DiagnosticReportOutput,
+    diagnostic_run_id,
+    logical_artifact_identity,
+    write_diagnostic_report,
+)
 from sleeper_manager.backtesting.replay.engine import (
     compare_team_week,
     oracle_team_week_result,
@@ -180,10 +186,14 @@ __all__ = (
     "DIAGNOSTIC_ADAPTER_VERSION",
     "DiagnosticDeferral",
     "DiagnosticPolicyTrace",
+    "DiagnosticReportOutput",
     "LockInDiagnosticError",
     "LockInDiagnosticExecution",
     "LockInDiagnosticRequest",
     "OracleFeasibilityCheck",
     "admit_historical_team_week",
+    "diagnostic_run_id",
+    "logical_artifact_identity",
     "run_lock_in_diagnostic",
+    "write_diagnostic_report",
 )
