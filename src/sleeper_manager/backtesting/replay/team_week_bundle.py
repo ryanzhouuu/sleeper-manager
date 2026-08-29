@@ -257,9 +257,22 @@ def _with_observed_starter_lock_eligibility(
     )
 
 
+def main(argv: list[str] | None = None) -> int:
+    """Delegate module-command execution to the isolated CLI boundary."""
+
+    from sleeper_manager.backtesting.replay.team_week_bundle_cli import main as cli_main
+
+    return cli_main(argv)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+
 __all__ = (
     "HistoricalTeamWeekBundleError",
     "HistoricalTeamWeekBundleOutput",
     "HistoricalTeamWeekBundleRequest",
     "bootstrap_historical_team_week_bundle",
+    "main",
 )

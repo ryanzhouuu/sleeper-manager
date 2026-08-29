@@ -92,6 +92,7 @@ Run `uv run sleeper-manager --help` for the complete argument reference.
 | `run-scheduled` | Run one local due-work wake against SQLite |
 | `validate-model-features` | Run the frozen historical feature experiment |
 | `evaluate-projections` | Evaluate the frozen projection models |
+| `python -m sleeper_manager.backtesting.replay.team_week_bundle` | Build one immutable historical team-week replay-input bundle |
 | `validate-lock-in-policy` | Replay historical leagues against the Lock-In policy |
 | `sync-cloudflare-runtime-data` | Prepare or apply projection history and runtime policy in D1 |
 
@@ -100,6 +101,23 @@ Historical ingestion commands need the optional dependencies:
 ```bash
 uv sync --locked --all-groups --extra historical
 ```
+
+Build a single historical team-week bundle with cached NBA data and a minimal
+Sleeper archive (acquired only when absent):
+
+```bash
+uv run --extra historical python -m sleeper_manager.backtesting.replay.team_week_bundle \
+  --league-id <league-id> --roster-id <roster-id> --week <week> --monday <YYYY-MM-DD>
+```
+
+The command persists source-fingerprinted artifacts under
+`.local/model-validation/team-week-inputs/`. It labels late-captured player
+eligibility as best-known rather than exact and leaves unavailable evidence
+visible in the bundle. The NBA cache directory is resolved from Sleeper's
+season metadata using SportsDataverse's ending-year convention, including
+October--December weeks. When source finalization timestamps are unavailable,
+the bundle labels a next-local-day 6:00 AM Eastern completion bound as
+approximate; only observed starters are treated as best-known eligible to lock.
 
 ## Development
 
