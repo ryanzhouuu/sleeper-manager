@@ -105,7 +105,7 @@ async def collect_cloudflare_planning_inputs(
             max_nba_schedule_age=policy.team_data_max_age,
             max_availability_age=policy.availability_max_age,
         ),
-        runtime_policy_version=policy.version,
+        runtime_policy_version=policy.manager_intent.version,
         move_lead_time=policy.move_lead_time,
         projection_history_version=history.history_version,
         projection_history_retrieved_at=history.loaded_at,

@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 import pytest
 
 from sleeper_manager.cloudflare.planning import collect_cloudflare_planning_inputs
+from sleeper_manager.config import ManagerPolicy
 from sleeper_manager.decisions.weekly_plan import build_weekly_plan
 from sleeper_manager.domain.planning import PlanStatus
 from sleeper_manager.domain.runtime_policy import default_runtime_policy
@@ -120,7 +121,7 @@ def test_cloudflare_assembly_refreshes_live_evidence(tmp_path) -> None:  # type:
         decision_time=assembly.evidence.decision_time,
     )
 
-    assert assembly.evidence.inputs.runtime_policy_version == "runtime-policy-v1"
+    assert assembly.evidence.inputs.runtime_policy_version == ManagerPolicy().version
     assert assembly.local_timezone.key == "America/Chicago"
     assert assembly.player_names["player-1"] == "Fixture Point Guard"
     plan = build_weekly_plan(state)
