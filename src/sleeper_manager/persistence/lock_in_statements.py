@@ -140,6 +140,23 @@ WHERE action_deadline <= ?
 LIST_ACKNOWLEDGED_LOCK_IN_OPPORTUNITIES_SQL = f"""
 SELECT {LOCK_IN_OPPORTUNITY_COLUMNS} FROM lock_in_opportunities
 WHERE league_id = ? AND fantasy_week = ?
-  AND status IN ('acknowledged_locked', 'acknowledged_passed')
+  AND status IN ('acknowledged_locked', 'acknowledged_passed', 'automatic_final')
 ORDER BY roster_id, player_id, scheduled_start, game_id
+"""
+
+HAS_OPEN_LOCK_IN_WATCH_SQL = """
+SELECT 1 FROM lock_in_opportunities
+WHERE game_id = ? AND action_deadline > ?
+  AND status IN ('scheduled', 'active', 'finalizing', 'actionable', 'reconciliation_required')
+LIMIT 1
+"""
+
+CONSUME_LOCK_IN_OPPORTUNITY_SQL = """
+UPDATE lock_in_opportunities SET
+    status = CASE WHEN ? = 'locked' THEN 'acknowledged_locked' ELSE 'acknowledged_passed' END,
+    acknowledged_action = ?,
+    acknowledged_at = ?,
+    updated_at = ?,
+    row_version = row_version + 1
+WHERE current_recommendation_id = ? AND status = 'actionable'
 """

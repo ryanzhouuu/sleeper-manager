@@ -39,6 +39,7 @@ from sleeper_manager.persistence.base import (
     StoredLeagueProfile,
 )
 from sleeper_manager.persistence.lock_in_sqlite import SQLiteLockInOpportunityMixin
+from sleeper_manager.persistence.lock_in_statements import CONSUME_LOCK_IN_OPPORTUNITY_SQL
 from sleeper_manager.persistence.rows import (
     acknowledgement_id,
     cached_nba_as_of,
@@ -353,6 +354,16 @@ class SQLiteStateRepository(SQLiteLockInOpportunityMixin):
                         acknowledged_at.isoformat(),
                     ),
                 )
+            connection.execute(
+                CONSUME_LOCK_IN_OPPORTUNITY_SQL,
+                (
+                    action.value,
+                    action.value,
+                    acknowledged_at.isoformat(),
+                    acknowledged_at.isoformat(),
+                    recommendation.recommendation_id,
+                ),
+            )
             updated = _mapping(
                 connection.execute(
                     LOAD_RECOMMENDATION_SQL, (recommendation.recommendation_id,)

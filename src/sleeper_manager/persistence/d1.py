@@ -39,6 +39,7 @@ from sleeper_manager.persistence.base import (
     ScheduledWorkStatus,
 )
 from sleeper_manager.persistence.lock_in_d1 import D1LockInOpportunityMixin
+from sleeper_manager.persistence.lock_in_statements import CONSUME_LOCK_IN_OPPORTUNITY_SQL
 from sleeper_manager.persistence.rows import (
     acknowledgement_id,
     cached_nba_as_of,
@@ -337,6 +338,16 @@ class D1StateRepository(D1LockInOpportunityMixin, AsyncRuntimeStateRepository):
                     acknowledged_at.isoformat(),
                     ack_id,
                     AcknowledgementAction.LOCKED.value,
+                ),
+            ),
+            self._statement(
+                CONSUME_LOCK_IN_OPPORTUNITY_SQL,
+                (
+                    action.value,
+                    action.value,
+                    acknowledged_at.isoformat(),
+                    acknowledged_at.isoformat(),
+                    recommendation_id,
                 ),
             ),
         ]

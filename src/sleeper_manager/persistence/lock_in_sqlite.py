@@ -20,6 +20,7 @@ from sleeper_manager.persistence.lock_in_opportunities import (
 )
 from sleeper_manager.persistence.lock_in_statements import (
     EXPIRE_LOCK_IN_OPPORTUNITIES_SQL,
+    HAS_OPEN_LOCK_IN_WATCH_SQL,
     INSERT_LOCK_IN_OPPORTUNITY_SQL,
     LIST_ACKNOWLEDGED_LOCK_IN_OPPORTUNITIES_SQL,
     LIST_ACTIONABLE_LOCK_IN_OPPORTUNITIES_SQL,
@@ -139,10 +140,20 @@ class SQLiteLockInOpportunityMixin:
             )
         return cursor.rowcount
 
+    def has_open_lock_in_watch(self, game_id: str, now: datetime) -> bool:
+        """Report whether any player for this game still needs a five-minute watch."""
+
+        with self._connect() as connection:
+            row = connection.execute(
+                HAS_OPEN_LOCK_IN_WATCH_SQL,
+                (game_id, now.isoformat()),
+            ).fetchone()
+        return row is not None
+
     def load_acknowledged_lock_in_opportunities(
         self, league_id: str, fantasy_week: int
     ) -> tuple[LockInOpportunityRecord, ...]:
-        """Load fixed Lock and removed Pass evidence for later planning."""
+        """Load locked, passed, and automatic-final evidence for later planning."""
 
         with self._connect() as connection:
             rows = connection.execute(
