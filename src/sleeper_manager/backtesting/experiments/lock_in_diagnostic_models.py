@@ -7,10 +7,11 @@ from datetime import datetime, timedelta
 
 from sleeper_manager.backtesting.replay.inputs.models import HistoricalTeamWeekInput
 from sleeper_manager.backtesting.replay.models import TeamWeekComparison, TeamWeekReplayResult
-from sleeper_manager.decisions.lock_in import LockInPolicyConfig, PolicyDecision
+from sleeper_manager.decisions.lock_in import LockInPolicyConfig
+from sleeper_manager.domain.lock_in import LockInDecision
 from sleeper_manager.domain.planning import PlanningReasonCode
 
-DIAGNOSTIC_ADAPTER_VERSION = "lock-in-diagnostic-adapter-v1"
+DIAGNOSTIC_ADAPTER_VERSION = "lock-in-diagnostic-adapter-v2"
 DECISION_CRITICAL_EXCLUSIONS = frozenset(
     {
         PlanningReasonCode.UNSUPPORTED_SCORING,
@@ -87,7 +88,7 @@ class DiagnosticDeferral:
 class DiagnosticPolicyTrace:
     """Attach stable event and ordering identity to one policy decision."""
 
-    decision: PolicyDecision
+    decision: LockInDecision
     decision_time: datetime
     event_id: str
     batch_id: str

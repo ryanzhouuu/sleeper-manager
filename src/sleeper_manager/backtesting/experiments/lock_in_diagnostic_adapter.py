@@ -14,14 +14,20 @@ from sleeper_manager.backtesting.experiments.lock_in_diagnostic_models import (
 from sleeper_manager.backtesting.replay.engine import ReplayConfig
 from sleeper_manager.backtesting.replay.inputs.models import HistoricalTeamWeekInput
 from sleeper_manager.backtesting.replay.models import LockCandidate, ReplayPlayerGame
+from sleeper_manager.backtesting.replay.planning_adapter import team_week_state_from_replay
 from sleeper_manager.backtesting.replay.runner import (
     ReplayEvent,
     ReplayEventKind,
     build_chronological_events,
 )
 from sleeper_manager.backtesting.replay.state import ReplayState
-from sleeper_manager.decisions.lock_in import ScoreMaximizingLockInPolicy
-from sleeper_manager.domain.eligibility import eligible_for_slot
+from sleeper_manager.decisions.lock_in import (
+    ScoreMaximizingLockInPolicy,
+    decision_critical_opportunities,
+    missing_decision_projection_keys,
+)
+from sleeper_manager.domain.lock_in import LockInDecisionKind
+from sleeper_manager.domain.planning import GameOpportunity, TeamWeekState
 
 
 class DiagnosticPolicyAdapter:
@@ -84,15 +90,13 @@ class DiagnosticPolicyAdapter:
                     continue
                 self._evaluation_counter += 1
                 self.evaluation_order.append(candidate_id)
-                remaining = _decision_critical_remaining(
-                    self.state,
-                    completed=player_game,
-                    decision_time=event.at,
+                planning_state = self._planning_state(event.at)
+                completed_opportunity = _completed_opportunity(planning_state, player_game)
+                remaining = decision_critical_opportunities(
+                    planning_state,
+                    completed_opportunity,
                 )
-                missing = _missing_projection_keys(
-                    (player_game, *remaining),
-                    decision_time=event.at,
-                )
+                missing = missing_decision_projection_keys((completed_opportunity, *remaining))
                 if missing:
                     self.deferred_seen.add(candidate_id)
                     self.deferrals.append(
@@ -111,22 +115,8 @@ class DiagnosticPolicyAdapter:
                         )
                     )
                     continue
-                decision = self.policy.decide_after_game(
-                    player_game,
-                    remaining_games=remaining,
-                    open_slots=tuple(
-                        (index, self.state.starter_slots[index])
-                        for index in self.state.open_slot_indices
-                    ),
-                    locked_slots=self.state.locked_slots,
-                    decision_time=event.at,
-                    league_id=self.request.team_week.league_id,
-                    week=self.request.team_week.week,
-                    roster_id=self.request.team_week.roster_id,
-                    run_seed=self.request.policy_config.seed,
-                    scenario_count=self.request.policy_config.scenario_count,
-                )
-                if decision.kind == "lock":
+                decision = self.policy.decide_after_game(planning_state, completed_opportunity)
+                if decision.kind is LockInDecisionKind.LOCK:
                     if decision.slot_index is None:
                         raise LockInDiagnosticError("Lock decision is missing a slot index")
                     self.state = self.state.lock(
@@ -136,7 +126,7 @@ class DiagnosticPolicyAdapter:
                         information_version=decision.information_version,
                         reason=decision.reason,
                     )
-                elif decision.kind == "pass":
+                elif decision.kind is LockInDecisionKind.PASS:
                     self.state = self.state.pass_candidate(
                         candidate,
                         at=event.at,
@@ -151,13 +141,27 @@ class DiagnosticPolicyAdapter:
                 self.policy_traces.append(
                     DiagnosticPolicyTrace(
                         decision=decision,
-                        decision_time=event.at,
+                        decision_time=decision.decision_time,
                         event_id=event.event_id,
                         batch_id=batch_id,
                         candidate_id=candidate_id,
                         evaluation_order=self._evaluation_counter,
                     )
                 )
+
+    def _planning_state(self, decision_time: datetime) -> TeamWeekState:
+        """Adapt current replay transitions into the shared policy boundary."""
+
+        team_week = self.request.team_week
+        return team_week_state_from_replay(
+            self.state,
+            config=replay_config(team_week),
+            decision_time=decision_time,
+            observed_starter_ids=team_week.observed_starter_ids,
+            roster_player_ids=team_week.roster_player_ids,
+            manager_policy_version=self.request.policy_name,
+            input_version=f"{team_week.manifest_id}:{team_week.league_id}:{team_week.week}",
+        )
 
     def _expire_deferred(self, event: ReplayEvent) -> None:
         """Record terminal evidence for candidates still deferred at week end."""
@@ -240,68 +244,24 @@ def _candidate_id(player_game: ReplayPlayerGame) -> str:
     return f"{player_game.sleeper_id}:{player_game.game_id}"
 
 
-def _opportunity_key(player_game: ReplayPlayerGame) -> str:
-    """Return the stable key used to report missing projection opportunities."""
+def _completed_opportunity(
+    state: TeamWeekState,
+    player_game: ReplayPlayerGame,
+) -> GameOpportunity:
+    """Resolve the shared finalized opportunity for one replay candidate."""
 
-    return f"{player_game.sleeper_id}:{player_game.game_id}"
-
-
-def _decision_critical_remaining(
-    state: ReplayState,
-    *,
-    completed: ReplayPlayerGame,
-    decision_time: datetime,
-) -> tuple[ReplayPlayerGame, ...]:
-    """Select future rostered opportunities that can still fill an open slot."""
-
-    locked_players = {slot.sleeper_id for slot in state.locked_slots}
-    open_slots = tuple((index, state.starter_slots[index]) for index in state.open_slot_indices)
-    game_by_id = {game.game_id: game for game in state.games}
-    remaining: list[ReplayPlayerGame] = []
-    for player_game in state.player_games:
-        if player_game.sleeper_id in locked_players:
-            continue
-        if (
-            player_game.sleeper_id == completed.sleeper_id
-            and player_game.game_id == completed.game_id
-        ):
-            continue
-        if not player_game.rostered_at_tipoff:
-            continue
-        game = game_by_id.get(player_game.game_id)
-        if game is None or game.start_time <= decision_time:
-            continue
-        if not any(
-            eligible_for_slot(player_game.eligible_positions, position)
-            for _, position in open_slots
-        ):
-            continue
-        remaining.append(player_game)
-    return tuple(
-        sorted(
-            remaining,
-            key=lambda item: (
-                item.sleeper_id,
-                game_by_id[item.game_id].start_time,
-                item.game_id,
-            ),
-        )
+    opportunity = next(
+        (
+            item
+            for item in state.opportunities
+            if item.sleeper_player_id == player_game.sleeper_id
+            and item.game_id == player_game.game_id
+        ),
+        None,
     )
-
-
-def _missing_projection_keys(
-    player_games: tuple[ReplayPlayerGame, ...],
-    *,
-    decision_time: datetime,
-) -> tuple[str, ...]:
-    """Identify candidate projections unavailable at the decision cutoff."""
-
-    missing: list[str] = []
-    for player_game in player_games:
-        projection = player_game.projection
-        if projection is None or projection.available_as_of > decision_time:
-            missing.append(_opportunity_key(player_game))
-    return tuple(missing)
+    if opportunity is None:
+        raise LockInDiagnosticError("Replay candidate is absent from shared planning state")
+    return opportunity
 
 
 __all__ = ("DiagnosticPolicyAdapter", "replay_config")

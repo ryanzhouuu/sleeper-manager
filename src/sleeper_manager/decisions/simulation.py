@@ -1,3 +1,9 @@
+"""Deterministic projection sampling and legal terminal assignment rollout.
+
+This module operates on provider-neutral scenario inputs. Policy and planner
+callers normalize their own domain records before crossing this boundary.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -6,7 +12,6 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 
-from sleeper_manager.backtesting.replay.models import ReplayPlayerGame
 from sleeper_manager.decisions.lineup import (
     AssignmentCandidate,
     AssignmentResult,
@@ -16,11 +21,13 @@ from sleeper_manager.domain.projection import ProjectionSnapshot
 
 
 class SimulationError(ValueError):
-    pass
+    """Report invalid point-in-time evidence or scenario configuration."""
 
 
 @dataclass(frozen=True, slots=True)
 class ScenarioInput:
+    """Describe one projected player-game that may fill eligible starter slots."""
+
     candidate_id: str
     player_id: str
     game_id: str
@@ -29,6 +36,8 @@ class ScenarioInput:
     eligible_slot_indices: tuple[int, ...] | None = None
 
     def __post_init__(self) -> None:
+        """Reject unstable identities and impossible slot restrictions."""
+
         if not self.candidate_id.strip() or not self.player_id.strip() or not self.game_id.strip():
             raise SimulationError("Scenario inputs require stable candidate, player, and game IDs")
         if not self.eligible_positions:
@@ -42,35 +51,14 @@ class ScenarioInput:
 
 @dataclass(frozen=True, slots=True)
 class Scenario:
+    """Store one sampled fantasy score for every candidate in stable order."""
+
     values: tuple[tuple[str, float], ...]
 
     def value_for(self, candidate_id: str, default: float = 0.0) -> float:
+        """Return the sampled score or a caller-supplied missing-value fallback."""
+
         return dict(self.values).get(candidate_id, default)
-
-
-def generate_scenarios(
-    player_games: Iterable[ReplayPlayerGame],
-    *,
-    decision_time: datetime,
-    count: int,
-    seed: int,
-) -> tuple[Scenario, ...]:
-    records = tuple(player_games)
-    inputs = tuple(
-        ScenarioInput(
-            candidate_id=_candidate_id(record),
-            player_id=record.sleeper_id,
-            game_id=record.game_id,
-            eligible_positions=record.eligible_positions,
-            projection=record.projection
-            if record.projection is not None
-            else _missing_projection(record),
-        )
-        for record in records
-    )
-    return generate_projection_scenarios(
-        inputs, decision_time=decision_time, count=count, seed=seed
-    )
 
 
 def generate_projection_scenarios(
@@ -80,6 +68,8 @@ def generate_projection_scenarios(
     count: int,
     seed: int,
 ) -> tuple[Scenario, ...]:
+    """Sample point-in-time projections deterministically by candidate identity."""
+
     if decision_time.tzinfo is None:
         raise SimulationError("Scenario decision time must be timezone-aware")
     if count <= 0:
@@ -112,37 +102,11 @@ def stable_scenario_seed(
     roster_id: int,
     decision_time: datetime,
 ) -> int:
+    """Derive a stable per-decision random seed from team-week identity."""
+
     payload = f"{run_seed}|{league_id}|{week}|{roster_id}|{decision_time.isoformat()}"
     digest = hashlib.sha256(payload.encode()).digest()
     return int.from_bytes(digest[:8], "big")
-
-
-def rollout_terminal_score(
-    *,
-    fixed_assignments: tuple[AssignmentCandidate, ...],
-    remaining_games: Iterable[ReplayPlayerGame],
-    open_slots: tuple[str, ...],
-    scenarios: Sequence[Scenario],
-) -> float:
-    remaining = tuple(remaining_games)
-    inputs = tuple(
-        ScenarioInput(
-            candidate_id=_candidate_id(record),
-            player_id=record.sleeper_id,
-            game_id=record.game_id,
-            eligible_positions=record.eligible_positions,
-            projection=record.projection
-            if record.projection is not None
-            else _missing_projection(record),
-        )
-        for record in remaining
-    )
-    return rollout_scenario_terminal_score(
-        fixed_assignments=fixed_assignments,
-        remaining_inputs=inputs,
-        open_slots=open_slots,
-        scenarios=scenarios,
-    )
 
 
 def rollout_scenario_terminal_score(
@@ -154,6 +118,8 @@ def rollout_scenario_terminal_score(
     slot_indices: tuple[int, ...] | None = None,
     excluded_candidate_ids: frozenset[str] = frozenset(),
 ) -> float:
+    """Return mean terminal score across legal assignments for all scenarios."""
+
     remaining = tuple(remaining_inputs)
     fixed_score = sum(candidate.score for candidate in fixed_assignments)
     results = rollout_scenario_assignments(
@@ -177,6 +143,8 @@ def rollout_scenario_assignments(
     slot_indices: tuple[int, ...] | None = None,
     excluded_candidate_ids: frozenset[str] = frozenset(),
 ) -> tuple[AssignmentResult, ...]:
+    """Optimize every scenario while respecting fixed players and exact slot indices."""
+
     remaining = tuple(remaining_inputs)
     if not scenarios:
         raise SimulationError("Scenario assignment rollout requires scenarios")
@@ -203,34 +171,9 @@ def rollout_scenario_assignments(
     return tuple(results)
 
 
-def pregame_assignment(
-    player_games: Iterable[ReplayPlayerGame],
-    *,
-    decision_time: datetime,
-    starter_slots: tuple[str, ...],
-) -> AssignmentResult:
-    records = tuple(player_games)
-    _validate_projection_times(records, decision_time)
-    candidates = tuple(
-        AssignmentCandidate(
-            candidate_id=_candidate_id(record),
-            player_id=record.sleeper_id,
-            score=record.projection.distribution.expected_value if record.projection else 0.0,
-            eligible_positions=record.eligible_positions,
-            game_id=record.game_id,
-        )
-        for record in records
-        if record.rostered_at_tipoff
-    )
-    return maximum_weight_assignment(candidates, starter_slots)
-
-
-def _sample_distribution(record: ReplayPlayerGame, randomizer: random.Random) -> float:
-    assert record.projection is not None
-    return _sample_projection(record.projection, randomizer)
-
-
 def _sample_projection(projection: ProjectionSnapshot, randomizer: random.Random) -> float:
+    """Sample empirical observations or fall back to the distribution mean."""
+
     observations = projection.distribution.weighted_observations
     if not observations:
         return projection.distribution.expected_value
@@ -239,40 +182,12 @@ def _sample_projection(projection: ProjectionSnapshot, randomizer: random.Random
     return randomizer.choices(values, weights=weights, k=1)[0]
 
 
-def _candidate_id(record: ReplayPlayerGame) -> str:
-    return (
-        f"{record.sleeper_id}:{record.game_id}:"
-        f"{record.membership_segment or record.fantasy_team_id}"
-    )
-
-
-def _missing_projection(record: ReplayPlayerGame) -> ProjectionSnapshot:
-    raise SimulationError(f"Missing projection for {record.sleeper_id}:{record.game_id}")
-
-
-def _validate_projection_times(
-    records: Sequence[ReplayPlayerGame], decision_time: datetime
-) -> None:
-    if decision_time.tzinfo is None:
-        raise SimulationError("Decision time must be timezone-aware")
-    for record in records:
-        if record.projection is None:
-            raise SimulationError(f"Missing projection for {record.sleeper_id}:{record.game_id}")
-        if record.projection.available_as_of > decision_time:
-            raise SimulationError(
-                f"Projection for {record.sleeper_id}:{record.game_id} is not point-in-time valid"
-            )
-
-
 __all__ = (
     "Scenario",
     "ScenarioInput",
     "SimulationError",
-    "generate_scenarios",
     "generate_projection_scenarios",
-    "pregame_assignment",
     "rollout_scenario_assignments",
-    "rollout_terminal_score",
     "rollout_scenario_terminal_score",
     "stable_scenario_seed",
 )

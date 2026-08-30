@@ -13,7 +13,11 @@ from sleeper_manager.backtesting.experiments.lock_in_diagnostic_adapter import (
 from sleeper_manager.backtesting.experiments.lock_in_diagnostic_models import (
     LockInDiagnosticRequest,
 )
-from sleeper_manager.decisions.lock_in import LockInPolicyConfig, ScoreMaximizingLockInPolicy
+from sleeper_manager.decisions.lock_in import (
+    LockInPolicyConfig,
+    ScoreMaximizingLockInPolicy,
+    decision_critical_opportunities,
+)
 
 
 def test_adapter_defers_until_complete_as_of_opportunity_set_is_projected() -> None:
@@ -46,12 +50,12 @@ def test_adapter_never_invokes_policy_with_reduced_future_set(
     seen_remaining: list[tuple[str, ...]] = []
     original = ScoreMaximizingLockInPolicy.decide_after_game
 
-    def wrapped(self, completed, **kwargs):  # type: ignore[no-untyped-def]
-        remaining = kwargs["remaining_games"]
-        keys = tuple(f"{item.sleeper_id}:{item.game_id}" for item in remaining)
+    def wrapped(self, state, completed):  # type: ignore[no-untyped-def]
+        remaining = decision_critical_opportunities(state, completed)
+        keys = tuple(f"{item.sleeper_player_id}:{item.game_id}" for item in remaining)
         seen_remaining.append(keys)
         assert "p2:g2" in keys
-        return original(self, completed, **kwargs)
+        return original(self, state, completed)
 
     monkeypatch.setattr(ScoreMaximizingLockInPolicy, "decide_after_game", wrapped)
     adapter = DiagnosticPolicyAdapter(

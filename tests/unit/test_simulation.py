@@ -2,8 +2,11 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from sleeper_manager.backtesting.replay.models import ReplayPlayerGame
-from sleeper_manager.decisions.simulation import SimulationError, generate_scenarios
+from sleeper_manager.decisions.simulation import (
+    ScenarioInput,
+    SimulationError,
+    generate_projection_scenarios,
+)
 from sleeper_manager.domain.projection import ProjectionDistribution, ProjectionSnapshot
 
 NOW = datetime(2026, 1, 10, 18, tzinfo=UTC)
@@ -21,9 +24,9 @@ def test_scenarios_are_seeded_and_reject_future_projections() -> None:
         distribution=distribution,
         reasons=(),
     )
-    record = ReplayPlayerGame("p1", "p1", "g1", 1, True, ("PG",), 10, projection)
-    first = generate_scenarios((record,), decision_time=NOW, count=5, seed=11)
-    second = generate_scenarios((record,), decision_time=NOW, count=5, seed=11)
+    record = ScenarioInput("p1:g1", "p1", "g1", ("PG",), projection)
+    first = generate_projection_scenarios((record,), decision_time=NOW, count=5, seed=11)
+    second = generate_projection_scenarios((record,), decision_time=NOW, count=5, seed=11)
     assert first == second
 
     future_projection = ProjectionSnapshot(
@@ -36,6 +39,6 @@ def test_scenarios_are_seeded_and_reject_future_projections() -> None:
         distribution=distribution,
         reasons=(),
     )
-    future = ReplayPlayerGame("p2", "p2", "g2", 1, True, ("PG",), 10, future_projection)
+    future = ScenarioInput("p2:g2", "p2", "g2", ("PG",), future_projection)
     with pytest.raises(SimulationError, match="not available"):
-        generate_scenarios((future,), decision_time=NOW, count=1, seed=11)
+        generate_projection_scenarios((future,), decision_time=NOW, count=1, seed=11)

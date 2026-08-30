@@ -20,7 +20,7 @@ from sleeper_manager.backtesting.replay.models import (
     TeamWeekReplayResult,
 )
 
-REPORT_SCHEMA_VERSION = "lock-in-diagnostic-report-v1"
+REPORT_SCHEMA_VERSION = "lock-in-diagnostic-report-v2"
 REPORT_TYPE = "lock_in_diagnostic_report"
 
 LIMITATIONS = (
@@ -57,7 +57,6 @@ def diagnostic_run_id(request: LockInDiagnosticRequest) -> str:
         "policy_name": request.policy_name,
         "policy_config": {
             "scenario_count": config.scenario_count,
-            "fixture_scenario_count": config.fixture_scenario_count,
             "seed": config.seed,
             "tie_tolerance": config.tie_tolerance,
         },
@@ -108,7 +107,6 @@ def build_diagnostic_report_payload(
         "policy": {
             "name": request.policy_name,
             "scenario_count": request.policy_config.scenario_count,
-            "fixture_scenario_count": request.policy_config.fixture_scenario_count,
             "seed": request.policy_config.seed,
             "tie_tolerance": request.policy_config.tie_tolerance,
             "planning_lead_time_seconds": _lead_time_seconds(request.planning_lead_time),
