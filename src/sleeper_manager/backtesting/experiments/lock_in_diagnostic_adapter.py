@@ -130,16 +130,7 @@ class DiagnosticPolicyAdapter:
     def _planning_state(self, decision_time: datetime) -> TeamWeekState:
         """Adapt current replay transitions into the shared policy boundary."""
 
-        team_week = self.request.team_week
-        return team_week_state_from_replay(
-            self.state,
-            config=replay_config(team_week),
-            decision_time=decision_time,
-            observed_starter_ids=team_week.observed_starter_ids,
-            roster_player_ids=team_week.roster_player_ids,
-            manager_policy_version=self.request.policy_name,
-            input_version=f"{team_week.manifest_id}:{team_week.league_id}:{team_week.week}",
-        )
+        return planning_state_for(self.request, self.state, decision_time)
 
     def _expire_deferred(self, event: ReplayEvent) -> None:
         """Record terminal evidence for candidates still deferred at week end."""
@@ -204,6 +195,38 @@ class DiagnosticPolicyAdapter:
         return batches
 
 
+def realized_decision_time(team_week: HistoricalTeamWeekInput) -> datetime:
+    """Return the latest realized finalization time visible in one team-week artifact."""
+
+    if not team_week.games:
+        raise LockInDiagnosticError("Team-week artifact has no games")
+    latest = team_week.games[0].final_time or team_week.games[0].start_time
+    for game in team_week.games[1:]:
+        candidate = game.final_time or game.start_time
+        if candidate > latest:
+            latest = candidate
+    return latest
+
+
+def planning_state_for(
+    request: LockInDiagnosticRequest,
+    replay_state: ReplayState,
+    decision_time: datetime,
+) -> TeamWeekState:
+    """Adapt replay transitions into the shared policy boundary at one timestamp."""
+
+    team_week = request.team_week
+    return team_week_state_from_replay(
+        replay_state,
+        config=replay_config(team_week),
+        decision_time=decision_time,
+        observed_starter_ids=team_week.observed_starter_ids,
+        roster_player_ids=team_week.roster_player_ids,
+        manager_policy_version=request.policy_name,
+        input_version=f"{team_week.manifest_id}:{team_week.league_id}:{team_week.week}",
+    )
+
+
 def replay_config(team_week: HistoricalTeamWeekInput) -> ReplayConfig:
     """Build the replay identity and slot configuration for one team-week."""
 
@@ -242,4 +265,9 @@ def _completed_opportunity(
     return opportunity
 
 
-__all__ = ("DiagnosticPolicyAdapter", "replay_config")
+__all__ = (
+    "DiagnosticPolicyAdapter",
+    "planning_state_for",
+    "realized_decision_time",
+    "replay_config",
+)

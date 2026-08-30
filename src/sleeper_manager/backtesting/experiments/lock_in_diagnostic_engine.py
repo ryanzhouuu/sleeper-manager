@@ -2,6 +2,8 @@
 
 from sleeper_manager.backtesting.experiments.lock_in_diagnostic_adapter import (
     DiagnosticPolicyAdapter,
+    planning_state_for,
+    realized_decision_time,
     replay_config,
 )
 from sleeper_manager.backtesting.experiments.lock_in_diagnostic_oracle import (
@@ -19,5 +21,7 @@ __all__ = (
     "build_model_result",
     "legal_automatic_assignments",
     "oracle_feasibility_checks",
+    "planning_state_for",
+    "realized_decision_time",
     "replay_config",
 )

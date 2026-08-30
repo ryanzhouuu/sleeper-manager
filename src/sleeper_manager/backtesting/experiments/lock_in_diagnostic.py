@@ -9,6 +9,8 @@ from sleeper_manager.backtesting.experiments.lock_in_diagnostic_engine import (
     build_model_result,
     legal_automatic_assignments,
     oracle_feasibility_checks,
+    planning_state_for,
+    realized_decision_time,
     replay_config,
 )
 from sleeper_manager.backtesting.experiments.lock_in_diagnostic_models import (
@@ -146,8 +148,15 @@ def run_lock_in_diagnostic(request: LockInDiagnosticRequest) -> LockInDiagnostic
             oracle_feasibility=(),
         )
 
-    automatic = legal_automatic_assignments(adapter.state, request.team_week)
-    built_model = build_model_result(request, adapter, automatic)
+    week_end = realized_decision_time(request.team_week)
+    model_state = planning_state_for(request, adapter.state, week_end)
+    automatic = legal_automatic_assignments(model_state)
+    built_model = build_model_result(
+        request,
+        locked_slots=model_state.fixed_slots,
+        policy_traces=tuple(adapter.policy_traces),
+        automatic=automatic,
+    )
     oracle_result = oracle_team_week_result(
         request.team_week.player_games,
         config=replay_config(request.team_week),
