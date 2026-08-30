@@ -14,6 +14,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from sleeper_manager.domain.runtime_policy import ManagerIntent
+
 PolicyPreset = Literal["conservative", "balanced", "aggressive"]
 
 
@@ -56,6 +58,21 @@ class ManagerPolicy(BaseModel):
         payload = self.model_dump(mode="json")
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         return sha256(encoded).hexdigest()[:16]
+
+    def to_manager_intent(self) -> ManagerIntent:
+        """Translate local manager intent into the runtime policy envelope."""
+
+        return ManagerIntent(
+            preset=self.decision.preset,
+            minimum_confidence=self.decision.minimum_confidence,
+            quiet_hours_start=self.notifications.quiet_hours_start,
+            quiet_hours_end=self.notifications.quiet_hours_end,
+            urgent_actions_override_quiet_hours=(
+                self.notifications.urgent_actions_override_quiet_hours
+            ),
+            protected_sleeper_ids=self.players.protected_sleeper_ids,
+            version=self.version,
+        )
 
 
 _PRESET_VALUES: dict[PolicyPreset, dict[str, Any]] = {

@@ -166,6 +166,7 @@ def runtime_policy_for_history(
         team_data_max_age=base.team_data_max_age,
         projection_history_version=base.projection_history_version,
         mapping_overrides=overrides,
+        manager_intent=base.manager_intent,
     )
 
 
