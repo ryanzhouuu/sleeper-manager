@@ -18,21 +18,21 @@ from sleeper_manager.domain.runtime_policy import ManagerIntent
 
 PolicyPreset = Literal["conservative", "balanced", "aggressive"]
 
+_REMOVED_DECISION_KEYS = frozenset({"use_matchup_context", "protect_elite_upside"})
+_REMOVED_NOTIFICATION_KEYS = frozenset({"daily_summary", "injury_alerts"})
+_REMOVED_FROM_VERSION_ONE = _REMOVED_DECISION_KEYS | _REMOVED_NOTIFICATION_KEYS
+
 
 class DecisionPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     preset: PolicyPreset = "balanced"
     minimum_confidence: float = Field(default=0.70, ge=0, le=1)
-    use_matchup_context: bool = True
-    protect_elite_upside: bool = True
 
 
 class NotificationPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    daily_summary: bool = True
-    injury_alerts: bool = True
     quiet_hours_start: str = "23:00"
     quiet_hours_end: str = "07:00"
     urgent_actions_override_quiet_hours: bool = True
@@ -76,21 +76,9 @@ class ManagerPolicy(BaseModel):
 
 
 _PRESET_VALUES: dict[PolicyPreset, dict[str, Any]] = {
-    "conservative": {
-        "minimum_confidence": 0.80,
-        "use_matchup_context": False,
-        "protect_elite_upside": True,
-    },
-    "balanced": {
-        "minimum_confidence": 0.70,
-        "use_matchup_context": True,
-        "protect_elite_upside": True,
-    },
-    "aggressive": {
-        "minimum_confidence": 0.60,
-        "use_matchup_context": True,
-        "protect_elite_upside": False,
-    },
+    "conservative": {"minimum_confidence": 0.80},
+    "balanced": {"minimum_confidence": 0.70},
+    "aggressive": {"minimum_confidence": 0.60},
 }
 
 
@@ -98,7 +86,7 @@ def load_manager_policy(path: Path) -> ManagerPolicy:
     """Load policy TOML, applying preset defaults then file overrides.
 
     Missing files return defaults. Unknown presets raise ValueError. Extra keys
-    inside known tables are rejected.
+    inside known tables are rejected. Removed version-one keys fail closed.
     """
     if not path.exists():
         return ManagerPolicy()
@@ -109,6 +97,12 @@ def load_manager_policy(path: Path) -> ManagerPolicy:
     decision_values = raw.get("decision", {})
     if not isinstance(decision_values, dict):
         raise ValueError("The [decision] policy section must be a TOML table")
+    notification_values = raw.get("notifications", {})
+    if not isinstance(notification_values, dict):
+        raise ValueError("The [notifications] policy section must be a TOML table")
+    _reject_removed_policy_keys(decision_values, section="decision")
+    _reject_removed_policy_keys(notification_values, section="notifications")
+
     preset = decision_values.get("preset", "balanced")
     if preset not in _PRESET_VALUES:
         raise ValueError(f"Unknown manager policy preset: {preset!r}")
@@ -120,10 +114,20 @@ def load_manager_policy(path: Path) -> ManagerPolicy:
     }
     resolved = {
         "decision": resolved_decision,
-        "notifications": raw.get("notifications", {}),
+        "notifications": notification_values,
         "players": raw.get("players", {}),
     }
     return ManagerPolicy.model_validate(resolved)
+
+
+def _reject_removed_policy_keys(values: dict[str, object], *, section: str) -> None:
+    removed = sorted(key for key in values if key in _REMOVED_FROM_VERSION_ONE)
+    if removed:
+        joined = ", ".join(removed)
+        raise ValueError(
+            f"Removed from version one in [{section}]: {joined}. "
+            "Delete these keys from the manager policy file."
+        )
 
 
 class Settings(BaseSettings):

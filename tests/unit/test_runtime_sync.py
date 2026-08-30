@@ -10,6 +10,7 @@ from sleeper_manager.cloudflare.runtime_sync import (
     runtime_policy_for_history,
     sync_cloudflare_runtime_data,
 )
+from sleeper_manager.config import load_manager_policy
 from sleeper_manager.domain.scoring import BoxScoreLine
 from sleeper_manager.persistence.async_sqlite import AsyncSQLiteStateRepository
 from sleeper_manager.projections.direct_baseline import DirectBaselineObservation
@@ -99,3 +100,35 @@ def test_redact_secrets_strips_tokens() -> None:
 
 def test_d1_database_id_reads_wrangler_config() -> None:
     assert d1_database_id(Path("wrangler.toml")) == "ceabcb2a-68f6-4781-8c50-98f37a0e6044"
+
+
+def test_runtime_policy_for_history_translates_manager_intent(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    policy_path = tmp_path / "policy.toml"
+    policy_path.write_text(
+        """
+[decision]
+preset = "conservative"
+minimum_confidence = 0.85
+
+[notifications]
+quiet_hours_start = "22:00"
+quiet_hours_end = "06:30"
+urgent_actions_override_quiet_hours = false
+
+[players]
+protected_sleeper_ids = ["player-1"]
+mapping_overrides = { "sleeper-1" = "espn-1" }
+""",
+        encoding="utf-8",
+    )
+    manager_policy = load_manager_policy(policy_path)
+    history = records_from_observations((_observation(),), history_version="history-v1")
+
+    policy = runtime_policy_for_history(history, manager_policy=manager_policy)
+
+    assert policy.mapping_overrides == {"sleeper-1": "espn-1"}
+    assert policy.manager_intent == manager_policy.to_manager_intent()
+    assert policy.manager_intent.preset == "conservative"
+    assert policy.manager_intent.minimum_confidence == 0.85
+    assert policy.manager_intent.protected_sleeper_ids == ("player-1",)
+    assert policy.manager_intent.version == manager_policy.version

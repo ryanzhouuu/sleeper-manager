@@ -154,7 +154,9 @@ def runtime_policy_for_history(
     loaded = manager_policy
     if loaded is None and policy_path is not None:
         loaded = load_manager_policy(policy_path)
-    overrides = dict(loaded.players.mapping_overrides) if loaded is not None else {}
+    manager_policy = loaded if loaded is not None else ManagerPolicy()
+    manager_intent = manager_policy.to_manager_intent()
+    overrides = dict(manager_policy.players.mapping_overrides)
     base = default_runtime_policy(history_version=history.dataset_version)
     return RuntimePolicy(
         version=base.version,
@@ -166,7 +168,7 @@ def runtime_policy_for_history(
         team_data_max_age=base.team_data_max_age,
         projection_history_version=base.projection_history_version,
         mapping_overrides=overrides,
-        manager_intent=base.manager_intent,
+        manager_intent=manager_intent,
     )
 
 
