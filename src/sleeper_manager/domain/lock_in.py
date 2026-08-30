@@ -24,6 +24,16 @@ class LockInDecisionKind(StrEnum):
     PASS = "pass"
 
 
+class LockInEvaluationKind(StrEnum):
+    """Identify actionable, deferred, and terminal live evaluation outcomes."""
+
+    LOCK = "lock"
+    PASS = "pass"
+    WAIT = "wait"
+    UNAVAILABLE = "unavailable"
+    AUTOMATIC_FINAL = "automatic_final"
+
+
 @dataclass(frozen=True, slots=True)
 class LockInDecision:
     """Capture one policy result with the evidence required to audit it later."""
@@ -78,6 +88,64 @@ class LockInDecisionTrace:
             raise LockInContractError("Lock-In evaluation order must be positive")
 
 
+@dataclass(frozen=True, slots=True)
+class LockInEvaluation:
+    """Describe one auditable live result without inventing a Lock/Pass decision."""
+
+    decision_time: datetime
+    kind: LockInEvaluationKind
+    player_id: str
+    game_id: str
+    deadline: datetime
+    information_version: str
+    manager_policy_version: str
+    reason_codes: tuple[str, ...]
+    trace: tuple[tuple[str, str], ...]
+    observed_score: float | None = None
+    alternative_expected_score: float | None = None
+    alternative_percentiles: tuple[tuple[int, float], ...] = ()
+    confidence: float | None = None
+    decision: LockInDecision | None = None
+
+    def __post_init__(self) -> None:
+        """Reject evaluations whose outcome and supporting evidence disagree."""
+
+        _require_aware(self.decision_time, "evaluation time")
+        _require_aware(self.deadline, "evaluation deadline")
+        _require_text(self.player_id, "player ID")
+        _require_text(self.game_id, "game ID")
+        _require_text(self.information_version, "information version")
+        _require_text(self.manager_policy_version, "manager policy version")
+        if not self.reason_codes or any(not item.strip() for item in self.reason_codes):
+            raise LockInContractError("Lock-In evaluations require reason codes")
+        trace_keys = tuple(key for key, _ in self.trace)
+        if not self.trace or len(set(trace_keys)) != len(trace_keys):
+            raise LockInContractError("Lock-In evaluation trace requires unique evidence keys")
+        if any(not key.strip() or not value.strip() for key, value in self.trace):
+            raise LockInContractError("Lock-In evaluation trace values must be non-empty")
+        if self.observed_score is not None and not isfinite(self.observed_score):
+            raise LockInContractError("Observed Lock-In score must be finite")
+        if self.alternative_expected_score is not None and not isfinite(
+            self.alternative_expected_score
+        ):
+            raise LockInContractError("Alternative Lock-In score must be finite")
+        if self.confidence is not None and (
+            not isfinite(self.confidence) or not 0 <= self.confidence <= 1
+        ):
+            raise LockInContractError("Lock-In confidence must be between zero and one")
+        _validate_percentiles(self.alternative_percentiles)
+        actionable = self.kind in {LockInEvaluationKind.LOCK, LockInEvaluationKind.PASS}
+        if actionable != (self.decision is not None):
+            raise LockInContractError("Only actionable evaluations carry a Lock-In decision")
+        if self.decision is not None:
+            if self.decision.player_id != self.player_id or self.decision.game_id != self.game_id:
+                raise LockInContractError("Evaluation and decision identities must match")
+            if self.decision.kind.value != self.kind.value:
+                raise LockInContractError("Evaluation and decision actions must match")
+            if self.observed_score is None or self.confidence is None:
+                raise LockInContractError("Actionable evaluations require score and confidence")
+
+
 def _require_text(value: str, label: str) -> None:
     """Require stable nonblank identifiers and human-readable evidence."""
 
@@ -85,9 +153,28 @@ def _require_text(value: str, label: str) -> None:
         raise LockInContractError(f"Lock-In {label} must be non-empty")
 
 
+def _require_aware(value: datetime, label: str) -> None:
+    """Require timezone-aware timestamps at live decision boundaries."""
+
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise LockInContractError(f"Lock-In {label} must be timezone-aware")
+
+
+def _validate_percentiles(values: tuple[tuple[int, float], ...]) -> None:
+    """Require ordered finite percentile evidence without duplicate ranks."""
+
+    ranks = tuple(rank for rank, _ in values)
+    if ranks != tuple(sorted(set(ranks))) or any(not 0 <= rank <= 100 for rank in ranks):
+        raise LockInContractError("Lock-In percentiles must have unique ordered ranks")
+    if any(not isfinite(value) for _, value in values):
+        raise LockInContractError("Lock-In percentile values must be finite")
+
+
 __all__ = (
     "LockInContractError",
     "LockInDecision",
     "LockInDecisionKind",
     "LockInDecisionTrace",
+    "LockInEvaluation",
+    "LockInEvaluationKind",
 )

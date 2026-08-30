@@ -126,6 +126,20 @@ def test_policy_locks_known_high_score_and_passes_for_future_upside() -> None:
     assert lock.information_version == "team-week-inputs-v1"
 
 
+def test_policy_comparison_exposes_paired_scenarios_without_changing_decision() -> None:
+    """Expose scenario evidence while retaining the historical policy result."""
+
+    policy = ScoreMaximizingLockInPolicy(LockInPolicyConfig(scenario_count=20, seed=7))
+    completed = _opportunity("p1", "g1", 10, actual=10, start_offset=-3)
+    state = _state((completed, _opportunity("p1", "g2", 1)))
+
+    comparison = policy.compare_after_game(state, completed)
+
+    assert comparison.decision == policy.decide_after_game(state, completed)
+    assert comparison.selected_terminal_scores == (10.0,) * 20
+    assert comparison.counterfactual_terminal_scores == (1.0,) * 20
+
+
 def test_policy_honors_exact_slot_indices_with_duplicate_positions() -> None:
     """Never place a completed score into a same-label slot it could not occupy."""
 
