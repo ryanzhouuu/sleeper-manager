@@ -9,6 +9,8 @@ from sleeper_manager.domain.lock_in import (
     LockInDecision,
     LockInDecisionKind,
     LockInDecisionTrace,
+    LockInEvaluation,
+    LockInEvaluationKind,
 )
 
 NOW = datetime(2026, 2, 2, 20, tzinfo=UTC)
@@ -102,4 +104,52 @@ def test_trace_requires_stable_positive_ordering_identity() -> None:
             trace.batch_id,
             trace.candidate_id,
             0,
+        )
+
+
+def test_live_evaluation_separates_actions_from_waits() -> None:
+    """Keep deferred live results from masquerading as Lock/Pass decisions."""
+
+    actionable = LockInEvaluation(
+        decision_time=NOW,
+        kind=LockInEvaluationKind.LOCK,
+        player_id="player-1",
+        game_id="game-1",
+        deadline=NOW,
+        information_version="inputs-v1",
+        manager_policy_version="manager-v1",
+        reason_codes=("confidence_met",),
+        trace=(("scoring_policy_version", "scoring-v1"),),
+        observed_score=50.0,
+        alternative_expected_score=42.0,
+        alternative_percentiles=((10, 30.0), (50, 42.0), (90, 55.0)),
+        confidence=0.8,
+        decision=_decision(),
+    )
+    waiting = LockInEvaluation(
+        decision_time=NOW,
+        kind=LockInEvaluationKind.WAIT,
+        player_id="player-1",
+        game_id="game-1",
+        deadline=NOW,
+        information_version="inputs-v1",
+        manager_policy_version="manager-v1",
+        reason_codes=("score_stabilizing",),
+        trace=(("scoring_policy_version", "scoring-v1"),),
+    )
+
+    assert actionable.decision is not None
+    assert waiting.decision is None
+    with pytest.raises(LockInContractError, match="Only actionable"):
+        LockInEvaluation(
+            decision_time=NOW,
+            kind=LockInEvaluationKind.WAIT,
+            player_id="player-1",
+            game_id="game-1",
+            deadline=NOW,
+            information_version="inputs-v1",
+            manager_policy_version="manager-v1",
+            reason_codes=("score_stabilizing",),
+            trace=(("scoring_policy_version", "scoring-v1"),),
+            decision=_decision(),
         )

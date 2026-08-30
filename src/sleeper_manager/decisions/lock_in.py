@@ -14,6 +14,7 @@ from sleeper_manager.decisions.simulation import (
     Scenario,
     ScenarioInput,
     generate_projection_scenarios,
+    rollout_scenario_assignments,
     rollout_scenario_terminal_score,
     stable_scenario_seed,
 )
@@ -48,6 +49,21 @@ class LockInPolicyConfig:
             raise ValueError("Tie tolerance must be non-negative")
 
 
+@dataclass(frozen=True, slots=True)
+class LockInComparison:
+    """Expose the selected and counterfactual terminal values by scenario."""
+
+    decision: LockInDecision
+    selected_terminal_scores: tuple[float, ...]
+    counterfactual_terminal_scores: tuple[float, ...]
+
+    def __post_init__(self) -> None:
+        """Require paired scenarios whenever a comparison was available."""
+
+        if len(self.selected_terminal_scores) != len(self.counterfactual_terminal_scores):
+            raise ValueError("Lock-In comparison scenarios must be paired")
+
+
 class ScoreMaximizingLockInPolicy:
     """Choose Lock or Pass by maximizing expected own-team terminal score."""
 
@@ -63,16 +79,29 @@ class ScoreMaximizingLockInPolicy:
     ) -> LockInDecision:
         """Evaluate one finalized opportunity against every legal future alternative."""
 
+        return self.compare_after_game(state, completed_game).decision
+
+    def compare_after_game(
+        self,
+        state: TeamWeekState,
+        completed_game: GameOpportunity,
+    ) -> LockInComparison:
+        """Return the historical decision plus paired scenario terminal values."""
+
         _validate_policy_input(state, completed_game)
         completed_score = completed_game.completed_fantasy_score
         assert completed_score is not None
         locked_score = sum(slot.accepted_fantasy_score for slot in state.fixed_slots)
         if completed_game.rostered_at_tipoff is False:
-            return _terminal_pass(
-                state,
-                completed_game,
-                expected_terminal_score=locked_score,
-                reason="PASS because the player was not rostered at tipoff.",
+            return LockInComparison(
+                decision=_terminal_pass(
+                    state,
+                    completed_game,
+                    expected_terminal_score=locked_score,
+                    reason="PASS because the player was not rostered at tipoff.",
+                ),
+                selected_terminal_scores=(),
+                counterfactual_terminal_scores=(),
             )
         if completed_game.rostered_at_tipoff is None:
             raise LockInPolicyError("Completed opportunity lacks tipoff roster evidence")
@@ -87,11 +116,15 @@ class ScoreMaximizingLockInPolicy:
             and eligible_for_slot(completed_game.eligible_positions, slot.position)
         )
         if not legal_open_slots:
-            return _terminal_pass(
-                state,
-                completed_game,
-                expected_terminal_score=locked_score,
-                reason="No legal open starting slot remained.",
+            return LockInComparison(
+                decision=_terminal_pass(
+                    state,
+                    completed_game,
+                    expected_terminal_score=locked_score,
+                    reason="No legal open starting slot remained.",
+                ),
+                selected_terminal_scores=(),
+                counterfactual_terminal_scores=(),
             )
 
         remaining = decision_critical_opportunities(state, completed_game)
@@ -114,7 +147,13 @@ class ScoreMaximizingLockInPolicy:
             open_slots,
             scenarios=scenarios,
         )
-        best_lock: tuple[float, int, float] | None = None
+        pass_scores = _scenario_terminal_scores(
+            inputs,
+            open_slots,
+            scenarios=scenarios,
+            fixed_score=locked_score,
+        )
+        best_lock: tuple[float, int, float, tuple[float, ...]] | None = None
         for slot in legal_open_slots:
             fixed = AssignmentCandidate(
                 candidate_id=(
@@ -134,35 +173,51 @@ class ScoreMaximizingLockInPolicy:
                 slot_indices=tuple(item.index for item in remaining_slots),
                 scenarios=scenarios,
             )
-            candidate = (lock_value, slot.index, lock_value - pass_value)
+            lock_scores = _scenario_terminal_scores(
+                inputs,
+                remaining_slots,
+                scenarios=scenarios,
+                fixed_assignments=(fixed,),
+                fixed_score=locked_score + completed_score,
+            )
+            candidate = (lock_value, slot.index, lock_value - pass_value, lock_scores)
             if best_lock is None or candidate[0] > best_lock[0] + 1e-9:
                 best_lock = candidate
 
         assert best_lock is not None
         if best_lock[0] <= pass_value + self.config.tie_tolerance:
-            return LockInDecision(
+            return LockInComparison(
+                decision=LockInDecision(
+                    decision_time=state.decision_time,
+                    kind=LockInDecisionKind.PASS,
+                    player_id=completed_game.sleeper_player_id,
+                    game_id=completed_game.game_id,
+                    slot_index=None,
+                    expected_terminal_score=pass_value,
+                    counterfactual_value=pass_value - best_lock[0],
+                    information_version=state.input_version,
+                    reason="PASS preserved future own-team slot flexibility within tie tolerance.",
+                ),
+                selected_terminal_scores=pass_scores,
+                counterfactual_terminal_scores=best_lock[3],
+            )
+        return LockInComparison(
+            decision=LockInDecision(
                 decision_time=state.decision_time,
-                kind=LockInDecisionKind.PASS,
+                kind=LockInDecisionKind.LOCK,
                 player_id=completed_game.sleeper_player_id,
                 game_id=completed_game.game_id,
-                slot_index=None,
-                expected_terminal_score=pass_value,
-                counterfactual_value=pass_value - best_lock[0],
+                slot_index=best_lock[1],
+                expected_terminal_score=best_lock[0],
+                counterfactual_value=best_lock[0] - pass_value,
                 information_version=state.input_version,
-                reason="PASS preserved future own-team slot flexibility within tie tolerance.",
-            )
-        return LockInDecision(
-            decision_time=state.decision_time,
-            kind=LockInDecisionKind.LOCK,
-            player_id=completed_game.sleeper_player_id,
-            game_id=completed_game.game_id,
-            slot_index=best_lock[1],
-            expected_terminal_score=best_lock[0],
-            counterfactual_value=best_lock[0] - pass_value,
-            information_version=state.input_version,
-            reason=(
-                "LOCK maximized expected terminal own-team score across deterministic scenarios."
+                reason=(
+                    "LOCK maximized expected terminal own-team score "
+                    "across deterministic scenarios."
+                ),
             ),
+            selected_terminal_scores=best_lock[3],
+            counterfactual_terminal_scores=pass_scores,
         )
 
 
@@ -259,6 +314,26 @@ def _remaining_terminal_value(
     )
 
 
+def _scenario_terminal_scores(
+    inputs: tuple[ScenarioInput, ...],
+    open_slots: tuple[StarterSlot, ...],
+    *,
+    scenarios: tuple[Scenario, ...],
+    fixed_score: float,
+    fixed_assignments: tuple[AssignmentCandidate, ...] = (),
+) -> tuple[float, ...]:
+    """Return one complete terminal score for each deterministic scenario."""
+
+    results = rollout_scenario_assignments(
+        fixed_assignments=fixed_assignments,
+        remaining_inputs=inputs,
+        open_slots=tuple(slot.position for slot in open_slots),
+        slot_indices=tuple(slot.index for slot in open_slots),
+        scenarios=scenarios,
+    )
+    return tuple(fixed_score + result.score for result in results)
+
+
 def _terminal_pass(
     state: TeamWeekState,
     completed_game: GameOpportunity,
@@ -288,6 +363,7 @@ def _opportunity_key(opportunity: GameOpportunity) -> str:
 
 
 __all__ = (
+    "LockInComparison",
     "LockInPolicyConfig",
     "LockInPolicyError",
     "ScoreMaximizingLockInPolicy",
