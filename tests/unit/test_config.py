@@ -27,7 +27,7 @@ quiet_hours_end = "06:30"
 urgent_actions_override_quiet_hours = false
 
 [players]
-protected_sleeper_ids = ["player-1"]
+mapping_overrides = { "player-1" = "provider-1" }
 """,
         encoding="utf-8",
     )
@@ -39,7 +39,7 @@ protected_sleeper_ids = ["player-1"]
     assert policy.notifications.quiet_hours_start == "22:00"
     assert policy.notifications.quiet_hours_end == "06:30"
     assert policy.notifications.urgent_actions_override_quiet_hours is False
-    assert policy.players.protected_sleeper_ids == ("player-1",)
+    assert policy.players.mapping_overrides == {"player-1": "provider-1"}
 
 
 def test_policy_defaults_are_constructible() -> None:
@@ -65,6 +65,10 @@ daily_summary = true
 [notifications]
 injury_alerts = false
 """,
+        """
+[players]
+protected_sleeper_ids = ["player-1"]
+""",
     ),
 )
 def test_removed_policy_keys_fail_closed(tmp_path, toml_text: str) -> None:  # type: ignore[no-untyped-def]
@@ -83,7 +87,7 @@ def test_to_manager_intent_translates_surviving_fields() -> None:
             "quiet_hours_end": "05:00",
             "urgent_actions_override_quiet_hours": False,
         },
-        players={"protected_sleeper_ids": ("player-9",), "mapping_overrides": {}},
+        players={"mapping_overrides": {"player-9": "provider-9"}},
     )
 
     intent = policy.to_manager_intent()
@@ -93,5 +97,4 @@ def test_to_manager_intent_translates_surviving_fields() -> None:
     assert intent.quiet_hours_start == "21:00"
     assert intent.quiet_hours_end == "05:00"
     assert intent.urgent_actions_override_quiet_hours is False
-    assert intent.protected_sleeper_ids == ("player-9",)
     assert intent.version == policy.version

@@ -20,7 +20,10 @@ PolicyPreset = Literal["conservative", "balanced", "aggressive"]
 
 _REMOVED_DECISION_KEYS = frozenset({"use_matchup_context", "protect_elite_upside"})
 _REMOVED_NOTIFICATION_KEYS = frozenset({"daily_summary", "injury_alerts"})
-_REMOVED_FROM_VERSION_ONE = _REMOVED_DECISION_KEYS | _REMOVED_NOTIFICATION_KEYS
+_REMOVED_PLAYER_KEYS = frozenset({"protected_sleeper_ids"})
+_REMOVED_FROM_VERSION_ONE = (
+    _REMOVED_DECISION_KEYS | _REMOVED_NOTIFICATION_KEYS | _REMOVED_PLAYER_KEYS
+)
 
 
 class DecisionPolicy(BaseModel):
@@ -41,7 +44,6 @@ class NotificationPolicy(BaseModel):
 class PlayerPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    protected_sleeper_ids: tuple[str, ...] = ()
     mapping_overrides: dict[str, str] = Field(default_factory=dict)
 
 
@@ -70,7 +72,6 @@ class ManagerPolicy(BaseModel):
             urgent_actions_override_quiet_hours=(
                 self.notifications.urgent_actions_override_quiet_hours
             ),
-            protected_sleeper_ids=self.players.protected_sleeper_ids,
             version=self.version,
         )
 
@@ -102,6 +103,10 @@ def load_manager_policy(path: Path) -> ManagerPolicy:
         raise ValueError("The [notifications] policy section must be a TOML table")
     _reject_removed_policy_keys(decision_values, section="decision")
     _reject_removed_policy_keys(notification_values, section="notifications")
+    player_values = raw.get("players", {})
+    if not isinstance(player_values, dict):
+        raise ValueError("The [players] policy section must be a TOML table")
+    _reject_removed_policy_keys(player_values, section="players")
 
     preset = decision_values.get("preset", "balanced")
     if preset not in _PRESET_VALUES:
@@ -115,7 +120,7 @@ def load_manager_policy(path: Path) -> ManagerPolicy:
     resolved = {
         "decision": resolved_decision,
         "notifications": notification_values,
-        "players": raw.get("players", {}),
+        "players": player_values,
     }
     return ManagerPolicy.model_validate(resolved)
 

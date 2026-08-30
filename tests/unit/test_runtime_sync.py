@@ -116,7 +116,6 @@ quiet_hours_end = "06:30"
 urgent_actions_override_quiet_hours = false
 
 [players]
-protected_sleeper_ids = ["player-1"]
 mapping_overrides = { "sleeper-1" = "espn-1" }
 """,
         encoding="utf-8",
@@ -130,5 +129,4 @@ mapping_overrides = { "sleeper-1" = "espn-1" }
     assert policy.manager_intent == manager_policy.to_manager_intent()
     assert policy.manager_intent.preset == "conservative"
     assert policy.manager_intent.minimum_confidence == 0.85
-    assert policy.manager_intent.protected_sleeper_ids == ("player-1",)
     assert policy.manager_intent.version == manager_policy.version
