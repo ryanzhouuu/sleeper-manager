@@ -9,16 +9,13 @@ from sleeper_manager.backtesting.artifacts import canonical_json, canonicalize, 
 from sleeper_manager.backtesting.experiments.lock_in_diagnostic_models import (
     DIAGNOSTIC_ADAPTER_VERSION,
     DiagnosticDeferral,
-    DiagnosticPolicyTrace,
     LockInDiagnosticExecution,
     LockInDiagnosticRequest,
 )
 from sleeper_manager.backtesting.replay.inputs.models import HistoricalTeamWeekInput
-from sleeper_manager.backtesting.replay.models import (
-    LockedSlot,
-    ReplayDecision,
-    TeamWeekReplayResult,
-)
+from sleeper_manager.backtesting.replay.models import TeamWeekReplayResult
+from sleeper_manager.domain.lock_in import LockInDecision, LockInDecisionTrace
+from sleeper_manager.domain.planning import FixedSlot
 
 REPORT_SCHEMA_VERSION = "lock-in-diagnostic-report-v2"
 REPORT_TYPE = "lock_in_diagnostic_report"
@@ -154,13 +151,13 @@ def _deferral_payload(item: DiagnosticDeferral) -> dict[str, Any]:
     }
 
 
-def _trace_payload(item: DiagnosticPolicyTrace) -> dict[str, Any]:
+def _trace_payload(item: LockInDecisionTrace) -> dict[str, Any]:
     """Serialize one ordered policy trace without implementation-only fields."""
 
     decision = item.decision
     return {
         "candidate_id": item.candidate_id,
-        "decision_time": item.decision_time.isoformat(),
+        "decision_time": decision.decision_time.isoformat(),
         "event_id": item.event_id,
         "batch_id": item.batch_id,
         "evaluation_order": item.evaluation_order,
@@ -195,7 +192,7 @@ def _team_week_payload(result: TeamWeekReplayResult | None) -> dict[str, Any] | 
     }
 
 
-def _decision_payload(item: ReplayDecision) -> dict[str, Any]:
+def _decision_payload(item: LockInDecision) -> dict[str, Any]:
     """Serialize one model or oracle replay decision."""
 
     return {
@@ -211,16 +208,16 @@ def _decision_payload(item: ReplayDecision) -> dict[str, Any]:
     }
 
 
-def _locked_slot_payload(item: LockedSlot) -> dict[str, Any]:
+def _locked_slot_payload(item: FixedSlot) -> dict[str, Any]:
     """Serialize one realized locked-slot assignment."""
 
     return {
         "slot_index": item.slot_index,
         "slot_position": item.slot_position,
-        "sleeper_id": item.sleeper_id,
+        "sleeper_id": item.player_id,
         "game_id": item.game_id,
-        "score": item.score,
-        "locked_at": item.locked_at.isoformat(),
+        "score": item.accepted_fantasy_score,
+        "locked_at": item.decision_time.isoformat(),
     }
 
 

@@ -38,7 +38,7 @@ def test_adapter_defers_until_complete_as_of_opportunity_set_is_projected() -> N
     assert any(not item.terminal for item in adapter.deferrals)
     assert any(item.missing_opportunity_keys for item in adapter.deferrals if not item.terminal)
     assert adapter.policy_traces
-    assert adapter.policy_traces[0].decision_time == late
+    assert adapter.policy_traces[0].decision.decision_time == late
 
 
 def test_adapter_never_invokes_policy_with_reduced_future_set(

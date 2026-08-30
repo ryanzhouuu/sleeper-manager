@@ -224,7 +224,7 @@ class ChronologicalReplayRunner:
             self.replay_state,
             player_games=player_games,
             locked_slots=tuple(
-                locked for locked in self.replay_state.locked_slots if locked.locked_at <= at
+                locked for locked in self.replay_state.locked_slots if locked.decision_time <= at
             ),
             decisions=tuple(
                 decision for decision in self.replay_state.decisions if decision.decision_time <= at

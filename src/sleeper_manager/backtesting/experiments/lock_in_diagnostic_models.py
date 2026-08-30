@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from sleeper_manager.backtesting.replay.inputs.models import HistoricalTeamWeekInput
 from sleeper_manager.backtesting.replay.models import TeamWeekComparison, TeamWeekReplayResult
 from sleeper_manager.decisions.lock_in import LockInPolicyConfig
-from sleeper_manager.domain.lock_in import LockInDecision
+from sleeper_manager.domain.lock_in import LockInDecisionTrace
 from sleeper_manager.domain.planning import PlanningReasonCode
 
 DIAGNOSTIC_ADAPTER_VERSION = "lock-in-diagnostic-adapter-v2"
@@ -85,18 +85,6 @@ class DiagnosticDeferral:
 
 
 @dataclass(frozen=True, slots=True)
-class DiagnosticPolicyTrace:
-    """Attach stable event and ordering identity to one policy decision."""
-
-    decision: LockInDecision
-    decision_time: datetime
-    event_id: str
-    batch_id: str
-    candidate_id: str
-    evaluation_order: int
-
-
-@dataclass(frozen=True, slots=True)
 class CandidateBatch:
     """Group candidates sharing the same outcome-finalization timestamp."""
 
@@ -137,7 +125,7 @@ class LockInDiagnosticExecution:
     model_result: TeamWeekReplayResult | None
     oracle_result: TeamWeekReplayResult | None
     comparison: TeamWeekComparison | None
-    policy_traces: tuple[DiagnosticPolicyTrace, ...]
+    policy_traces: tuple[LockInDecisionTrace, ...]
     deferrals: tuple[DiagnosticDeferral, ...]
     batches: tuple[CandidateBatch, ...]
     evaluation_order: tuple[str, ...]
@@ -153,7 +141,6 @@ __all__ = (
     "DECISION_CRITICAL_EXCLUSIONS",
     "DIAGNOSTIC_ADAPTER_VERSION",
     "DiagnosticDeferral",
-    "DiagnosticPolicyTrace",
     "LockInDiagnosticError",
     "LockInDiagnosticExecution",
     "LockInDiagnosticRequest",

@@ -43,6 +43,8 @@ class LockInDecision:
 
         if self.decision_time.tzinfo is None:
             raise LockInContractError("Lock-In decision times must be timezone-aware")
+        if not isinstance(self.kind, LockInDecisionKind):
+            raise LockInContractError("Lock-In decision kind must be Lock or Pass")
         _require_text(self.player_id, "player ID")
         _require_text(self.game_id, "game ID")
         _require_text(self.information_version, "information version")

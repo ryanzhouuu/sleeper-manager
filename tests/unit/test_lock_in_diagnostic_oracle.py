@@ -11,11 +11,11 @@ from sleeper_manager.backtesting.experiments.lock_in_diagnostic_oracle import (
     oracle_feasibility_checks,
 )
 from sleeper_manager.backtesting.replay.models import (
-    LockedSlot,
-    ReplayDecision,
     ReplayGame,
     TeamWeekReplayResult,
 )
+from sleeper_manager.domain.lock_in import LockInDecision, LockInDecisionKind
+from sleeper_manager.domain.planning import FixedSlot
 
 
 def test_oracle_feasibility_rejects_earlier_pick_finalized_after_next_game() -> None:
@@ -39,19 +39,30 @@ def test_oracle_feasibility_rejects_earlier_pick_finalized_after_next_game() -> 
         policy_name="oracle",
         realized_score=50,
         decisions=(
-            ReplayDecision(
+            LockInDecision(
                 BASE + timedelta(hours=13),
-                "oracle_select",
+                LockInDecisionKind.LOCK,
                 "p1",
                 "g1",
                 0,
+                50,
+                50,
                 "realized-outcomes",
-                50,
-                50,
                 "Constrained maximum-weight realized assignment.",
             ),
         ),
-        locked_slots=(LockedSlot(0, "UTIL", "p1", "g1", 50, BASE + timedelta(hours=13)),),
+        locked_slots=(
+            FixedSlot(
+                0,
+                "UTIL",
+                "p1",
+                "g1",
+                50,
+                BASE + timedelta(hours=13),
+                "oracle-lock",
+                "realized-outcomes",
+            ),
+        ),
         automatic_final_scores=(("p2", 8.0),),
         eligibility_quality=team_week.eligibility_quality.value,
         data_quality="partial",

@@ -2,14 +2,13 @@ from datetime import UTC, datetime
 
 from sleeper_manager.backtesting.replay import ReplayConfig, ReplayState
 from sleeper_manager.backtesting.replay.models import (
-    LockedSlot,
-    ReplayDecision,
     ReplayGame,
     ReplayGameStatus,
     ReplayPlayerGame,
 )
 from sleeper_manager.backtesting.replay.planning_adapter import team_week_state_from_replay
-from sleeper_manager.domain.planning import PlanningGameStatus, PlanningReasonCode
+from sleeper_manager.domain.lock_in import LockInDecision, LockInDecisionKind
+from sleeper_manager.domain.planning import FixedSlot, PlanningGameStatus, PlanningReasonCode
 
 DECISION_TIME = datetime(2026, 1, 5, 12, tzinfo=UTC)
 
@@ -128,28 +127,39 @@ def test_locked_and_passed_state_round_trips_into_shared_records() -> None:
         replay.starter_slots,
         replay.games,
         replay.player_games,
-        locked_slots=(LockedSlot(0, "G", "p1", "g1", 10, DECISION_TIME),),
-        decisions=(
-            ReplayDecision(
+        locked_slots=(
+            FixedSlot(
+                0,
+                "G",
+                "p1",
+                "g1",
+                10,
                 DECISION_TIME,
-                "lock",
+                "fixture-lock",
+                "replay-inputs-v1",
+            ),
+        ),
+        decisions=(
+            LockInDecision(
+                DECISION_TIME,
+                LockInDecisionKind.LOCK,
                 "p1",
                 "g1",
                 0,
+                10,
+                10,
                 "replay-inputs-v1",
-                10,
-                10,
                 "accepted",
             ),
-            ReplayDecision(
+            LockInDecision(
                 DECISION_TIME,
-                "pass",
+                LockInDecisionKind.PASS,
                 "p1",
                 "g2",
                 None,
+                0,
+                0,
                 "replay-inputs-v1",
-                0,
-                0,
                 "preserved future flexibility",
             ),
         ),

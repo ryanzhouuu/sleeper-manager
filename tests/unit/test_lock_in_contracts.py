@@ -50,6 +50,7 @@ def test_lock_and_pass_enforce_slot_semantics() -> None:
     ("changes", "message"),
     (
         ({"decision_time": datetime(2026, 2, 2, 20)}, "timezone-aware"),
+        ({"kind": "wait"}, "kind must be Lock or Pass"),
         ({"player_id": "  "}, "player ID"),
         ({"game_id": ""}, "game ID"),
         ({"expected_terminal_score": float("nan")}, "values must be finite"),

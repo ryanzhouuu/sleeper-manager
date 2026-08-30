@@ -22,8 +22,6 @@ from sleeper_manager.backtesting.replay.inputs import (
 )
 from sleeper_manager.backtesting.replay.models import (
     LockCandidate,
-    LockedSlot,
-    ReplayDecision,
     ReplayGame,
     ReplayGameStatus,
     ReplayPlayerGame,
@@ -65,12 +63,10 @@ __all__ = (
     "HistoricalReplayBuildInput",
     "HistoricalTeamWeekInput",
     "LockCandidate",
-    "LockedSlot",
     "PairedPolicyDelta",
     "PlanningAdapterError",
     "PolicyScore",
     "ReplayConfig",
-    "ReplayDecision",
     "ReplayError",
     "ReplayEvent",
     "ReplayEventKind",

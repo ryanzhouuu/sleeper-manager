@@ -5,6 +5,8 @@ from datetime import datetime
 from enum import StrEnum
 from math import isfinite
 
+from sleeper_manager.domain.lock_in import LockInDecision
+from sleeper_manager.domain.planning import FixedSlot
 from sleeper_manager.domain.projection import ProjectionSnapshot
 
 
@@ -61,37 +63,14 @@ class LockCandidate:
 
 
 @dataclass(frozen=True, slots=True)
-class LockedSlot:
-    slot_index: int
-    slot_position: str
-    sleeper_id: str
-    game_id: str
-    score: float
-    locked_at: datetime
-
-
-@dataclass(frozen=True, slots=True)
-class ReplayDecision:
-    decision_time: datetime
-    kind: str
-    player_id: str
-    game_id: str | None
-    slot_index: int | None
-    information_version: str
-    expected_terminal_score: float
-    counterfactual_value: float
-    reason: str
-
-
-@dataclass(frozen=True, slots=True)
 class TeamWeekReplayResult:
     league_id: str
     week: int
     roster_id: int
     policy_name: str
     realized_score: float
-    decisions: tuple[ReplayDecision, ...]
-    locked_slots: tuple[LockedSlot, ...]
+    decisions: tuple[LockInDecision, ...]
+    locked_slots: tuple[FixedSlot, ...]
     automatic_final_scores: tuple[tuple[str, float], ...]
     eligibility_quality: str
     data_quality: str
@@ -115,8 +94,6 @@ class TeamWeekComparison:
 
 __all__ = (
     "LockCandidate",
-    "LockedSlot",
-    "ReplayDecision",
     "ReplayGame",
     "ReplayGameStatus",
     "ReplayPlayerGame",

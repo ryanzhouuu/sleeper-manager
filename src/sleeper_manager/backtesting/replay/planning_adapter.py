@@ -4,14 +4,11 @@ from collections.abc import Iterable, Mapping
 from datetime import datetime
 
 from sleeper_manager.backtesting.replay.engine import ReplayConfig
-from sleeper_manager.backtesting.replay.models import (
-    LockedSlot,
-    ReplayGame,
-    ReplayPlayerGame,
-)
+from sleeper_manager.backtesting.replay.models import ReplayGame, ReplayPlayerGame
 from sleeper_manager.backtesting.replay.state import ReplayState
 from sleeper_manager.domain.eligibility import eligible_for_slot
 from sleeper_manager.domain.league import LeagueProfile
+from sleeper_manager.domain.lock_in import LockInDecisionKind
 from sleeper_manager.domain.planning import (
     FixedSlot,
     FreshnessSummary,
@@ -148,7 +145,7 @@ def team_week_state_from_replay(
         )
 
     fixed_slots = tuple(
-        _fixed_slot(locked, replay_slot_to_domain, starter_slots, replay_state)
+        _fixed_slot(locked, replay_slot_to_domain, starter_slots)
         for locked in replay_state.locked_slots
     )
     passed_opportunities = tuple(
@@ -160,7 +157,7 @@ def team_week_state_from_replay(
             provenance=decision.information_version,
         )
         for index, decision in enumerate(replay_state.decisions)
-        if decision.kind == "pass" and decision.game_id is not None
+        if decision.kind is LockInDecisionKind.PASS
     )
     quality = _planning_quality(config.eligibility_quality)
     projection_model_version = _combined_version(projection_versions, "unknown")
@@ -313,35 +310,25 @@ def _point_in_time_projection(
 
 
 def _fixed_slot(
-    locked: LockedSlot,
+    fixed: FixedSlot,
     replay_slot_to_domain: Mapping[int, int],
     starter_slots: tuple[StarterSlot, ...],
-    replay_state: ReplayState,
 ) -> FixedSlot:
-    slot_index = replay_slot_to_domain.get(locked.slot_index)
+    """Map a replay-indexed fixed slot onto the shared starter-slot identity."""
+
+    slot_index = replay_slot_to_domain.get(fixed.slot_index)
     if slot_index is None:
         raise PlanningAdapterError("Locked slot index is outside the replay starter slots")
     slot = next(slot for slot in starter_slots if slot.index == slot_index)
-    decision = next(
-        (
-            decision
-            for decision in replay_state.decisions
-            if decision.kind == "lock"
-            and decision.player_id == locked.sleeper_id
-            and decision.game_id == locked.game_id
-            and decision.slot_index == locked.slot_index
-        ),
-        None,
-    )
     return FixedSlot(
         slot_index=slot_index,
         slot_position=slot.position,
-        player_id=locked.sleeper_id,
-        game_id=locked.game_id,
-        accepted_fantasy_score=locked.score,
-        decision_time=locked.locked_at,
-        decision_id=(f"replay-lock-{locked.sleeper_id}-{locked.game_id}-{locked.slot_index}"),
-        provenance=decision.information_version if decision is not None else "replay",
+        player_id=fixed.player_id,
+        game_id=fixed.game_id,
+        accepted_fantasy_score=fixed.accepted_fantasy_score,
+        decision_time=fixed.decision_time,
+        decision_id=fixed.decision_id,
+        provenance=fixed.provenance,
     )
 
 

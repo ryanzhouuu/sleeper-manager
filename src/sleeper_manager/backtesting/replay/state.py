@@ -5,12 +5,12 @@ from datetime import UTC, datetime, timedelta
 
 from sleeper_manager.backtesting.replay.models import (
     LockCandidate,
-    LockedSlot,
-    ReplayDecision,
     ReplayGame,
     ReplayPlayerGame,
 )
 from sleeper_manager.domain.eligibility import eligible_for_slot
+from sleeper_manager.domain.lock_in import LockInDecision, LockInDecisionKind
+from sleeper_manager.domain.planning import FixedSlot
 
 
 class ReplayError(ValueError):
@@ -22,8 +22,8 @@ class ReplayState:
     starter_slots: tuple[str, ...]
     games: tuple[ReplayGame, ...]
     player_games: tuple[ReplayPlayerGame, ...]
-    locked_slots: tuple[LockedSlot, ...] = ()
-    decisions: tuple[ReplayDecision, ...] = ()
+    locked_slots: tuple[FixedSlot, ...] = ()
+    decisions: tuple[LockInDecision, ...] = ()
 
     @property
     def open_slot_indices(self) -> tuple[int, ...]:
@@ -39,7 +39,7 @@ class ReplayState:
         final_time = game.finalized_at
         if final_time is None or at < final_time:
             return None
-        if any(slot.sleeper_id == player_game.sleeper_id for slot in self.locked_slots):
+        if any(slot.player_id == player_game.sleeper_id for slot in self.locked_slots):
             return None
         next_start = min(
             (
@@ -66,69 +66,12 @@ class ReplayState:
             expires_at=next_start,
         )
 
-    def lock(
-        self,
-        candidate: LockCandidate,
-        *,
-        slot_index: int,
-        at: datetime,
-        information_version: str = "replay-inputs",
-        reason: str = "legal Lock-In",
-    ) -> ReplayState:
-        if slot_index not in self.open_slot_indices:
-            raise ReplayError("Lock-In slot is already locked")
-        if slot_index >= len(self.starter_slots):
-            raise ReplayError("Lock-In slot index is outside the roster")
-        player_game = next(
-            (
-                game
-                for game in self.player_games
-                if game.sleeper_id == candidate.sleeper_id and game.game_id == candidate.game_id
-            ),
-            None,
-        )
-        if player_game is None:
-            raise ReplayError("Lock candidate does not belong to this replay")
-        legal_candidate = self.candidate_at(player_game, at)
-        if legal_candidate != candidate:
-            raise ReplayError("Lock candidate is expired or otherwise illegal")
-        if not eligible_for_slot(
-            candidate.eligible_positions_at_tipoff, self.starter_slots[slot_index]
-        ):
-            raise ReplayError("Player was not eligible for the selected starting slot")
-        locked = LockedSlot(
-            slot_index,
-            self.starter_slots[slot_index],
-            candidate.sleeper_id,
-            candidate.game_id,
-            candidate.completed_score,
-            at,
-        )
-        decision = ReplayDecision(
-            at,
-            "lock",
-            candidate.sleeper_id,
-            candidate.game_id,
-            slot_index,
-            information_version,
-            candidate.completed_score,
-            candidate.completed_score,
-            reason,
-        )
-        return replace(
-            self,
-            locked_slots=self.locked_slots + (locked,),
-            decisions=self.decisions + (decision,),
-        )
+    def apply_decision(self, candidate: LockCandidate, decision: LockInDecision) -> ReplayState:
+        """Apply one exact shared policy decision to historical replay state."""
 
-    def pass_candidate(
-        self,
-        candidate: LockCandidate,
-        *,
-        at: datetime,
-        information_version: str = "replay-inputs",
-        reason: str = "preserved future flexibility",
-    ) -> ReplayState:
+        if decision.player_id != candidate.sleeper_id or decision.game_id != candidate.game_id:
+            raise ReplayError("Lock-In decision does not identify the replay candidate")
+        at = decision.decision_time
         player_game = next(
             (
                 game
@@ -138,22 +81,39 @@ class ReplayState:
             None,
         )
         if player_game is None or self.candidate_at(player_game, at) != candidate:
-            raise ReplayError("Cannot pass an expired or unknown Lock-In candidate")
-        decision = ReplayDecision(
-            at,
-            "pass",
-            candidate.sleeper_id,
-            candidate.game_id,
-            None,
-            information_version,
-            0.0,
-            0.0,
-            reason,
+            raise ReplayError("Lock-In candidate is expired or otherwise illegal")
+        if decision.kind is LockInDecisionKind.PASS:
+            return replace(self, decisions=self.decisions + (decision,))
+
+        slot_index = decision.slot_index
+        if slot_index is None:
+            raise ReplayError("Lock decision is missing a slot index")
+        if slot_index not in self.open_slot_indices:
+            raise ReplayError("Lock-In slot is already locked")
+        if slot_index >= len(self.starter_slots):
+            raise ReplayError("Lock-In slot index is outside the roster")
+        if not eligible_for_slot(
+            candidate.eligible_positions_at_tipoff, self.starter_slots[slot_index]
+        ):
+            raise ReplayError("Player was not eligible for the selected starting slot")
+        locked = FixedSlot(
+            slot_index=slot_index,
+            slot_position=self.starter_slots[slot_index],
+            player_id=candidate.sleeper_id,
+            game_id=candidate.game_id,
+            accepted_fantasy_score=candidate.completed_score,
+            decision_time=at,
+            decision_id=_decision_id(decision),
+            provenance=decision.information_version,
         )
-        return replace(self, decisions=self.decisions + (decision,))
+        return replace(
+            self,
+            locked_slots=self.locked_slots + (locked,),
+            decisions=self.decisions + (decision,),
+        )
 
     def automatic_final_scores(self) -> tuple[tuple[str, float], ...]:
-        locked_players = {slot.sleeper_id for slot in self.locked_slots}
+        locked_players = {slot.player_id for slot in self.locked_slots}
         scores: list[tuple[str, float]] = []
         for player_id in sorted({game.sleeper_id for game in self.player_games} - locked_players):
             player_games = tuple(game for game in self.player_games if game.sleeper_id == player_id)
@@ -176,6 +136,15 @@ def _week_end(games: tuple[ReplayGame, ...], current_start: datetime) -> datetim
         (game.start_time for game in games),
         default=current_start,
     ) + timedelta(minutes=1)
+
+
+def _decision_id(decision: LockInDecision) -> str:
+    """Build stable fixed-slot identity from the exact applied decision."""
+
+    return (
+        f"{decision.information_version}:{decision.player_id}:"
+        f"{decision.game_id}:{decision.slot_index}:{decision.decision_time.isoformat()}"
+    )
 
 
 __all__ = ("ReplayError", "ReplayState")

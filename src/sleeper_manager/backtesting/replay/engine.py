@@ -5,8 +5,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sleeper_manager.backtesting.replay.models import (
-    LockedSlot,
-    ReplayDecision,
     ReplayGame,
     ReplayPlayerGame,
     TeamWeekComparison,
@@ -18,6 +16,8 @@ from sleeper_manager.decisions.lineup import (
     AssignmentResult,
     maximum_weight_assignment,
 )
+from sleeper_manager.domain.lock_in import LockInDecision, LockInDecisionKind
+from sleeper_manager.domain.planning import FixedSlot
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,9 +76,9 @@ def oracle_team_week_result(
         require_full_cardinality=require_full_cardinality,
     )
     game_by_id = {game.game_id: game for game in games}
-    locked: list[LockedSlot] = []
+    locked: list[FixedSlot] = []
     automatic: list[tuple[str, float]] = []
-    decisions: list[ReplayDecision] = []
+    decisions: list[LockInDecision] = []
     selected_players = {
         item.player_id for item in assignment.assignments if item.player_id is not None
     }
@@ -101,19 +101,21 @@ def oracle_team_week_result(
             automatic.append((item.player_id, item.score))
         else:
             locked.append(
-                LockedSlot(
-                    item.slot_index,
-                    item.slot_position,
-                    item.player_id,
-                    item.game_id,
-                    item.score,
-                    locked_at,
+                FixedSlot(
+                    slot_index=item.slot_index,
+                    slot_position=item.slot_position,
+                    player_id=item.player_id,
+                    game_id=item.game_id,
+                    accepted_fantasy_score=item.score,
+                    decision_time=locked_at,
+                    decision_id=f"oracle:{item.candidate_id}:{item.slot_index}",
+                    provenance="realized-outcomes",
                 )
             )
         decisions.append(
-            ReplayDecision(
+            LockInDecision(
                 decision_time=locked_at,
-                kind="oracle_select",
+                kind=LockInDecisionKind.LOCK,
                 player_id=item.player_id,
                 game_id=item.game_id,
                 slot_index=item.slot_index,

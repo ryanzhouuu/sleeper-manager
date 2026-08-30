@@ -43,6 +43,7 @@ def test_diagnostic_locks_and_passes_with_stable_batches_and_full_traces() -> No
             for item in result.model_result.decisions
             if item.player_id == decision.player_id and item.game_id == decision.game_id
         )
+        assert replay is decision
         assert replay.expected_terminal_score == decision.expected_terminal_score
         assert replay.counterfactual_value == decision.counterfactual_value
         assert replay.information_version == decision.information_version

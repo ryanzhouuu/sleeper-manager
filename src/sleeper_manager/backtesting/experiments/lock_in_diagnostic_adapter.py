@@ -7,7 +7,6 @@ from datetime import datetime
 from sleeper_manager.backtesting.experiments.lock_in_diagnostic_models import (
     CandidateBatch,
     DiagnosticDeferral,
-    DiagnosticPolicyTrace,
     LockInDiagnosticError,
     LockInDiagnosticRequest,
 )
@@ -26,7 +25,7 @@ from sleeper_manager.decisions.lock_in import (
     decision_critical_opportunities,
     missing_decision_projection_keys,
 )
-from sleeper_manager.domain.lock_in import LockInDecisionKind
+from sleeper_manager.domain.lock_in import LockInDecisionTrace
 from sleeper_manager.domain.planning import GameOpportunity, TeamWeekState
 
 
@@ -45,7 +44,7 @@ class DiagnosticPolicyAdapter:
         self.policy = ScoreMaximizingLockInPolicy(request.policy_config)
         self.decided: set[str] = set()
         self.deferred_seen: set[str] = set()
-        self.policy_traces: list[DiagnosticPolicyTrace] = []
+        self.policy_traces: list[LockInDecisionTrace] = []
         self.deferrals: list[DiagnosticDeferral] = []
         self.batches: list[CandidateBatch] = []
         self.evaluation_order: list[str] = []
@@ -116,32 +115,11 @@ class DiagnosticPolicyAdapter:
                     )
                     continue
                 decision = self.policy.decide_after_game(planning_state, completed_opportunity)
-                if decision.kind is LockInDecisionKind.LOCK:
-                    if decision.slot_index is None:
-                        raise LockInDiagnosticError("Lock decision is missing a slot index")
-                    self.state = self.state.lock(
-                        candidate,
-                        slot_index=decision.slot_index,
-                        at=event.at,
-                        information_version=decision.information_version,
-                        reason=decision.reason,
-                    )
-                elif decision.kind is LockInDecisionKind.PASS:
-                    self.state = self.state.pass_candidate(
-                        candidate,
-                        at=event.at,
-                        information_version=decision.information_version,
-                        reason=decision.reason,
-                    )
-                else:
-                    raise LockInDiagnosticError(
-                        f"Unsupported policy decision kind {decision.kind!r}"
-                    )
+                self.state = self.state.apply_decision(candidate, decision)
                 self.decided.add(candidate_id)
                 self.policy_traces.append(
-                    DiagnosticPolicyTrace(
+                    LockInDecisionTrace(
                         decision=decision,
-                        decision_time=decision.decision_time,
                         event_id=event.event_id,
                         batch_id=batch_id,
                         candidate_id=candidate_id,

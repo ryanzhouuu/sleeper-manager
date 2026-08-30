@@ -10,12 +10,11 @@ from sleeper_manager.backtesting.experiments.lock_in_diagnostic_adapter import (
 )
 from sleeper_manager.backtesting.experiments.lock_in_diagnostic_models import (
     AutomaticSlotAssignment,
-    DiagnosticPolicyTrace,
     LockInDiagnosticError,
     LockInDiagnosticRequest,
 )
 from sleeper_manager.backtesting.replay.inputs.models import HistoricalTeamWeekInput
-from sleeper_manager.backtesting.replay.models import ReplayDecision, TeamWeekReplayResult
+from sleeper_manager.backtesting.replay.models import TeamWeekReplayResult
 from sleeper_manager.backtesting.replay.state import ReplayState
 from sleeper_manager.decisions.lineup import AssignmentCandidate, maximum_weight_assignment
 
@@ -28,7 +27,7 @@ def legal_automatic_assignments(
 ) -> tuple[AutomaticSlotAssignment, ...]:
     """Assign every unlocked observed starter to its legal final slot."""
 
-    locked_players = {slot.sleeper_id for slot in state.locked_slots}
+    locked_players = {slot.player_id for slot in state.locked_slots}
     unlocked_starters = tuple(
         player_id
         for player_id in team_week.observed_starter_ids
@@ -116,11 +115,11 @@ def build_model_result(
 ) -> TeamWeekReplayResult:
     """Combine locked and automatic scores into the diagnostic model result."""
 
-    locked_score = sum(slot.score for slot in adapter.state.locked_slots)
+    locked_score = sum(slot.accepted_fantasy_score for slot in adapter.state.locked_slots)
     automatic_score = sum(item.score for item in automatic)
     if not isfinite(locked_score + automatic_score):
         raise LockInDiagnosticError("Model realized score must be finite")
-    decisions = tuple(_trace_to_replay_decision(trace) for trace in adapter.policy_traces)
+    decisions = tuple(trace.decision for trace in adapter.policy_traces)
     return TeamWeekReplayResult(
         league_id=request.team_week.league_id,
         week=request.team_week.week,
@@ -133,23 +132,6 @@ def build_model_result(
         eligibility_quality=request.team_week.eligibility_quality.value,
         data_quality="complete" if request.team_week.complete else "partial",
         exclusions=tuple(item.reason.value for item in request.team_week.exclusions),
-    )
-
-
-def _trace_to_replay_decision(trace: DiagnosticPolicyTrace) -> ReplayDecision:
-    """Convert a diagnostic trace into the shared replay decision shape."""
-
-    decision = trace.decision
-    return ReplayDecision(
-        decision_time=trace.decision_time,
-        kind=decision.kind,
-        player_id=decision.player_id,
-        game_id=decision.game_id,
-        slot_index=decision.slot_index,
-        information_version=decision.information_version,
-        expected_terminal_score=decision.expected_terminal_score,
-        counterfactual_value=decision.counterfactual_value,
-        reason=decision.reason,
     )
 
 

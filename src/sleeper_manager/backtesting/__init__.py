@@ -70,8 +70,6 @@ from sleeper_manager.backtesting.replay.league_archive import (
 )
 from sleeper_manager.backtesting.replay.models import (
     LockCandidate,
-    LockedSlot,
-    ReplayDecision,
     ReplayGame,
     ReplayGameStatus,
     ReplayPlayerGame,
@@ -164,8 +162,6 @@ __all__ = (
     "optimize_oracle",
     "oracle_team_week_result",
     "LockCandidate",
-    "LockedSlot",
-    "ReplayDecision",
     "ReplayGame",
     "ReplayGameStatus",
     "ReplayPlayerGame",

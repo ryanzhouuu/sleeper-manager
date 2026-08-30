@@ -5,7 +5,6 @@ import pytest
 
 from sleeper_manager.backtesting.replay import (
     ReplayConfig,
-    ReplayDecision,
     ReplayEventKind,
     ReplayGame,
     ReplayGameStatus,
@@ -16,8 +15,8 @@ from sleeper_manager.backtesting.replay import (
     build_chronological_events,
     run_chronological_replay,
 )
-from sleeper_manager.backtesting.replay.models import LockedSlot
-from sleeper_manager.domain.planning import PlanningReasonCode
+from sleeper_manager.domain.lock_in import LockInDecision, LockInDecisionKind
+from sleeper_manager.domain.planning import FixedSlot, PlanningReasonCode
 from sleeper_manager.domain.projection import ProjectionDistribution, ProjectionSnapshot
 
 BASE = datetime(2026, 1, 5, 12, tzinfo=UTC)
@@ -175,28 +174,39 @@ def test_future_locks_and_passes_are_hidden_until_their_decision_time() -> None:
     lock_time = BASE + timedelta(hours=1)
     locked_state = replace(
         state,
-        locked_slots=(LockedSlot(0, "G", "p1", "g1", 10, lock_time),),
-        decisions=(
-            ReplayDecision(
+        locked_slots=(
+            FixedSlot(
+                0,
+                "G",
+                "p1",
+                "g1",
+                10,
                 lock_time,
-                "lock",
+                "fixture-lock",
+                "fixture-inputs",
+            ),
+        ),
+        decisions=(
+            LockInDecision(
+                lock_time,
+                LockInDecisionKind.LOCK,
                 "p1",
                 "g1",
                 0,
+                10,
+                10,
                 "fixture-inputs",
-                10,
-                10,
                 "fixture lock",
             ),
-            ReplayDecision(
+            LockInDecision(
                 lock_time,
-                "pass",
+                LockInDecisionKind.PASS,
                 "p2",
                 "g2",
                 None,
+                0,
+                0,
                 "fixture-inputs",
-                0,
-                0,
                 "fixture pass",
             ),
         ),
