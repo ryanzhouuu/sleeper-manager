@@ -1,3 +1,4 @@
+import json
 from datetime import time, timedelta
 
 import pytest
@@ -48,7 +49,6 @@ def test_manager_intent_round_trips_through_runtime_policy_json() -> None:
         quiet_hours_start="22:30",
         quiet_hours_end="06:15",
         urgent_actions_override_quiet_hours=False,
-        protected_sleeper_ids=("player-1", "player-2"),
         version="abc123def4567890",
     )
     policy = default_runtime_policy(history_version="history-2026").__class__(
@@ -117,3 +117,26 @@ def test_manager_intent_round_trips_through_runtime_policy_json() -> None:
 def test_runtime_policy_rejects_invalid_payload(payload: str) -> None:
     with pytest.raises(RuntimePolicyError):
         RuntimePolicy.from_json("policy-v1", payload)
+
+
+def test_manager_intent_accepts_empty_legacy_protected_ids() -> None:
+    """Permit one safe runtime resynchronization from the removed empty field."""
+
+    payload = default_runtime_policy(history_version="history-2026").to_json()
+    decoded = json.loads(payload)
+    decoded["manager_intent"]["protected_sleeper_ids"] = []
+
+    restored = RuntimePolicy.from_json("runtime-policy-v1", json.dumps(decoded))
+
+    assert restored.manager_intent == ManagerPolicy().to_manager_intent()
+
+
+def test_manager_intent_rejects_nonempty_legacy_protected_ids() -> None:
+    """Fail closed when a removed preference would otherwise be ignored."""
+
+    payload = default_runtime_policy(history_version="history-2026").to_json()
+    decoded = json.loads(payload)
+    decoded["manager_intent"]["protected_sleeper_ids"] = ["player-1"]
+
+    with pytest.raises(RuntimePolicyError, match="removed from version one"):
+        RuntimePolicy.from_json("runtime-policy-v1", json.dumps(decoded))

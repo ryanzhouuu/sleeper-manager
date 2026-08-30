@@ -25,7 +25,6 @@ class ManagerIntent:
     quiet_hours_start: str
     quiet_hours_end: str
     urgent_actions_override_quiet_hours: bool
-    protected_sleeper_ids: tuple[str, ...]
     version: str
 
     def __post_init__(self) -> None:
@@ -47,12 +46,6 @@ class ManagerIntent:
             "quiet_hours_end",
             _validate_wall_clock(self.quiet_hours_end, "quiet_hours_end"),
         )
-        protected = tuple(item.strip() for item in self.protected_sleeper_ids)
-        if any(not item for item in protected):
-            raise RuntimePolicyError("Protected Sleeper IDs must be non-empty")
-        if len(set(protected)) != len(protected):
-            raise RuntimePolicyError("Protected Sleeper IDs must be unique")
-        object.__setattr__(self, "protected_sleeper_ids", protected)
         if not self.version.strip():
             raise RuntimePolicyError("Manager intent version must be non-empty")
 
@@ -70,9 +63,13 @@ class ManagerIntent:
         extras = set(payload) - allowed
         if extras:
             raise RuntimePolicyError("Unknown manager intent fields: " + ", ".join(sorted(extras)))
-        protected_raw = payload.get("protected_sleeper_ids", ())
+        protected_raw = payload.get("protected_sleeper_ids", [])
         if not isinstance(protected_raw, list):
             raise RuntimePolicyError("protected_sleeper_ids must be a JSON array")
+        if protected_raw:
+            raise RuntimePolicyError(
+                "protected_sleeper_ids is removed from version one; resync manager policy"
+            )
         preset = payload.get("preset", "balanced")
         if not isinstance(preset, str):
             raise RuntimePolicyError("preset must be a string")
@@ -88,7 +85,6 @@ class ManagerIntent:
             quiet_hours_start=_required_string(payload, "quiet_hours_start", default="23:00"),
             quiet_hours_end=_required_string(payload, "quiet_hours_end", default="07:00"),
             urgent_actions_override_quiet_hours=quiet_override,
-            protected_sleeper_ids=tuple(str(item) for item in protected_raw),
             version=_required_string(payload, "version"),
         )
 
@@ -99,7 +95,6 @@ class ManagerIntent:
             "quiet_hours_start": self.quiet_hours_start,
             "quiet_hours_end": self.quiet_hours_end,
             "urgent_actions_override_quiet_hours": self.urgent_actions_override_quiet_hours,
-            "protected_sleeper_ids": list(self.protected_sleeper_ids),
             "version": self.version,
         }
 
