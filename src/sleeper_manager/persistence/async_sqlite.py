@@ -290,6 +290,11 @@ class AsyncSQLiteStateRepository(AsyncRuntimeStateRepository):
 
         return self._repository.expire_lock_in_opportunities(now)
 
+    async def has_open_lock_in_watch(self, game_id: str, now: datetime) -> bool:
+        """Report whether a game still needs postgame wakes through SQLite."""
+
+        return self._repository.has_open_lock_in_watch(game_id, now)
+
     async def load_acknowledged_lock_in_opportunities(
         self, league_id: str, fantasy_week: int
     ) -> tuple[LockInOpportunityRecord, ...]:

@@ -18,6 +18,7 @@ from sleeper_manager.persistence.lock_in_opportunities import (
 )
 from sleeper_manager.persistence.lock_in_statements import (
     EXPIRE_LOCK_IN_OPPORTUNITIES_SQL,
+    HAS_OPEN_LOCK_IN_WATCH_SQL,
     INSERT_LOCK_IN_OPPORTUNITY_SQL,
     LIST_ACKNOWLEDGED_LOCK_IN_OPPORTUNITIES_SQL,
     LIST_ACTIONABLE_LOCK_IN_OPPORTUNITIES_SQL,
@@ -141,10 +142,16 @@ class D1LockInOpportunityMixin:
         )
         return self._changes(result)
 
+    async def has_open_lock_in_watch(self, game_id: str, now: datetime) -> bool:
+        """Report whether any player for this game still needs a five-minute watch."""
+
+        row = await self._first(HAS_OPEN_LOCK_IN_WATCH_SQL, game_id, now.isoformat())
+        return row is not None
+
     async def load_acknowledged_lock_in_opportunities(
         self, league_id: str, fantasy_week: int
     ) -> tuple[LockInOpportunityRecord, ...]:
-        """Load fixed Lock and removed Pass evidence for later planning."""
+        """Load locked, passed, and automatic-final evidence for later planning."""
 
         rows = await self._all(
             LIST_ACKNOWLEDGED_LOCK_IN_OPPORTUNITIES_SQL,

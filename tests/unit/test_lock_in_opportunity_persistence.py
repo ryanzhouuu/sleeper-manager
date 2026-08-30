@@ -10,12 +10,19 @@ from test_d1 import FakeD1
 
 from sleeper_manager.domain.lock_in import LockInOpportunityStatus
 from sleeper_manager.persistence.async_sqlite import AsyncSQLiteStateRepository
+from sleeper_manager.persistence.base import (
+    AcknowledgementAction,
+    AcknowledgementOutcome,
+    ActionTokenRecord,
+    RecommendationRecord,
+)
 from sleeper_manager.persistence.d1 import D1_SCHEMA, D1StateRepository
 from sleeper_manager.persistence.lock_in_opportunities import (
     LockInObservation,
     LockInOpportunityKey,
     LockInOpportunityRecord,
 )
+from sleeper_manager.persistence.tokens import hash_action_token
 
 NOW = datetime(2026, 8, 30, 18, tzinfo=UTC)
 
@@ -167,6 +174,63 @@ def test_opportunity_guards_stabilization_corrections_and_queries(
         fixed = await repository.load_acknowledged_lock_in_opportunities("league", 1)
         assert len(fixed) == 1 and fixed[0].stable_score == 13.0
         assert await repository.expire_lock_in_opportunities(NOW + timedelta(hours=4)) == 0
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("backend", ("sqlite", "d1"))
+def test_consume_acknowledgement_updates_opportunity_atomically(
+    backend: str, tmp_path: Path
+) -> None:
+    """Apply recommendation and opportunity acknowledgement in one repository call."""
+
+    async def exercise() -> None:
+        repository = await _repository(backend, tmp_path)
+        recommendation = RecommendationRecord(
+            recommendation_id="rec-lock",
+            idempotency_key="lock-key",
+            league_id="league",
+            fantasy_week=1,
+            player_id="player",
+            game_id="game",
+            decision_type="live_lock_in",
+            title="Lock player?",
+            message="Lock now",
+            deadline=NOW + timedelta(hours=2),
+            policy_version="policy-1",
+            created_at=NOW,
+        )
+        await repository.create_recommendation(recommendation)
+        original = replace(
+            _opportunity(),
+            status=LockInOpportunityStatus.ACTIONABLE,
+            current_recommendation_id=recommendation.recommendation_id,
+            current_recommendation_kind="live_lock_in",
+            stable_score=18.0,
+        )
+        assert await repository.upsert_lock_in_opportunity(original)
+        raw_token = "lock-token"
+        await repository.create_action_token(
+            ActionTokenRecord(
+                token_hash=hash_action_token(raw_token),
+                recommendation_id=recommendation.recommendation_id,
+                action=AcknowledgementAction.LOCKED,
+                created_at=NOW,
+                expires_at=recommendation.deadline or NOW,
+            )
+        )
+        result = await repository.consume_action_token(
+            hash_action_token(raw_token),
+            AcknowledgementAction.LOCKED,
+            NOW + timedelta(minutes=1),
+        )
+        stored = await repository.get_lock_in_opportunity(original.key)
+        assert result.outcome is AcknowledgementOutcome.APPLIED
+        assert stored is not None
+        assert stored.status is LockInOpportunityStatus.ACKNOWLEDGED_LOCKED
+        assert stored.acknowledged_action == "locked"
+        assert stored.stable_score == 18.0
+        assert await repository.has_open_lock_in_watch("game", NOW) is False
 
     asyncio.run(exercise())
 
