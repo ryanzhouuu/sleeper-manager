@@ -23,6 +23,12 @@ version, observation count, content hash, and the runtime policy that would be a
 writes nothing. `--apply` writes the observations to D1, verifies count and hash, and
 activates runtime policy last.
 
+The sync also translates the local manager policy TOML (`.local/policy.toml` by default) into
+the runtime policy envelope. That translation copies decision preset and confidence, quiet-hour
+settings, protected players, mapping overrides, and a content hash used as
+`manager_policy_version` on live plans. Operational fields such as freshness windows and the
+pinned projection-history version remain runtime defaults unless changed in code.
+
 `--apply` requires `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` in the environment. Do
 not print those values; Wrangler secrets stay in the Worker environment:
 

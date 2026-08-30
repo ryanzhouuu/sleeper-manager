@@ -79,6 +79,13 @@ At least one of `NTFY_TOPIC` or `DISCORD_WEBHOOK_URL` is required for notificati
 Local commands persist in SQLite; only `STATE_BACKEND=sqlite` is supported. The Cloudflare
 Worker uses D1 and does not read this variable.
 
+Manager policy TOML is the local source of manager intent: decision preset and confidence,
+notification quiet hours, protected players, and mapping overrides. `sync-cloudflare-runtime-data`
+translates that intent into the deployed runtime policy envelope in D1, including a content
+hash stamped on live plans as `manager_policy_version`. Version-one policy files reject removed
+keys such as `use_matchup_context`, `protect_elite_upside`, `daily_summary`, and `injury_alerts`.
+Changing `.local/policy.toml` does not affect the Worker until the next runtime-data sync.
+
 ## Commands
 
 Run `uv run sleeper-manager --help` for the complete argument reference.
