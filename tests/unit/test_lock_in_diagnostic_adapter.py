@@ -51,6 +51,9 @@ def test_adapter_never_invokes_policy_with_reduced_future_set(
     original = ScoreMaximizingLockInPolicy.decide_after_game
 
     def wrapped(self, state, completed):  # type: ignore[no-untyped-def]
+        for opportunity in state.opportunities:
+            if opportunity.projection is not None:
+                assert opportunity.projection.available_as_of <= state.decision_time
         remaining = decision_critical_opportunities(state, completed)
         keys = tuple(f"{item.sleeper_player_id}:{item.game_id}" for item in remaining)
         seen_remaining.append(keys)
