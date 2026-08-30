@@ -9,9 +9,9 @@ from sleeper_manager.backtesting.experiments.lock_in_diagnostic_engine import (
     build_model_result,
     legal_automatic_assignments,
     oracle_feasibility_checks,
+    oracle_from_planning_state,
     planning_state_for,
     realized_decision_time,
-    replay_config,
 )
 from sleeper_manager.backtesting.experiments.lock_in_diagnostic_models import (
     DECISION_CRITICAL_EXCLUSIONS,
@@ -32,11 +32,9 @@ from sleeper_manager.backtesting.experiments.lock_in_diagnostic_report import (
     logical_artifact_identity,
     write_diagnostic_report,
 )
-from sleeper_manager.backtesting.replay.engine import (
-    compare_team_week,
-    oracle_team_week_result,
-)
+from sleeper_manager.backtesting.replay.engine import compare_team_week
 from sleeper_manager.backtesting.replay.inputs.models import HistoricalTeamWeekInput
+from sleeper_manager.backtesting.replay.state import ReplayState
 from sleeper_manager.domain.planning import PlanningQuality
 
 
@@ -150,6 +148,15 @@ def run_lock_in_diagnostic(request: LockInDiagnosticRequest) -> LockInDiagnostic
 
     week_end = realized_decision_time(request.team_week)
     model_state = planning_state_for(request, adapter.state, week_end)
+    unconstrained = planning_state_for(
+        request,
+        ReplayState(
+            starter_slots=request.team_week.starter_slots,
+            games=request.team_week.games,
+            player_games=request.team_week.player_games,
+        ),
+        week_end,
+    )
     automatic = legal_automatic_assignments(model_state)
     built_model = build_model_result(
         request,
@@ -157,17 +164,12 @@ def run_lock_in_diagnostic(request: LockInDiagnosticRequest) -> LockInDiagnostic
         policy_traces=tuple(adapter.policy_traces),
         automatic=automatic,
     )
-    oracle_result = oracle_team_week_result(
-        request.team_week.player_games,
-        config=replay_config(request.team_week),
-        games=request.team_week.games,
-        require_full_cardinality=True,
-    )
+    oracle_result = oracle_from_planning_state(unconstrained)
     oracle_result = replace(
         oracle_result,
         data_quality="complete" if request.team_week.complete else "partial",
     )
-    feasibility = oracle_feasibility_checks(oracle_result, request.team_week)
+    feasibility = oracle_feasibility_checks(oracle_result, unconstrained)
     if any(not check.feasible for check in feasibility):
         raise LockInDiagnosticError("Oracle assignment is temporally infeasible for this artifact")
     comparison = compare_team_week(oracle_result, built_model)
