@@ -1,5 +1,11 @@
 """Core fantasy domain models and rules."""
 
+from sleeper_manager.domain.lock_in import (
+    LockInContractError,
+    LockInDecision,
+    LockInDecisionKind,
+    LockInDecisionTrace,
+)
 from sleeper_manager.domain.planning import (
     AcknowledgedAction,
     AcknowledgedDecisionEvidence,
@@ -30,6 +36,10 @@ __all__ = (
     "FreshnessSummary",
     "GameOpportunity",
     "LineupMove",
+    "LockInContractError",
+    "LockInDecision",
+    "LockInDecisionKind",
+    "LockInDecisionTrace",
     "ObservedStarter",
     "PassedOpportunity",
     "PlanConfidence",
