@@ -3,6 +3,7 @@ preset = "balanced"
 minimum_confidence = 0.70
 
 [notifications]
+# Accepted and stored; quiet-hour suppression is not enforced yet.
 quiet_hours_start = "23:00"
 quiet_hours_end = "07:00"
 urgent_actions_override_quiet_hours = true

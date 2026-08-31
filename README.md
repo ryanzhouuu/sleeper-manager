@@ -11,8 +11,8 @@ it never submits roster changes to Sleeper.
 - ESPN and official NBA injury reports provide current schedules, results, and availability.
 - Historical SportsDataverse data supports projection experiments and backtesting.
 - Local commands persist state in SQLite; the deployed Cloudflare Worker uses D1.
-- Notification actions record acknowledgements in Sleeper Manager only. The manager still
-  makes every roster or Lock-In change in Sleeper.
+- The five-minute scheduled wake captures pre-tipoff starters, watches ESPN finals,
+  and recommends Lock or Pass until acknowledgement or deadline.
 
 See [LOCK_IN_MODE.md](LOCK_IN_MODE.md) for the league rules enforced by the decision engine.
 
@@ -84,7 +84,8 @@ notification quiet hours, and mapping overrides. `sync-cloudflare-runtime-data`
 translates that intent into the deployed runtime policy envelope in D1, including a content
 hash stamped on live plans as `manager_policy_version`. Version-one policy files reject removed
 keys such as `use_matchup_context`, `protect_elite_upside`, `daily_summary`, `injury_alerts`,
-and `protected_sleeper_ids`.
+and `protected_sleeper_ids`. Quiet-hour fields are accepted and stored, but quiet-hour
+suppression is deferred. Live Lock-In advice uses the resolved minimum-confidence threshold.
 Changing `.local/policy.toml` does not affect the Worker until the next runtime-data sync.
 
 ## Commands
