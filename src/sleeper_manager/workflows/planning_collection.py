@@ -31,6 +31,7 @@ from sleeper_manager.integrations.nba.identity import (
     parse_sleeper_player_identity,
 )
 from sleeper_manager.projections.live_baseline import LiveProjectionTarget
+from sleeper_manager.workflows.lock_in_evidence import merge_lock_in_opportunity_evidence
 from sleeper_manager.workflows.planning_inputs import (
     AvailabilityResourceResult,
     FantasyWeekWindow,
@@ -153,6 +154,14 @@ async def collect_live_planning_inputs(
         if acknowledgement_source is not None
         else ()
     )
+    load_opportunities = getattr(
+        acknowledgement_source, "load_acknowledged_lock_in_opportunities", None
+    )
+    if load_opportunities is not None:
+        acknowledgements = merge_lock_in_opportunity_evidence(
+            acknowledgements,
+            await load_opportunities(profile.league_id, week_window.week),
+        )
     try:
         inputs = LivePlanningInputs(
             league_profile=profile,
