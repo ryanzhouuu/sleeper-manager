@@ -32,6 +32,7 @@ from sleeper_manager.backtesting.experiments.projection_evaluation import (
 )
 from sleeper_manager.cloudflare.dispatcher import dispatch_due_work
 from sleeper_manager.cloudflare.planning import collect_cloudflare_planning_inputs
+from sleeper_manager.cloudflare.providers import CloudflareESPNProvider
 from sleeper_manager.cloudflare.runtime_sync import (
     RemoteD1,
     compact_history_from_workspace,
@@ -58,6 +59,7 @@ from sleeper_manager.workflows.notification_loop import (
     NotificationLoop,
     default_placeholder_request,
 )
+from sleeper_manager.workflows.postgame_lock_in import LOCK_IN_ACKNOWLEDGEMENT_KINDS
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -302,6 +304,7 @@ async def _test_notification(settings: Settings) -> int:
             repository,
             dispatcher,
             acknowledgement_base_url=settings.acknowledgement_base_url,
+            acknowledgement_kinds=LOCK_IN_ACKNOWLEDGEMENT_KINDS,
         ).run(
             default_placeholder_request(
                 league_id=settings.sleeper_league_id or "local-diagnostic",
@@ -444,6 +447,7 @@ async def _run_scheduled(settings: Settings) -> int:
             repository,
             build_notification_dispatcher(settings),
             acknowledgement_base_url=settings.acknowledgement_base_url,
+            acknowledgement_kinds=LOCK_IN_ACKNOWLEDGEMENT_KINDS,
         )
         now = datetime.now(UTC)
         env = SimpleNamespace(
@@ -472,6 +476,7 @@ async def _run_scheduled(settings: Settings) -> int:
                 scheduled_at=now,
                 correlation_id=uuid4().hex,
                 open_sleeper_url="https://sleeper.com",
+                fetch_game_summary=CloudflareESPNProvider(fetch, clock=lambda: now).game_summary,
             )
     except (OSError, RuntimeError, ValueError) as error:
         print(redact_secrets(f"Scheduled run failed: {error}"), file=sys.stderr)
