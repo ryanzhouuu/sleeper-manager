@@ -26,6 +26,11 @@ from sleeper_manager.persistence.base import (
     ScheduledWorkRecord,
     ScheduledWorkStatus,
 )
+from sleeper_manager.persistence.lock_in_opportunities import (
+    LockInObservation,
+    LockInOpportunityKey,
+    LockInOpportunityRecord,
+)
 from sleeper_manager.persistence.sqlite import SQLiteStateRepository
 
 
@@ -222,3 +227,75 @@ class AsyncSQLiteStateRepository(AsyncRuntimeStateRepository):
 
     async def cancel_expired_scheduled_work(self, now: datetime) -> int:
         return self._repository.cancel_expired_scheduled_work(now)
+
+    async def upsert_lock_in_opportunity(self, record: LockInOpportunityRecord) -> bool:
+        """Insert one opportunity through the synchronous SQLite repository."""
+
+        return self._repository.upsert_lock_in_opportunity(record)
+
+    async def get_lock_in_opportunity(
+        self, key: LockInOpportunityKey
+    ) -> LockInOpportunityRecord | None:
+        """Load one opportunity through the synchronous SQLite repository."""
+
+        return self._repository.get_lock_in_opportunity(key)
+
+    async def record_lock_in_observation(
+        self,
+        key: LockInOpportunityKey,
+        observation: LockInObservation,
+        *,
+        expected_version: int,
+    ) -> LockInOpportunityRecord | None:
+        """Apply one guarded direct observation through SQLite."""
+
+        return self._repository.record_lock_in_observation(
+            key,
+            observation,
+            expected_version=expected_version,
+        )
+
+    async def update_lock_in_opportunity(
+        self,
+        record: LockInOpportunityRecord,
+        *,
+        expected_version: int,
+    ) -> bool:
+        """Apply one guarded full opportunity update through SQLite."""
+
+        return self._repository.update_lock_in_opportunity(
+            record,
+            expected_version=expected_version,
+        )
+
+    async def list_due_lock_in_opportunities(
+        self, now: datetime, *, limit: int = 100
+    ) -> tuple[LockInOpportunityRecord, ...]:
+        """List opportunities due for this Worker-shaped wake."""
+
+        return self._repository.list_due_lock_in_opportunities(now, limit=limit)
+
+    async def list_actionable_lock_in_opportunities(
+        self, league_id: str, fantasy_week: int
+    ) -> tuple[LockInOpportunityRecord, ...]:
+        """List actionable opportunities through SQLite."""
+
+        return self._repository.list_actionable_lock_in_opportunities(
+            league_id,
+            fantasy_week,
+        )
+
+    async def expire_lock_in_opportunities(self, now: datetime) -> int:
+        """Expire elapsed opportunity windows through SQLite."""
+
+        return self._repository.expire_lock_in_opportunities(now)
+
+    async def load_acknowledged_lock_in_opportunities(
+        self, league_id: str, fantasy_week: int
+    ) -> tuple[LockInOpportunityRecord, ...]:
+        """Load acknowledged opportunity evidence through SQLite."""
+
+        return self._repository.load_acknowledged_lock_in_opportunities(
+            league_id,
+            fantasy_week,
+        )
