@@ -14,6 +14,7 @@ from hashlib import sha256
 from typing import Protocol
 
 from sleeper_manager.cloudflare.planning import CloudflarePlanningAssembly
+from sleeper_manager.cloudflare.postgame_dispatch import dispatch_postgame_work
 from sleeper_manager.cloudflare.scheduler_types import (
     FailureCategory,
     FreshnessDetail,
@@ -34,8 +35,13 @@ from sleeper_manager.persistence.base import (
 )
 from sleeper_manager.projections.live_baseline import ProjectionHistoryError
 from sleeper_manager.workflows.daily_plan import WeeklyLineupWorkflowResult, run_daily_plan
+from sleeper_manager.workflows.lock_in_planning import (
+    refresh_terminal_lock_in_scores,
+    sync_live_lock_in_opportunities,
+)
 from sleeper_manager.workflows.notification_loop import NotificationLoop
 from sleeper_manager.workflows.planning_inputs import LivePlanningInputs
+from sleeper_manager.workflows.postgame_lock_in import DirectGameSummarySource
 from sleeper_manager.workflows.pre_tipoff_check import run_pre_tipoff_check
 
 _RETRY_DELAY = timedelta(minutes=5)
@@ -71,8 +77,9 @@ async def dispatch_due_work(
     open_sleeper_url: str,
     plan_policy: WeeklyPlanPolicyConfig | None = None,
     clock: Callable[[], datetime] | None = None,
+    fetch_game_summary: DirectGameSummarySource | None = None,
 ) -> ScheduledRunSummary:
-    """Dispatch claimed daily, pre-tipoff, and delivery-retry rows for this wake."""
+    """Dispatch claimed daily, pre-tipoff, postgame, and delivery-retry rows for this wake."""
     if scheduled_at.tzinfo is None or scheduled_at.utcoffset() is None:
         raise ValueError("Scheduled time must be timezone-aware")
     tick = clock or (lambda: scheduled_at)
@@ -89,6 +96,7 @@ async def dispatch_due_work(
 
     await _ensure_daily_work(repository, policy, scheduled_at)
     await repository.cancel_expired_scheduled_work(scheduled_at)
+    await repository.expire_lock_in_opportunities(scheduled_at)
     claimed = await repository.claim_due_work(scheduled_at, correlation_id=correlation_id)
     if not claimed:
         return ScheduledRunSummary(
@@ -98,7 +106,12 @@ async def dispatch_due_work(
             claimed_count=0,
         )
 
-    planning = tuple(item for item in claimed if item.kind is not DueWorkKind.DELIVERY_RETRY)
+    planning = tuple(
+        item
+        for item in claimed
+        if item.kind not in {DueWorkKind.DELIVERY_RETRY, DueWorkKind.POSTGAME}
+    )
+    postgame = tuple(item for item in claimed if item.kind is DueWorkKind.POSTGAME)
     retries = tuple(item for item in claimed if item.kind is DueWorkKind.DELIVERY_RETRY)
     attempts: list[WorkAttemptSummary] = []
     if planning:
@@ -113,6 +126,22 @@ async def dispatch_due_work(
                 correlation_id=correlation_id,
                 open_sleeper_url=open_sleeper_url,
                 plan_policy=plan_policy,
+                clock=tick,
+                fetch_game_summary=fetch_game_summary,
+            )
+        )
+    if postgame:
+        attempts.extend(
+            await dispatch_postgame_work(
+                repository,
+                postgame,
+                policy=policy,
+                notifications=notifications,
+                collect=collect,
+                fetch_summary=fetch_game_summary,
+                scheduled_at=scheduled_at,
+                correlation_id=correlation_id,
+                open_sleeper_url=open_sleeper_url,
                 clock=tick,
             )
         )
@@ -178,6 +207,7 @@ async def _run_planning(
     open_sleeper_url: str,
     plan_policy: WeeklyPlanPolicyConfig | None,
     clock: Callable[[], datetime],
+    fetch_game_summary: DirectGameSummarySource | None = None,
 ) -> tuple[WorkAttemptSummary, ...]:
     trigger = (
         "pre_tipoff" if any(item.kind is DueWorkKind.PRE_TIPOFF for item in claimed) else "daily"
@@ -210,15 +240,29 @@ async def _run_planning(
             retry=True,
         )
 
+    planning_inputs = assembly.evidence.inputs
     await _replace_future_pre_tipoff(
         repository,
         policy,
-        assembly.evidence.inputs,
+        planning_inputs,
         scheduled_at,
     )
+    await sync_live_lock_in_opportunities(
+        planning_inputs,
+        repository=repository,
+        observed_at=assembly.evidence.decision_time,
+    )
+    if trigger == "daily" and fetch_game_summary is not None:
+        planning_inputs = await refresh_terminal_lock_in_scores(
+            planning_inputs,
+            repository=repository,
+            fetch_summary=fetch_game_summary,
+            observed_at=assembly.evidence.decision_time,
+            poll_id=f"{correlation_id}:daily-refresh",
+        )
     workflow = run_pre_tipoff_check if trigger == "pre_tipoff" else run_daily_plan
     result = await workflow(
-        assembly.evidence.inputs,
+        planning_inputs,
         decision_time=assembly.evidence.decision_time,
         repository=repository,
         notifications=notifications,

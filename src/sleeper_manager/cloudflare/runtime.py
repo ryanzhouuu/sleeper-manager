@@ -17,6 +17,7 @@ from sleeper_manager.cloudflare.planning import (
     CloudflarePlanningAssembly,
     collect_cloudflare_planning_inputs,
 )
+from sleeper_manager.cloudflare.providers import CloudflareESPNProvider
 from sleeper_manager.cloudflare.scheduler_types import (
     FailureCategory,
     ScheduledRunStatus,
@@ -27,6 +28,7 @@ from sleeper_manager.notifications.dispatcher import NotificationDispatcher
 from sleeper_manager.persistence.base import AsyncRuntimeStateRepository
 from sleeper_manager.persistence.d1 import D1StateRepository
 from sleeper_manager.workflows.notification_loop import NotificationLoop
+from sleeper_manager.workflows.postgame_lock_in import LOCK_IN_ACKNOWLEDGEMENT_KINDS
 
 
 def _value(env: Any, name: str, default: str = "") -> str:
@@ -119,10 +121,12 @@ async def run_scheduled(
             dispatcher,
             acknowledgement_base_url=acknowledgement_base_url,
             clock=lambda: now,
+            acknowledgement_kinds=LOCK_IN_ACKNOWLEDGEMENT_KINDS,
         ),
         collect=collect,
         scheduled_at=now,
         correlation_id=correlation,
         open_sleeper_url=_value(env, "OPEN_SLEEPER_URL", "https://sleeper.com"),
+        fetch_game_summary=CloudflareESPNProvider(fetcher, clock=lambda: now).game_summary,
     )
     return summary.as_dict()

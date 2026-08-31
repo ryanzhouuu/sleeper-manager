@@ -18,12 +18,20 @@ from test_daily_plan import (
     _workflow,
 )
 from test_notification_loop import RecordingSender
+from test_postgame_lock_in import _box, _summary_result
 
 from sleeper_manager.cloudflare.dispatcher import dispatch_due_work
 from sleeper_manager.cloudflare.planning import CloudflarePlanningAssembly
 from sleeper_manager.cloudflare.runtime import run_scheduled
 from sleeper_manager.cloudflare.scheduler_types import FailureCategory, ScheduledRunStatus
 from sleeper_manager.decisions.weekly_plan import WeeklyPlanPolicyConfig
+from sleeper_manager.domain.nba import (
+    DataQualityReport,
+    DataQualityState,
+    GameStatus,
+    GameSummary,
+    ProviderResult,
+)
 from sleeper_manager.domain.runtime_policy import default_runtime_policy
 from sleeper_manager.notifications.dispatcher import NotificationDispatcher
 from sleeper_manager.persistence.async_sqlite import AsyncSQLiteStateRepository
@@ -180,6 +188,8 @@ def test_daily_due_work_collects_once_and_notifies(tmp_path) -> None:  # type: i
         later = next(item for item in pre_tipoff if item.game_id == "g2")
         assert later.status is ScheduledWorkStatus.PENDING
         assert later.due_at == LATER_GAME_START - POLICY.move_lead_time
+        postgame = await repository.list_scheduled_work(kind=DueWorkKind.POSTGAME)
+        assert {item.game_id for item in postgame} == {"g1", "g2"}
 
     asyncio.run(exercise())
 
@@ -377,5 +387,113 @@ def test_scheduled_runtime_never_sends_placeholder() -> None:
         assert paths == []
         assert pending == ()
         assert weekly == ()
+
+    asyncio.run(exercise())
+
+
+def test_due_postgame_watch_fetches_espn_summary_directly(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Claimed postgame work must poll ESPN once and keep the five-minute watch open."""
+
+    async def exercise() -> None:
+        repository, sender, notifications = _workflow(tmp_path, clock=lambda: NOW)
+        await repository.initialize()
+        await _save_policy(repository)
+        await _dispatch(repository, notifications, scheduled_at=NOW)
+        postgame_at = GAME_START + timedelta(hours=2)
+        fetches: list[str] = []
+
+        async def fetch(game_id: str) -> ProviderResult[GameSummary]:
+            fetches.append(game_id)
+            game = replace(_game(game_id), status=GameStatus.IN_PROGRESS, start_time=GAME_START)
+            return ProviderResult(
+                GameSummary(game, ()),
+                DataQualityReport(
+                    state=DataQualityState.PARTIAL,
+                    resource=f"espn:game-summary:{game_id}",
+                    record_count=0,
+                    retrieved_at=postgame_at,
+                    source_updated_at=None,
+                    expires_at=None,
+                ),
+            )
+
+        notifications._clock = lambda: postgame_at
+        collect, calls = _collector(_assembly(decision_time=postgame_at))
+        summary = await dispatch_due_work(
+            repository,
+            notifications=notifications,
+            collect=collect,
+            scheduled_at=postgame_at,
+            correlation_id="postgame-1",
+            open_sleeper_url="https://sleeper.com/league",
+            plan_policy=PLAN_POLICY,
+            fetch_game_summary=fetch,
+        )
+        postgame = await repository.list_scheduled_work(kind=DueWorkKind.POSTGAME)
+        g1 = next(item for item in postgame if item.game_id == "g1")
+        assert DueWorkKind.POSTGAME in {attempt.kind for attempt in summary.attempts}
+        assert fetches == ["g1"]
+        assert g1.status is ScheduledWorkStatus.RETRY
+        assert g1.due_at == postgame_at + timedelta(minutes=5)
+        lock_in = await repository.list_pending_recommendations(
+            "league-1", 1, decision_type="live_lock_in"
+        )
+        assert lock_in == ()
+        assert calls == [postgame_at]
+
+    asyncio.run(exercise())
+
+
+def test_postgame_delivery_failure_remains_visible_and_retryable(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Record failed action delivery instead of reporting a successful watch."""
+
+    async def exercise() -> None:
+        repository, sender, notifications = _workflow(tmp_path, clock=lambda: NOW)
+        await repository.initialize()
+        await _save_policy(repository)
+        await _dispatch(repository, notifications, scheduled_at=NOW)
+        summary_result = _summary_result(_box("401", points=20), _box("402", points=8))
+        first_at = GAME_START + timedelta(hours=2)
+
+        async def fetch(game_id: str) -> ProviderResult[GameSummary]:
+            assert game_id == "g1"
+            return summary_result
+
+        collect, _ = _collector(_assembly(decision_time=first_at))
+        notifications._clock = lambda: first_at
+        await dispatch_due_work(
+            repository,
+            notifications=notifications,
+            collect=collect,
+            scheduled_at=first_at,
+            correlation_id="postgame-1",
+            open_sleeper_url="https://sleeper.com/league",
+            plan_policy=PLAN_POLICY,
+            fetch_game_summary=fetch,
+        )
+        second_at = first_at + timedelta(minutes=5)
+        collect, _ = _collector(_assembly(decision_time=second_at))
+        notifications._clock = lambda: second_at
+        sender.fail = True
+
+        result = await dispatch_due_work(
+            repository,
+            notifications=notifications,
+            collect=collect,
+            scheduled_at=second_at,
+            correlation_id="postgame-2",
+            open_sleeper_url="https://sleeper.com/league",
+            plan_policy=PLAN_POLICY,
+            fetch_game_summary=fetch,
+        )
+
+        attempt = next(item for item in result.attempts if item.kind is DueWorkKind.POSTGAME)
+        work = await repository.list_scheduled_work(kind=DueWorkKind.POSTGAME)
+        g1 = next(item for item in work if item.game_id == "g1")
+        assert result.status is ScheduledRunStatus.DELIVERY_FAILED
+        assert attempt.outcome is ScheduledRunStatus.DELIVERY_FAILED
+        assert attempt.failure_category is FailureCategory.DELIVERY
+        assert g1.status is ScheduledWorkStatus.RETRY
+        assert g1.due_at == second_at + timedelta(minutes=5)
 
     asyncio.run(exercise())
