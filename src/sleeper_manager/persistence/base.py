@@ -91,6 +91,7 @@ class DueWorkKind(StrEnum):
     DAILY = "daily"
     PRE_TIPOFF = "pre_tipoff"
     DELIVERY_RETRY = "delivery_retry"
+    POSTGAME = "postgame"
 
 
 class ScheduledWorkStatus(StrEnum):
