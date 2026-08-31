@@ -38,6 +38,7 @@ from sleeper_manager.persistence.base import (
     ScheduledWorkStatus,
     StoredLeagueProfile,
 )
+from sleeper_manager.persistence.lock_in_sqlite import SQLiteLockInOpportunityMixin
 from sleeper_manager.persistence.rows import (
     acknowledgement_id,
     cached_nba_as_of,
@@ -105,7 +106,7 @@ def _mapping(row: sqlite3.Row | None) -> dict[str, Any] | None:
     return {str(key): row[key] for key in row.keys()}
 
 
-class SQLiteStateRepository:
+class SQLiteStateRepository(SQLiteLockInOpportunityMixin):
     """Local file-backed `StateRepository` plus runtime tables and league profiles."""
 
     def __init__(self, path: Path) -> None:

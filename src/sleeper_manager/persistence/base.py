@@ -13,6 +13,7 @@ from typing import Protocol
 
 from sleeper_manager.domain.nba import DataQualityState
 from sleeper_manager.domain.planning import AcknowledgedDecisionEvidence
+from sleeper_manager.persistence.lock_in_opportunities import AsyncLockInOpportunityRepository
 
 DEFAULT_SCHEDULED_WORK_LEASE = timedelta(minutes=15)
 PROJECTION_OBSERVATION_PAGE_SIZE = 1000
@@ -376,7 +377,12 @@ class AsyncStateRepository(Protocol):
     async def supersede_recommendation(self, recommendation_id: str, now: datetime) -> bool: ...
 
 
-class AsyncRuntimeStateRepository(AsyncStateRepository, AsyncNBADataCache, Protocol):
+class AsyncRuntimeStateRepository(
+    AsyncStateRepository,
+    AsyncNBADataCache,
+    AsyncLockInOpportunityRepository,
+    Protocol,
+):
     """Worker runtime store: recommendations, NBA cache, policy, history, and scheduled work."""
 
     async def load_runtime_policy(self) -> RuntimePolicyRecord | None: ...

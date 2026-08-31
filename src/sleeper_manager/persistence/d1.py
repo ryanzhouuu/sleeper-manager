@@ -38,6 +38,7 @@ from sleeper_manager.persistence.base import (
     ScheduledWorkRecord,
     ScheduledWorkStatus,
 )
+from sleeper_manager.persistence.lock_in_d1 import D1LockInOpportunityMixin
 from sleeper_manager.persistence.rows import (
     acknowledgement_id,
     cached_nba_as_of,
@@ -116,7 +117,7 @@ def _d1_field(original: object, payload: object, name: str) -> object:
     return _MISSING
 
 
-class D1StateRepository(AsyncRuntimeStateRepository):
+class D1StateRepository(D1LockInOpportunityMixin, AsyncRuntimeStateRepository):
     """Async repository backed by a Cloudflare D1 binding."""
 
     def __init__(self, database: Any) -> None:
