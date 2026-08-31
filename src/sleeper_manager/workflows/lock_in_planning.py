@@ -9,6 +9,7 @@ from hashlib import sha256
 from sleeper_manager.domain.eligibility import eligible_for_slot
 from sleeper_manager.domain.lock_in import LockInOpportunityStatus
 from sleeper_manager.domain.nba import GameStatus, ScheduledGame
+from sleeper_manager.domain.scoring import calculate_fantasy_points
 from sleeper_manager.persistence.base import (
     AsyncRuntimeStateRepository,
     DueWorkKind,
@@ -16,13 +17,20 @@ from sleeper_manager.persistence.base import (
     ScheduledWorkStatus,
 )
 from sleeper_manager.persistence.lock_in_opportunities import (
+    LockInObservation,
     LockInOpportunityKey,
     LockInOpportunityRecord,
 )
+from sleeper_manager.workflows.lock_in_evidence import merge_lock_in_opportunity_evidence
 from sleeper_manager.workflows.planning_inputs import (
     LivePlanningInputs,
     PlayerEligibilityEvidence,
     ResolvedPlayerIdentity,
+)
+from sleeper_manager.workflows.postgame_lock_in import (
+    DirectGameSummarySource,
+    summary_fingerprint,
+    summary_wait_reason,
 )
 
 _POSTGAME_INITIAL_DELAY = timedelta(hours=2)
@@ -334,4 +342,58 @@ def _postgame_work(
     )
 
 
-__all__ = ["sync_live_lock_in_opportunities"]
+async def refresh_terminal_lock_in_scores(
+    inputs: LivePlanningInputs,
+    *,
+    repository: AsyncRuntimeStateRepository,
+    fetch_summary: DirectGameSummarySource,
+    observed_at: datetime,
+    poll_id: str,
+) -> LivePlanningInputs:
+    """Re-observe terminal scores and return inputs containing any stabilized correction."""
+
+    if observed_at > inputs.week_window.ends_at:
+        return inputs
+    records = await repository.load_acknowledged_lock_in_opportunities(
+        inputs.league_profile.league_id,
+        inputs.week_window.week,
+    )
+    if not records:
+        return inputs
+    grouped: dict[str, list[LockInOpportunityRecord]] = {}
+    for record in records:
+        grouped.setdefault(record.key.game_id, []).append(record)
+    for game_id, group in grouped.items():
+        opportunities = tuple(group)
+        summary_result = await fetch_summary(game_id)
+        if summary_wait_reason(summary_result, opportunities) is not None:
+            continue
+        fingerprint = summary_fingerprint(summary_result.records)
+        boxes = {item.player_id: item for item in summary_result.records.player_box_scores}
+        for opportunity in opportunities:
+            box_score = boxes.get(opportunity.provider_player_id)
+            if box_score is None:
+                continue
+            score = calculate_fantasy_points(box_score.line, inputs.league_profile.scoring)
+            await repository.record_lock_in_observation(
+                opportunity.key,
+                LockInObservation(
+                    score=score,
+                    fingerprint=fingerprint,
+                    poll_id=f"{poll_id}:{game_id}",
+                    observed_at=observed_at,
+                    next_check_at=opportunity.next_check_at,
+                ),
+                expected_version=opportunity.row_version,
+            )
+    refreshed = await repository.load_acknowledged_lock_in_opportunities(
+        inputs.league_profile.league_id,
+        inputs.week_window.week,
+    )
+    return replace(
+        inputs,
+        acknowledgements=merge_lock_in_opportunity_evidence(inputs.acknowledgements, refreshed),
+    )
+
+
+__all__ = ["refresh_terminal_lock_in_scores", "sync_live_lock_in_opportunities"]
