@@ -10,6 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sleeper_manager.persistence.base import DueWorkKind, ScheduledWorkStatus
+from sleeper_manager.persistence.lock_in_statements import LOCK_IN_OPPORTUNITY_SCHEMA
 
 D1_SCHEMA = """
 PRAGMA foreign_keys = ON;
@@ -145,7 +146,7 @@ ON projection_observations (history_version, game_start, player_id);
 CREATE TABLE IF NOT EXISTS scheduled_work (
     work_id TEXT PRIMARY KEY,
     dedupe_key TEXT NOT NULL UNIQUE,
-    kind TEXT NOT NULL CHECK (kind IN ('daily', 'pre_tipoff', 'delivery_retry')),
+    kind TEXT NOT NULL CHECK (kind IN ('daily', 'pre_tipoff', 'delivery_retry', 'postgame')),
     due_at TEXT NOT NULL,
     status TEXT NOT NULL CHECK (
         status IN ('pending', 'running', 'retry', 'completed', 'canceled')
@@ -167,6 +168,7 @@ CREATE TABLE IF NOT EXISTS scheduled_work (
 CREATE INDEX IF NOT EXISTS scheduled_work_due_idx
 ON scheduled_work (status, due_at, lease_expires_at);
 """
+D1_SCHEMA += LOCK_IN_OPPORTUNITY_SCHEMA
 
 SQLITE_CORE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS lock_acknowledgements (
@@ -320,6 +322,7 @@ CREATE TABLE IF NOT EXISTS scheduled_work (
 CREATE INDEX IF NOT EXISTS scheduled_work_due_idx
 ON scheduled_work (status, due_at, lease_expires_at);
 """
+SQLITE_RUNTIME_SCHEMA += LOCK_IN_OPPORTUNITY_SCHEMA
 
 UPSERT_LEAGUE_SNAPSHOT_SQL = """
 INSERT INTO league_snapshots (

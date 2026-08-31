@@ -34,6 +34,21 @@ class LockInEvaluationKind(StrEnum):
     AUTOMATIC_FINAL = "automatic_final"
 
 
+class LockInOpportunityStatus(StrEnum):
+    """Identify every durable stage in a live player-game opportunity."""
+
+    SCHEDULED = "scheduled"
+    ACTIVE = "active"
+    INELIGIBLE = "ineligible"
+    FINALIZING = "finalizing"
+    ACTIONABLE = "actionable"
+    AUTOMATIC_FINAL = "automatic_final"
+    ACKNOWLEDGED_LOCKED = "acknowledged_locked"
+    ACKNOWLEDGED_PASSED = "acknowledged_passed"
+    EXPIRED = "expired"
+    RECONCILIATION_REQUIRED = "reconciliation_required"
+
+
 @dataclass(frozen=True, slots=True)
 class LockInDecision:
     """Capture one policy result with the evidence required to audit it later."""
@@ -177,4 +192,5 @@ __all__ = (
     "LockInDecisionTrace",
     "LockInEvaluation",
     "LockInEvaluationKind",
+    "LockInOpportunityStatus",
 )
