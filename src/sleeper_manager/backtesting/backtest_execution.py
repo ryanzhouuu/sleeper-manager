@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from bisect import bisect_left
-from collections.abc import Iterable, Iterator, Sequence
-from dataclasses import replace
+from collections.abc import Iterable
 from datetime import datetime
-from itertools import islice
-from typing import overload
 
+from sleeper_manager.backtesting.backtest_dataset import (
+    PreparedBacktestDataset,
+    PreparedBacktestWindow,
+    prepare_backtest_dataset,
+)
 from sleeper_manager.backtesting.backtest_metrics import (
     _cohort_diagnostics,
     _compare_results,
@@ -30,13 +31,11 @@ from sleeper_manager.backtesting.models import (
     BacktestReport,
     BacktestSkip,
     CohortAssignment,
-    TargetSkip,
     model_names,
 )
 from sleeper_manager.backtesting.progress import ProgressCounter
-from sleeper_manager.domain.nba_season import nba_season_start_year
 from sleeper_manager.domain.projection import ProjectionSnapshot
-from sleeper_manager.domain.scoring import BoxScoreLine, ScoringPolicy, calculate_fantasy_points
+from sleeper_manager.domain.scoring import ScoringPolicy, calculate_fantasy_points
 from sleeper_manager.integrations.nba.historical_feature_models import (
     HistoricalFeatureDataset,
     HistoricalFeatureRow,
@@ -57,7 +56,24 @@ def run_backtest(
 
     ``progress`` advances only after all models have either projected or skipped one target.
     """
-    config = config or BacktestConfig()
+    resolved_config = config or BacktestConfig()
+    model_records, reference = prepare_backtest_models(models, reference_model)
+    prepared = prepare_backtest_dataset(dataset)
+    return run_prepared_backtest(
+        prepared,
+        window=prepared.prepare_window(resolved_config),
+        scoring_policy=scoring_policy,
+        models=model_records,
+        reference_model=reference,
+        cohort_config=cohort_config,
+        progress=progress,
+    )
+
+
+def prepare_backtest_models(
+    models: Iterable[BacktestModel], reference_model: str | None
+) -> tuple[tuple[BacktestModel, ...], str]:
+    """Materialize a valid ordered model suite and resolve its reference model."""
     model_records = tuple(models)
     if not model_records:
         raise BacktestError("At least one backtest model is required")
@@ -65,16 +81,29 @@ def run_backtest(
     reference = reference_model or names[0]
     if reference not in names:
         raise BacktestError(f"Unknown reference model: {reference!r}")
-    _validate_dataset(dataset)
-    chronological_rows = tuple(
-        sorted(dataset.rows, key=lambda row: (row.game_start, row.game_id, row.player_id))
-    )
-    game_starts = tuple(row.game_start for row in chronological_rows)
-    targets, target_skips = _eligible_targets(chronological_rows, config)
+    return model_records, reference
+
+
+def run_prepared_backtest(
+    prepared: PreparedBacktestDataset,
+    *,
+    window: PreparedBacktestWindow,
+    scoring_policy: ScoringPolicy,
+    models: tuple[BacktestModel, ...],
+    reference_model: str,
+    cohort_config: CohortConfig | None = None,
+    progress: ProgressCounter | None = None,
+) -> BacktestReport:
+    """Execute one frozen target window without repeating dataset preparation."""
+    dataset = prepared.dataset
+    chronological_rows = prepared.rows
+    config = window.config
+    targets = window.targets
+    target_skips = window.target_skips
     observations_by_model: dict[str, list[BacktestObservation]] = {
-        model.name: [] for model in model_records
+        model.name: [] for model in models
     }
-    skips_by_model: dict[str, list[BacktestSkip]] = {model.name: [] for model in model_records}
+    skips_by_model: dict[str, list[BacktestSkip]] = {model.name: [] for model in models}
     batch_player_ids: dict[datetime, list[str]] = {}
     for target in targets:
         batch_player_ids.setdefault(target.game_start, []).append(target.player_id)
@@ -106,12 +135,7 @@ def run_backtest(
         control = _component_control(
             ranker.prior_rows(target.player_id), target.game_start, scoring_policy
         )
-        point_in_time_dataset = _point_in_time_dataset(
-            dataset,
-            chronological_rows,
-            game_starts,
-            target,
-        )
+        point_in_time_dataset = prepared.point_in_time_dataset(target)
         actual_score = calculate_fantasy_points(target.target_box_score, scoring_policy)
         realized_participation = target.target_did_play
         realized_minutes = target.target_minutes if target.target_did_play else None
@@ -120,7 +144,7 @@ def run_backtest(
             if target.target_did_play and target.target_minutes
             else None
         )
-        for model in model_records:
+        for model in models:
             try:
                 snapshot = model.projector.project(
                     point_in_time_dataset,
@@ -194,17 +218,17 @@ def run_backtest(
                 config,
             ),
         )
-        for model in model_records
+        for model in models
     )
     comparisons = tuple(
         _compare_results(
             results=results,
-            reference_model=reference,
+            reference_model=reference_model,
             candidate_model=model.name,
             config=config,
         )
-        for model in model_records
-        if model.name != reference
+        for model in models
+        if model.name != reference_model
     )
     return BacktestReport(
         dataset_version=dataset.dataset_version,
@@ -212,132 +236,10 @@ def run_backtest(
         config_version=config.version,
         target_count=len(targets),
         target_skips=tuple(target_skips),
-        reference_model=reference,
+        reference_model=reference_model,
         model_results=results,
         comparisons=comparisons,
     )
-
-
-def _validate_dataset(dataset: HistoricalFeatureDataset) -> None:
-    if dataset.generated_at.tzinfo is None:
-        raise BacktestError("Historical dataset generated_at must be timezone-aware")
-    keys: set[tuple[str, str]] = set()
-    for row in dataset.rows:
-        key = row.player_id, row.game_id
-        if key in keys:
-            raise BacktestError(f"Duplicate historical feature row for {key!r}")
-        keys.add(key)
-        if row.game_start.tzinfo is None or row.available_as_of.tzinfo is None:
-            raise BacktestError("Historical feature timestamps must be timezone-aware")
-        if row.available_as_of > row.game_start:
-            raise BacktestError(f"Feature row {key!r} is available after game start")
-
-
-def _eligible_targets(
-    rows: Iterable[HistoricalFeatureRow], config: BacktestConfig
-) -> tuple[tuple[HistoricalFeatureRow, ...], tuple[TargetSkip, ...]]:
-    records = tuple(sorted(rows, key=lambda row: (row.game_start, row.game_id, row.player_id)))
-    targets: list[HistoricalFeatureRow] = []
-    skips: list[TargetSkip] = []
-    prior_games_by_player_season: dict[tuple[str, int], int] = {}
-    pending_game_time: datetime | None = None
-    pending_counts: dict[tuple[str, int], int] = {}
-    for row in records:
-        if pending_game_time is not None and row.game_start != pending_game_time:
-            for key, count in pending_counts.items():
-                prior_games_by_player_season[key] = prior_games_by_player_season.get(key, 0) + count
-            pending_counts.clear()
-        pending_game_time = row.game_start
-        player_season = row.player_id, nba_season_start_year(row.game_start)
-        prior_games = prior_games_by_player_season.get(player_season, 0)
-        pending_counts[player_season] = pending_counts.get(player_season, 0) + 1
-        if config.start_at is not None and row.game_start < config.start_at:
-            continue
-        if config.end_at is not None and row.game_start > config.end_at:
-            continue
-        if prior_games < config.min_prior_games:
-            skips.append(
-                TargetSkip(
-                    player_id=row.player_id,
-                    game_id=row.game_id,
-                    game_start=row.game_start,
-                    reason=(
-                        f"Warmup requires {config.min_prior_games} prior same-season games; "
-                        f"found {prior_games}."
-                    ),
-                )
-            )
-            continue
-        targets.append(row)
-    return tuple(targets), tuple(skips)
-
-
-def _point_in_time_dataset(
-    dataset: HistoricalFeatureDataset,
-    chronological_rows: tuple[HistoricalFeatureRow, ...],
-    game_starts: tuple[datetime, ...],
-    target: HistoricalFeatureRow,
-) -> HistoricalFeatureDataset:
-    prior_count = bisect_left(game_starts, target.game_start)
-    sanitized_target = replace(
-        target,
-        target_minutes=None,
-        target_started=False,
-        target_did_play=False,
-        target_box_score=BoxScoreLine(),
-        target_line_points=0,
-        target_line_rebounds=0,
-        target_line_assists=0,
-        target_line_steals=0,
-        target_line_blocks=0,
-        target_line_turnovers=0,
-    )
-    return replace(
-        dataset,
-        rows=_PointInTimeRows(chronological_rows, prior_count, sanitized_target),
-    )
-
-
-class _PointInTimeRows(Sequence[HistoricalFeatureRow]):
-    def __init__(
-        self,
-        rows: tuple[HistoricalFeatureRow, ...],
-        prior_count: int,
-        target: HistoricalFeatureRow,
-    ) -> None:
-        self._rows = rows
-        self._prior_count = prior_count
-        self._target = target
-
-    def __len__(self) -> int:
-        return self._prior_count + 1
-
-    @property
-    def prior_count(self) -> int:
-        return self._prior_count
-
-    def __iter__(self) -> Iterator[HistoricalFeatureRow]:
-        yield from islice(self._rows, self._prior_count)
-        yield self._target
-
-    @overload
-    def __getitem__(self, index: int) -> HistoricalFeatureRow: ...
-
-    @overload
-    def __getitem__(self, index: slice) -> tuple[HistoricalFeatureRow, ...]: ...
-
-    def __getitem__(
-        self, index: int | slice
-    ) -> HistoricalFeatureRow | tuple[HistoricalFeatureRow, ...]:
-        if isinstance(index, slice):
-            start, stop, step = index.indices(len(self))
-            return tuple(self[position] for position in range(start, stop, step))
-        normalized = index if index >= 0 else len(self) + index
-        if normalized < 0 or normalized >= len(self):
-            raise IndexError(index)
-        if normalized == self._prior_count:
-            return self._target
-        return self._rows[normalized]
 
 
 def _validate_snapshot(
