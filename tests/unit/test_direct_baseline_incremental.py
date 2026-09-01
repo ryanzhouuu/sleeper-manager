@@ -37,6 +37,7 @@ def row(
     points: int,
     *,
     finalized_at: datetime | None = None,
+    omit_finalization: bool = False,
     source_hash: str = "source-v1",
 ) -> HistoricalFeatureRow:
     """Build one finalized historical feature row with deterministic provenance."""
@@ -46,6 +47,7 @@ def row(
         start + timedelta(hours=3),
         content_hash=source_hash,
     )
+    outcome_finalized_at = None if omit_finalization else finalized_at or start + timedelta(hours=2)
     return HistoricalFeatureRow(
         dataset_version="incremental-fixture",
         available_as_of=start - timedelta(minutes=30),
@@ -53,7 +55,7 @@ def row(
         sleeper_id=player_id,
         game_id=game_id,
         game_start=start,
-        outcome_finalized_at=finalized_at or start + timedelta(hours=2),
+        outcome_finalized_at=outcome_finalized_at,
         team_id="CHI",
         opponent_team_id="WAS",
         opponent_abbreviation="was",
@@ -218,6 +220,105 @@ def test_incremental_path_matches_explicit_history_and_compacts_each_row_once(
     assert actual == expected
     assert conversions == 4
     assert all(snapshot.input_version.startswith("projection-input-v4-") for snapshot in actual)
+
+
+def test_incremental_path_projects_when_prior_outcome_finalization_is_missing() -> None:
+    """Treat cached historical rows without finalization timestamps as tipoff-eligible."""
+    prior_one = row("prior-1", "p1", BASE, 10, omit_finalization=True)
+    prior_two = row("prior-2", "p1", BASE + timedelta(days=1), 20, omit_finalization=True)
+    target = row("target", "p1", BASE + timedelta(days=2), 0)
+    rows = (prior_one, prior_two, target)
+    reference_rows = (
+        row("prior-1", "p1", BASE, 10),
+        row("prior-2", "p1", BASE + timedelta(days=1), 20),
+        target,
+    )
+
+    incremental = DirectFantasyPointBaseline().project(
+        growing_dataset(rows, target),
+        player_id="p1",
+        game_id="target",
+        scoring_policy=POLICY,
+    )
+    reference = DirectFantasyPointBaseline().project(
+        growing_dataset(reference_rows, target),
+        player_id="p1",
+        game_id="target",
+        scoring_policy=POLICY,
+    )
+
+    assert incremental.distribution == reference.distribution
+    assert incremental.input_version.startswith("projection-input-v4-")
+    assert incremental.input_version != reference.input_version
+
+
+def test_backtest_covers_direct_models_when_prior_outcome_finalization_is_missing() -> None:
+    """Smoke coverage for the cached-dataset regression that skipped every target."""
+    rows = tuple(
+        row(
+            f"p1-g{day}",
+            "p1",
+            BASE + timedelta(days=day),
+            10 + day * 2,
+            omit_finalization=True,
+        )
+        for day in range(3)
+    )
+    dataset = feature_dataset(rows)
+    config = BacktestConfig(min_prior_games=1)
+    result = run_backtest(
+        dataset,
+        scoring_policy=POLICY,
+        models=(
+            BacktestModel("direct", DirectFantasyPointBaseline()),
+            BacktestModel(
+                "calibrated",
+                CalibratedProjectionModel(
+                    DirectFantasyPointBaseline(), min_samples=1, refresh_interval=1
+                ),
+            ),
+        ),
+        config=config,
+    )
+
+    for model_result in result.model_results:
+        assert model_result.metrics.sample_count == model_result.metrics.target_count
+        assert model_result.metrics.sample_count > 0
+        assert model_result.metrics.coverage == 1.0
+
+
+def test_incremental_fingerprint_includes_missing_finalization_history() -> None:
+    """Hash prior rows without outcome_finalized_at instead of treating history as empty."""
+    prior = row("prior", "p1", BASE, 10, omit_finalization=True)
+    target = row("target", "p1", BASE + timedelta(days=1), 0)
+    rows = (prior, target)
+
+    snapshot = DirectFantasyPointBaseline().project(
+        growing_dataset(rows, target),
+        player_id="p1",
+        game_id="target",
+        scoring_policy=POLICY,
+    )
+
+    with pytest.raises(ProjectionBaselineError, match="No prior same-season"):
+        DirectFantasyPointBaseline().project(
+            growing_dataset((target,), target),
+            player_id="p1",
+            game_id="target",
+            scoring_policy=POLICY,
+        )
+
+    assert snapshot.input_version.startswith("projection-input-v4-")
+
+    changed_prior = replace(prior, target_line_points=11, target_box_score=BoxScoreLine(points=11))
+    changed = DirectFantasyPointBaseline().project(
+        growing_dataset((changed_prior, target), target),
+        player_id="p1",
+        game_id="target",
+        scoring_policy=POLICY,
+    )
+
+    assert changed.input_version != snapshot.input_version
 
 
 def test_incremental_path_excludes_same_tipoff_and_unfinalized_prior_outcomes() -> None:

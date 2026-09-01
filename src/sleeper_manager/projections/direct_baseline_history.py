@@ -298,15 +298,13 @@ class _DirectBaselineHistoryIndex:
         game_start: datetime,
         available_as_of: datetime,
     ) -> tuple[DirectBaselineObservation, ...]:
-        """Return finalized league observations available before the target cutoff."""
+        """Return league observations available before the target cutoff."""
         index = self.seasons.get(season)
         if index is None:
             return ()
         count = bisect_left(index.starts, game_start)
         return tuple(
-            row
-            for row in index.rows[:count]
-            if row.outcome_finalized_at is not None and row.outcome_finalized_at <= available_as_of
+            row for row in index.rows[:count] if _available_before(row, game_start, available_as_of)
         )
 
     def season_weighted_mean(
@@ -315,7 +313,7 @@ class _DirectBaselineHistoryIndex:
         game_start: datetime,
         available_as_of: datetime,
     ) -> float | None:
-        """Return the recency-weighted mean from finalized prior league outcomes."""
+        """Return the recency-weighted mean from prior league outcomes."""
         index = self.seasons.get(season)
         if index is None:
             return None
@@ -326,9 +324,7 @@ class _DirectBaselineHistoryIndex:
         if self._all_finalized_by(global_count, available_as_of):
             return index.cumulative_weighted_scores[count - 1] / index.cumulative_weights[count - 1]
         eligible = tuple(
-            row
-            for row in index.rows[:count]
-            if row.outcome_finalized_at is not None and row.outcome_finalized_at <= available_as_of
+            row for row in index.rows[:count] if _available_before(row, game_start, available_as_of)
         )
         if not eligible:
             return None
@@ -343,7 +339,7 @@ class _DirectBaselineHistoryIndex:
         return weighted_score / total_weight
 
     def fingerprint_before(self, game_start: datetime, available_as_of: datetime) -> str:
-        """Return the rolling identity of finalized observations available by cutoff."""
+        """Return the rolling identity of observations available by cutoff."""
         count = bisect_left(self.starts, game_start)
         if not count:
             return "empty"
@@ -351,7 +347,7 @@ class _DirectBaselineHistoryIndex:
             return self.prefix_fingerprints[count - 1]
         fingerprint = ""
         for row in self.rows[:count]:
-            if row.outcome_finalized_at is None or row.outcome_finalized_at > available_as_of:
+            if not _available_before(row, game_start, available_as_of):
                 continue
             fingerprint = hashlib.sha256(
                 f"{fingerprint}:{_row_fingerprint(row)}".encode()
@@ -359,14 +355,12 @@ class _DirectBaselineHistoryIndex:
         return fingerprint or "empty"
 
     def _all_finalized_by(self, count: int, available_as_of: datetime) -> bool:
-        """Return whether a committed prefix is entirely finalized by one cutoff."""
+        """Return whether prefix aggregates already exclude unavailable explicit outcomes."""
         if not count:
             return True
-        latest = self.prefix_latest_finalization[count - 1]
-        return (
-            self.prefix_unfinalized_counts[count - 1] == 0
-            and latest is not None
-            and latest <= available_as_of
+        return all(
+            row.outcome_finalized_at is None or row.outcome_finalized_at <= available_as_of
+            for row in self.rows[:count]
         )
 
     def _reset(self) -> None:
@@ -433,12 +427,12 @@ def _available_before(
     game_start: datetime,
     available_as_of: datetime,
 ) -> bool:
-    """Return whether one outcome is finalized and usable for a target projection."""
-    return (
-        row.game_start < game_start
-        and row.outcome_finalized_at is not None
-        and row.outcome_finalized_at <= available_as_of
-    )
+    """Return whether one prior observation is usable for a target projection."""
+    if row.game_start >= game_start:
+        return False
+    if row.outcome_finalized_at is None:
+        return True
+    return row.outcome_finalized_at <= available_as_of
 
 
 def _same_historical_boundary(

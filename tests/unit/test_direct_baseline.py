@@ -12,6 +12,7 @@ from sleeper_manager.integrations.nba.historical_feature_dataset import (
 from sleeper_manager.integrations.nba.historical_feature_models import AvailabilityObservation
 from sleeper_manager.projections.direct_baseline import (
     MISSING_WARMUP_REASON,
+    DirectBaselineObservation,
     DirectFantasyPointBaseline,
     PregameProjectionRequest,
     ProjectionBaselineConfig,
@@ -216,6 +217,27 @@ def test_pregame_request_excludes_same_tipoff_and_future_outcomes() -> None:
     assert tuple((item.player_id, item.game_id) for item in request.history) == (
         (prior.player_id, prior.game_id),
     )
+
+
+def test_pregame_projection_excludes_history_without_outcome_finalization() -> None:
+    prior = row("prior", "player-1", datetime(2025, 1, 9, tzinfo=UTC), 10, 10)
+    unfinalized = DirectBaselineObservation.from_historical_row(
+        replace(prior, outcome_finalized_at=None)
+    )
+    request = PregameProjectionRequest(
+        dataset_version="features-v1",
+        feature_schema_version="1",
+        player_id="player-1",
+        game_id="target",
+        game_start=datetime(2025, 1, 10, 18, tzinfo=UTC),
+        available_as_of=datetime(2025, 1, 10, 12, tzinfo=UTC),
+        history=(unfinalized,),
+    )
+
+    with pytest.raises(ProjectionBaselineError, match="No prior same-season"):
+        DirectFantasyPointBaseline().project_pregame(request, scoring_policy=POLICY)
+
+    assert request.history == ()
 
 
 def test_pregame_projection_reports_stable_missing_warmup_reason() -> None:
