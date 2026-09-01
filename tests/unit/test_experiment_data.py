@@ -41,6 +41,14 @@ class ProjectableFakeTable(FakeTable):
         return FakeTable([{column: row.get(column) for column in columns} for row in self.rows])
 
 
+class RecordingProgress:
+    def __init__(self) -> None:
+        self.events: list[tuple[int, int, str | None]] = []
+
+    def advance(self, completed: int, total: int, *, detail: str | None = None) -> None:
+        self.events.append((completed, total, detail))
+
+
 def test_load_historical_inputs_filters_regular_season_and_adds_fouls(
     tmp_path: Path,
 ) -> None:
@@ -137,11 +145,13 @@ def test_load_historical_inputs_filters_regular_season_and_adds_fouls(
             return {"table": ProjectableFakeTable(play, projections)}
         return {"table": FakeTable(tables[Path(path).name])}
 
+    progress = RecordingProgress()
     result = load_historical_experiment_inputs(
         tmp_path,
         seasons=(2023,),
         retrieved_at=datetime(2026, 8, 14, tzinfo=UTC),
         rds_reader=reader,
+        progress=progress,
     )
 
     assert [game.provider_id for game in result.games] == ["g1"]
@@ -153,6 +163,12 @@ def test_load_historical_inputs_filters_regular_season_and_adds_fouls(
     assert artifact_manifest(result.artifacts)[0]["sha256"]
     assert decision_cutoff(result.games[0]) == played_at - timedelta(minutes=30)
     assert projections == [("game_id", "type_text", "athlete_id_1")]
+    assert progress.events == [
+        (1, 4, "2023 schedule"),
+        (2, 4, "2023 player box scores"),
+        (3, 4, "2023 team box scores"),
+        (4, 4, "2023 play by play"),
+    ]
 
 
 def test_scoring_and_dataset_versions_are_deterministic(tmp_path: Path) -> None:

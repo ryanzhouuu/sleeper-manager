@@ -33,6 +33,7 @@ from sleeper_manager.backtesting.models import (
     TargetSkip,
     model_names,
 )
+from sleeper_manager.backtesting.progress import ProgressCounter
 from sleeper_manager.domain.nba_season import nba_season_start_year
 from sleeper_manager.domain.projection import ProjectionSnapshot
 from sleeper_manager.domain.scoring import BoxScoreLine, ScoringPolicy, calculate_fantasy_points
@@ -50,7 +51,12 @@ def run_backtest(
     config: BacktestConfig | None = None,
     reference_model: str | None = None,
     cohort_config: CohortConfig | None = None,
+    progress: ProgressCounter | None = None,
 ) -> BacktestReport:
+    """Evaluate every model against a shared point-in-time target sequence.
+
+    ``progress`` advances only after all models have either projected or skipped one target.
+    """
     config = config or BacktestConfig()
     model_records = tuple(models)
     if not model_records:
@@ -77,7 +83,7 @@ def run_backtest(
     current_rank_map: dict[str, int] = {}
     target_cohorts: dict[tuple[str, str], CohortAssignment] = {}
 
-    for target in targets:
+    for target_position, target in enumerate(targets, start=1):
         if target.game_start != current_batch_game_start:
             current_rank_map = ranker.rank_players_as_of(
                 chronological_rows,
@@ -159,6 +165,8 @@ def run_backtest(
                     component_control=control,
                 )
             )
+        if progress is not None:
+            progress.advance(target_position, len(targets))
 
     _validate_cohort_invariants(
         target_cohorts=target_cohorts,

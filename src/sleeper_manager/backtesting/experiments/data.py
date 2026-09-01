@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Protocol
 
+from sleeper_manager.backtesting.progress import ProgressCounter
 from sleeper_manager.domain.nba import (
     GameStatus,
     PlayerBoxScore,
@@ -101,7 +102,12 @@ def load_historical_experiment_inputs(
     seasons: Iterable[int] = (2023, 2024, 2025, 2026),
     retrieved_at: datetime | None = None,
     rds_reader: RDSReader | None = None,
+    progress: ProgressCounter | None = None,
 ) -> HistoricalExperimentInputs:
+    """Load and validate cached regular-season resources in chronological order.
+
+    ``progress`` advances only after one season resource has been fully parsed and joined.
+    """
     timestamp = retrieved_at or datetime.now(UTC)
     if timestamp.tzinfo is None:
         raise ExperimentDataError("Historical retrieval timestamp must be timezone-aware")
@@ -113,8 +119,11 @@ def load_historical_experiment_inputs(
     players: dict[tuple[str, str], ProviderPlayer] = {}
     artifacts: list[SourceArtifact] = []
     excluded_player_rows = 0
+    season_records = tuple(seasons)
+    total_resources = len(season_records) * 4
+    completed_resources = 0
 
-    for season in seasons:
+    for season in season_records:
         season_dir = raw_dir / str(season)
         schedule_rows, artifact = _load_resource(
             season_dir / f"nba_schedule_{season}.rds",
@@ -135,6 +144,9 @@ def load_historical_experiment_inputs(
         )
         game_ids = {game.provider_id for game in parsed_games}
         games.extend(parsed_games)
+        completed_resources += 1
+        if progress is not None:
+            progress.advance(completed_resources, total_resources, detail=f"{season} schedule")
 
         player_rows, artifact = _load_resource(
             season_dir / f"player_box_{season}.rds",
@@ -157,6 +169,13 @@ def load_historical_experiment_inputs(
             regular_player_rows,
             retrieved_at=timestamp,
         ).records
+        completed_resources += 1
+        if progress is not None:
+            progress.advance(
+                completed_resources,
+                total_resources,
+                detail=f"{season} player box scores",
+            )
 
         team_rows, artifact = _load_resource(
             season_dir / f"team_box_{season}.rds",
@@ -189,6 +208,13 @@ def load_historical_experiment_inputs(
                     completed_periods=schedule.completed_periods,
                 )
             )
+        completed_resources += 1
+        if progress is not None:
+            progress.advance(
+                completed_resources,
+                total_resources,
+                detail=f"{season} team box scores",
+            )
 
         play_rows, artifact = _load_resource(
             season_dir / f"play_by_play_{season}.rds",
@@ -213,6 +239,13 @@ def load_historical_experiment_inputs(
             teams=teams,
             players=players,
         )
+        completed_resources += 1
+        if progress is not None:
+            progress.advance(
+                completed_resources,
+                total_resources,
+                detail=f"{season} play by play",
+            )
 
     _validate_unique_games(games)
     _validate_box_score_games(player_box_scores, games)

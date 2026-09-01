@@ -38,6 +38,14 @@ SOURCE = SourceMetadata("fixture", "fixture", datetime(2026, 8, 10, tzinfo=UTC))
 POLICY = ScoringPolicy(points=1)
 
 
+class RecordingProgress:
+    def __init__(self) -> None:
+        self.events: list[tuple[int, int, str | None]] = []
+
+    def advance(self, completed: int, total: int, *, detail: str | None = None) -> None:
+        self.events.append((completed, total, detail))
+
+
 def row(
     game_id: str,
     player_id: str,
@@ -99,6 +107,7 @@ def fixture_dataset() -> HistoricalFeatureDataset:
 
 
 def test_backtest_reports_walk_forward_metrics_and_warmup_skips() -> None:
+    progress = RecordingProgress()
     report = run_backtest(
         fixture_dataset(),
         scoring_policy=POLICY,
@@ -107,6 +116,7 @@ def test_backtest_reports_walk_forward_metrics_and_warmup_skips() -> None:
             BacktestModel("last_game", NaiveProjectionBaseline("last_game")),
             BacktestModel("season_average", NaiveProjectionBaseline("season_average")),
         ),
+        progress=progress,
     )
 
     assert report.target_count == 3
@@ -127,6 +137,25 @@ def test_backtest_reports_walk_forward_metrics_and_warmup_skips() -> None:
     )
     assert len(report.comparisons) == 2
     assert all(comparison.common_sample_count == 3 for comparison in report.comparisons)
+    assert progress.events == [(1, 3, None), (2, 3, None), (3, 3, None)]
+    without_progress = run_backtest(
+        fixture_dataset(),
+        scoring_policy=POLICY,
+        models=(
+            BacktestModel("direct", DirectFantasyPointBaseline()),
+            BacktestModel("last_game", NaiveProjectionBaseline("last_game")),
+            BacktestModel("season_average", NaiveProjectionBaseline("season_average")),
+        ),
+    )
+    assert report.target_skips == without_progress.target_skips
+    assert report.comparisons == without_progress.comparisons
+    assert (
+        tuple(
+            replace(result, model=without_progress.model_results[index].model)
+            for index, result in enumerate(report.model_results)
+        )
+        == without_progress.model_results
+    )
 
 
 class FixedProjector:

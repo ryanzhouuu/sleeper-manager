@@ -35,6 +35,14 @@ NOW = datetime(2026, 8, 9, 4, tzinfo=UTC)
 SOURCE = SourceMetadata("fixture", "fixture", NOW)
 
 
+class RecordingProgress:
+    def __init__(self) -> None:
+        self.events: list[tuple[int, int, str | None]] = []
+
+    def advance(self, completed: int, total: int, *, detail: str | None = None) -> None:
+        self.events.append((completed, total, detail))
+
+
 def team(team_id: str, abbreviation: str) -> Team:
     return Team(team_id, abbreviation, abbreviation, None, SOURCE)
 
@@ -80,6 +88,7 @@ def box(
 def test_historical_feature_dataset_uses_only_prior_player_history_and_schedule_context() -> None:
     target = game("game-2", "2025-01-02T01:00:00")
     previous = game("game-1", "2025-01-01T01:00:00")
+    progress = RecordingProgress()
     dataset = build_historical_feature_dataset(
         box_scores=[
             box("game-1", "espn-1", "2025-01-01T01:00:00", 30, True),
@@ -104,6 +113,7 @@ def test_historical_feature_dataset_uses_only_prior_player_history_and_schedule_
         },
         dataset_version="nba-features-2025-v1",
         generated_at=NOW,
+        progress=progress,
     )
 
     row = dataset.rows[-1]
@@ -121,6 +131,7 @@ def test_historical_feature_dataset_uses_only_prior_player_history_and_schedule_
     assert row.target_box_score.flagrant_fouls == 1
     assert row.dataset_version == "nba-features-2025-v1"
     assert dataset.source_versions[0].provider == "fixture"
+    assert progress.events == [(1, 2, None), (2, 2, None)]
 
 
 def test_historical_feature_dataset_preserves_only_explicit_outcome_finalization() -> None:

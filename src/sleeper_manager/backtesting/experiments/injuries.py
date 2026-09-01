@@ -12,6 +12,7 @@ from typing import Protocol, cast
 
 import httpx
 
+from sleeper_manager.backtesting.progress import ProgressCounter
 from sleeper_manager.domain.nba import ProviderPlayer, ScheduledGame, SourceMetadata
 from sleeper_manager.integrations.nba.official_injury_mapping import (
     HistoricalPlayerAvailability,
@@ -111,7 +112,12 @@ def acquire_injury_archive(
     retry_attempts: int = 4,
     request_interval_seconds: float = 0.1,
     sleeper: Callable[[float], None] = time.sleep,
+    progress: ProgressCounter | None = None,
 ) -> InjuryArchiveResult:
+    """Resolve the latest point-in-time injury evidence for every requested cutoff.
+
+    ``progress`` advances after a cutoff selection completes, including unavailable evidence.
+    """
     if retrieved_at.tzinfo is None:
         raise InjuryArchiveError("Injury archive retrieval timestamp must be timezone-aware")
     if max_lookback_hours < 0:
@@ -129,8 +135,9 @@ def acquire_injury_archive(
     content_by_nominal_time: dict[datetime, tuple[str, str, str]] = {}
     unavailable: dict[tuple[datetime, str], str] = {}
     selections: list[InjuryReportSelection] = []
+    requested_timestamps = requested_report_timestamps(games)
     try:
-        for requested_at in requested_report_timestamps(games):
+        for position, requested_at in enumerate(requested_timestamps, start=1):
             selected: OfficialInjuryReportSnapshot | None = None
             selected_metadata: tuple[str, str, str] | None = None
             attempts = 0
@@ -227,6 +234,8 @@ def acquire_injury_archive(
                     unavailable_candidates=tuple(unavailable_candidates),
                 )
             )
+            if progress is not None:
+                progress.advance(position, len(requested_timestamps))
     finally:
         if owned_client and isinstance(http_client, httpx.Client):
             http_client.close()

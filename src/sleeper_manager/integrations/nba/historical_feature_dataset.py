@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime
 
+from sleeper_manager.backtesting.progress import ProgressCounter
 from sleeper_manager.domain.nba import (
     PlayerBoxScore,
     ScheduledGame,
@@ -62,7 +63,12 @@ def build_historical_feature_dataset(
     dataset_version: str,
     generated_at: datetime,
     team_box_scores: Iterable[TeamBoxScore] = (),
+    progress: ProgressCounter | None = None,
 ) -> HistoricalFeatureDataset:
+    """Build point-in-time player-game features without exposing target outcomes early.
+
+    ``progress`` advances after each complete feature row and does not affect row ordering.
+    """
     _validate_timestamp(generated_at, "generated_at")
     if not dataset_version.strip():
         raise HistoricalFeatureDatasetError("dataset_version must not be empty")
@@ -105,7 +111,7 @@ def build_historical_feature_dataset(
     travel_by_game_team: dict[tuple[str, str], TravelContext] = {}
     rows: list[HistoricalFeatureRow] = []
 
-    for box_score in box_score_records:
+    for position, box_score in enumerate(box_score_records, start=1):
         game = game_by_id.get(box_score.game_id)
         if game is None:
             raise HistoricalFeatureDatasetError(
@@ -245,6 +251,8 @@ def build_historical_feature_dataset(
                 travel_fallback=travel.fallback,
             )
         )
+        if progress is not None:
+            progress.advance(position, len(box_score_records))
 
     sorted_rows = tuple(sorted(rows, key=lambda row: (row.game_start, row.game_id, row.player_id)))
     return HistoricalFeatureDataset(

@@ -40,6 +40,14 @@ class FakeClient:
         return self.responses.pop(0)
 
 
+class RecordingProgress:
+    def __init__(self) -> None:
+        self.events: list[tuple[int, int, str | None]] = []
+
+    def advance(self, completed: int, total: int, *, detail: str | None = None) -> None:
+        self.events.append((completed, total, detail))
+
+
 def game(game_id: str, start: datetime) -> ScheduledGame:
     return ScheduledGame(
         provider_id=game_id,
@@ -82,6 +90,7 @@ def test_archive_falls_back_and_reuses_cached_report(tmp_path: Path) -> None:
     assert requested_report_timestamps(games) == (datetime(2025, 1, 2, 1, 30, tzinfo=UTC),)
     client = FakeClient([FakeResponse(404), FakeResponse(200, b"report")])
 
+    progress = RecordingProgress()
     first = acquire_injury_archive(
         games,
         (),
@@ -90,6 +99,7 @@ def test_archive_falls_back_and_reuses_cached_report(tmp_path: Path) -> None:
         client=client,
         parser=parse_fixture,
         request_interval_seconds=0,
+        progress=progress,
     )
 
     assert len(client.urls) == 2
@@ -105,6 +115,7 @@ def test_archive_falls_back_and_reuses_cached_report(tmp_path: Path) -> None:
     )
     assert first.selections[0].sha256 is not None
     assert len(first.snapshots) == 1
+    assert progress.events == [(1, 1, None)]
 
     cached_client = FakeClient([FakeResponse(404)])
     second = acquire_injury_archive(
