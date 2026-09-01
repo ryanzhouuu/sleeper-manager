@@ -87,9 +87,13 @@ class ProjectionBaselineConfig:
 
 
 class DirectFantasyPointBaseline:
+    """Project empirical fantasy-point distributions from finalized prior outcomes."""
+
     def __init__(self, config: ProjectionBaselineConfig | None = None) -> None:
+        """Create independent explicit-history and incremental backtest indexes."""
         self.config = config or ProjectionBaselineConfig()
         self._pregame_indexes: dict[tuple[str, str, str], _DirectBaselineHistoryIndex] = {}
+        self._backtest_indexes: dict[tuple[str, str, str], _DirectBaselineHistoryIndex] = {}
 
     def project(
         self,
@@ -100,21 +104,31 @@ class DirectFantasyPointBaseline:
         scoring_policy: ScoringPolicy,
         exceed_score: float | None = None,
     ) -> ProjectionSnapshot:
+        """Project one historical target without admitting its realized outcome."""
+        prior_count: object = getattr(dataset.rows, "prior_count", None)
+        if isinstance(prior_count, int) and not isinstance(prior_count, bool):
+            index = self._backtest_index(dataset, scoring_policy)
+            target = index.resolve_historical_target(
+                dataset.rows,
+                player_id=player_id,
+                game_id=game_id,
+            )
+            request = self._historical_request(dataset, target)
+            return self._project_prepared(
+                request,
+                index,
+                scoring_policy=scoring_policy,
+                exceed_score=exceed_score,
+            )
         target = _find_target(dataset.rows, player_id=player_id, game_id=game_id)
-        request = PregameProjectionRequest(
-            dataset_version=dataset.dataset_version,
-            feature_schema_version=dataset.feature_schema_version,
-            player_id=target.sleeper_id or target.player_id,
-            game_id=target.game_id,
-            game_start=target.game_start,
-            available_as_of=target.available_as_of,
+        request = self._historical_request(
+            dataset,
+            target,
             history=tuple(
                 DirectBaselineObservation.from_historical_row(row)
                 for row in dataset.rows
                 if row.game_start < target.game_start
             ),
-            history_player_id=target.player_id,
-            source_versions=dataset.source_versions,
         )
         return self.project_pregame(
             request,
@@ -129,16 +143,35 @@ class DirectFantasyPointBaseline:
         scoring_policy: ScoringPolicy,
         exceed_score: float | None = None,
     ) -> ProjectionSnapshot:
+        """Project from an explicit compact history validated at a pregame cutoff."""
         index = self._pregame_index(request, scoring_policy)
+        return self._project_prepared(
+            request,
+            index,
+            scoring_policy=scoring_policy,
+            exceed_score=exceed_score,
+        )
+
+    def _project_prepared(
+        self,
+        request: PregameProjectionRequest,
+        index: _DirectBaselineHistoryIndex,
+        *,
+        scoring_policy: ScoringPolicy,
+        exceed_score: float | None,
+    ) -> ProjectionSnapshot:
+        """Apply shared direct-projection math to one validated request and history index."""
         season = nba_season_start_year(request.game_start)
         prior_rows = index.player_rows_before(
             request.history_player_id or request.player_id,
             season,
             request.game_start,
+            request.available_as_of,
         )
         season_mean = index.season_weighted_mean(
             season,
             request.game_start,
+            request.available_as_of,
         )
         if season_mean is None:
             raise ProjectionBaselineError(
@@ -162,7 +195,11 @@ class DirectFantasyPointBaseline:
                 f"{effective_games:.2f} effective recency-weighted games."
             )
         else:
-            season_rows = index.season_rows_before(season, request.game_start)
+            season_rows = index.season_rows_before(
+                season,
+                request.game_start,
+                request.available_as_of,
+            )
             season_observations = _direct_observations(
                 season_rows,
                 request.game_start,
@@ -205,7 +242,10 @@ class DirectFantasyPointBaseline:
             input_version=_pregame_input_version(
                 request,
                 scoring_policy,
-                history_fingerprint=index.fingerprint_before(request.game_start),
+                history_fingerprint=index.fingerprint_before(
+                    request.game_start,
+                    request.available_as_of,
+                ),
             ),
             scoring_policy_version=scoring_policy.version,
             distribution=distribution,
@@ -228,6 +268,41 @@ class DirectFantasyPointBaseline:
         )
         index.extend(request.history, len(request.history))
         return index
+
+    def _backtest_index(
+        self,
+        dataset: HistoricalFeatureDataset,
+        scoring_policy: ScoringPolicy,
+    ) -> _DirectBaselineHistoryIndex:
+        """Return the isolated incremental index for one modeled input identity."""
+        key = dataset.dataset_version, scoring_policy.version, self.config.model_version
+        return self._backtest_indexes.setdefault(
+            key,
+            _DirectBaselineHistoryIndex(
+                scoring_policy=scoring_policy,
+                half_life_days=self.config.recency_half_life_days,
+            ),
+        )
+
+    @staticmethod
+    def _historical_request(
+        dataset: HistoricalFeatureDataset,
+        target: HistoricalFeatureRow,
+        *,
+        history: tuple[DirectBaselineObservation, ...] = (),
+    ) -> PregameProjectionRequest:
+        """Translate a sanitized historical target to production-neutral request metadata."""
+        return PregameProjectionRequest(
+            dataset_version=dataset.dataset_version,
+            feature_schema_version=dataset.feature_schema_version,
+            player_id=target.sleeper_id or target.player_id,
+            game_id=target.game_id,
+            game_start=target.game_start,
+            available_as_of=target.available_as_of,
+            history=history,
+            history_player_id=target.player_id,
+            source_versions=dataset.source_versions,
+        )
 
 
 def _find_target(

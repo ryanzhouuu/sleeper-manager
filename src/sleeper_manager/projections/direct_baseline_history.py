@@ -21,6 +21,10 @@ from sleeper_manager.integrations.nba.historical_feature_models import (
     DatasetSourceVersion,
     HistoricalFeatureRow,
 )
+from sleeper_manager.projections.incremental_history import (
+    IncrementalHistory,
+    IncrementalHistoryError,
+)
 
 
 class ProjectionBaselineError(ValueError):
@@ -171,8 +175,20 @@ class _DirectBaselineHistoryIndex:
     rows: list[DirectBaselineObservation] = field(default_factory=list)
     starts: list[datetime] = field(default_factory=list)
     prefix_fingerprints: list[str] = field(default_factory=list)
+    prefix_latest_finalization: list[datetime | None] = field(default_factory=list)
+    prefix_unfinalized_counts: list[int] = field(default_factory=list)
     seasons: dict[int, _SeasonIndex] = field(default_factory=dict)
     players: dict[tuple[str, int], list[DirectBaselineObservation]] = field(default_factory=dict)
+    rows_by_key: dict[tuple[str, str], DirectBaselineObservation] = field(default_factory=dict)
+    duplicate_keys: set[tuple[str, str]] = field(default_factory=set)
+    historical_rows: IncrementalHistory[HistoricalFeatureRow] = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        """Configure shared prefix synchronization with a content boundary fallback."""
+        self.historical_rows = IncrementalHistory(
+            timestamp=lambda row: row.game_start,
+            same_boundary=_same_historical_boundary,
+        )
 
     def extend(self, rows: Sequence[DirectBaselineObservation], prior_count: int) -> None:
         """Commit an explicit chronological observation prefix once per index."""
@@ -180,80 +196,191 @@ class _DirectBaselineHistoryIndex:
             return
         if prior_count == self.processed_count:
             return
-        additions = rows[self.processed_count : prior_count]
-        fingerprint = self.prefix_fingerprints[-1] if self.prefix_fingerprints else ""
-        for row in additions:
+        for row in rows[self.processed_count : prior_count]:
             if self.starts and row.game_start < self.starts[-1]:
                 raise ProjectionBaselineError("Historical rows must be evaluated chronologically")
-            self.rows.append(row)
-            self.starts.append(row.game_start)
-            season = nba_season_start_year(row.game_start)
-            season_index = self.seasons.setdefault(season, _SeasonIndex(row.game_start))
-            season_index.rows.append(row)
-            season_index.starts.append(row.game_start)
-            score = calculate_fantasy_points(row.box_score, self.scoring_policy)
-            season_index.scores.append(score)
-            age_from_origin = (row.game_start - season_index.origin).total_seconds() / 86400
-            transformed_weight = exp(log(2) * age_from_origin / self.half_life_days)
-            season_index.cumulative_weights.append(
-                transformed_weight
-                + (season_index.cumulative_weights[-1] if season_index.cumulative_weights else 0)
-            )
-            season_index.cumulative_weighted_scores.append(
-                score * transformed_weight
-                + (
-                    season_index.cumulative_weighted_scores[-1]
-                    if season_index.cumulative_weighted_scores
-                    else 0
-                )
-            )
-            self.players.setdefault((row.player_id, season), []).append(row)
-            fingerprint = hashlib.sha256(
-                f"{fingerprint}:{_row_fingerprint(row)}".encode()
-            ).hexdigest()
-            self.prefix_fingerprints.append(fingerprint)
+            self._commit(row)
         self.processed_count = prior_count
+
+    def resolve_historical_target(
+        self,
+        rows: Sequence[HistoricalFeatureRow],
+        *,
+        player_id: str,
+        game_id: str,
+    ) -> HistoricalFeatureRow:
+        """Synchronize a growing prefix and resolve its uncommitted sanitized target."""
+        try:
+            limit = self.historical_rows.synchronize(
+                rows,
+                commit=self._commit_historical_row,
+                reset=self._reset,
+            )
+        except IncrementalHistoryError as error:
+            raise ProjectionBaselineError(str(error)) from error
+        self.processed_count = limit
+        if limit != len(rows) - 1:
+            raise ProjectionBaselineError(
+                "Point-in-time direct history must expose exactly one uncommitted target"
+            )
+        target = rows[limit]
+        if target.player_id != player_id or target.game_id != game_id:
+            raise ProjectionBaselineError("Point-in-time direct target identity does not match")
+        return target
+
+    def _commit_historical_row(self, row: HistoricalFeatureRow) -> None:
+        """Compact one newly visible feature row before updating direct indexes."""
+        self._commit(DirectBaselineObservation.from_historical_row(row))
+
+    def _commit(self, row: DirectBaselineObservation) -> None:
+        """Update every direct-history lookup and rolling aggregate for one observation."""
+        key = row.player_id, row.game_id
+        if key in self.rows_by_key:
+            self.duplicate_keys.add(key)
+            raise ProjectionBaselineError(
+                f"Duplicate direct history observation for player/game {key!r}"
+            )
+        self.rows_by_key[key] = row
+        self.rows.append(row)
+        self.starts.append(row.game_start)
+        season = nba_season_start_year(row.game_start)
+        season_index = self.seasons.setdefault(season, _SeasonIndex(row.game_start))
+        season_index.rows.append(row)
+        season_index.starts.append(row.game_start)
+        score = calculate_fantasy_points(row.box_score, self.scoring_policy)
+        season_index.scores.append(score)
+        age_from_origin = (row.game_start - season_index.origin).total_seconds() / 86400
+        transformed_weight = exp(log(2) * age_from_origin / self.half_life_days)
+        season_index.cumulative_weights.append(
+            transformed_weight
+            + (season_index.cumulative_weights[-1] if season_index.cumulative_weights else 0)
+        )
+        season_index.cumulative_weighted_scores.append(
+            score * transformed_weight
+            + (
+                season_index.cumulative_weighted_scores[-1]
+                if season_index.cumulative_weighted_scores
+                else 0
+            )
+        )
+        self.players.setdefault((row.player_id, season), []).append(row)
+        fingerprint = self.prefix_fingerprints[-1] if self.prefix_fingerprints else ""
+        self.prefix_fingerprints.append(
+            hashlib.sha256(f"{fingerprint}:{_row_fingerprint(row)}".encode()).hexdigest()
+        )
+        prior_latest = self.prefix_latest_finalization[-1] if len(self.rows) > 1 else None
+        latest = row.outcome_finalized_at
+        if prior_latest is not None and (latest is None or prior_latest > latest):
+            latest = prior_latest
+        self.prefix_latest_finalization.append(latest)
+        prior_unfinalized = self.prefix_unfinalized_counts[-1] if len(self.rows) > 1 else 0
+        self.prefix_unfinalized_counts.append(
+            prior_unfinalized + int(row.outcome_finalized_at is None)
+        )
 
     def player_rows_before(
         self,
         player_id: str,
         season: int,
         game_start: datetime,
+        available_as_of: datetime,
     ) -> tuple[DirectBaselineObservation, ...]:
-        """Return one player's same-season observations strictly before tipoff."""
+        """Return finalized player observations available before the target cutoff."""
         return tuple(
-            row for row in self.players.get((player_id, season), ()) if row.game_start < game_start
+            row
+            for row in self.players.get((player_id, season), ())
+            if _available_before(row, game_start, available_as_of)
         )
 
     def season_rows_before(
         self,
         season: int,
         game_start: datetime,
+        available_as_of: datetime,
     ) -> tuple[DirectBaselineObservation, ...]:
-        """Return all indexed season observations strictly before tipoff."""
+        """Return finalized league observations available before the target cutoff."""
         index = self.seasons.get(season)
         if index is None:
             return ()
-        return tuple(index.rows[: bisect_left(index.starts, game_start)])
+        count = bisect_left(index.starts, game_start)
+        return tuple(
+            row
+            for row in index.rows[:count]
+            if row.outcome_finalized_at is not None and row.outcome_finalized_at <= available_as_of
+        )
 
     def season_weighted_mean(
         self,
         season: int,
         game_start: datetime,
+        available_as_of: datetime,
     ) -> float | None:
-        """Return the recency-weighted league mean strictly before tipoff."""
+        """Return the recency-weighted mean from finalized prior league outcomes."""
         index = self.seasons.get(season)
         if index is None:
             return None
         count = bisect_left(index.starts, game_start)
         if not count:
             return None
-        return index.cumulative_weighted_scores[count - 1] / index.cumulative_weights[count - 1]
+        global_count = bisect_left(self.starts, game_start)
+        if self._all_finalized_by(global_count, available_as_of):
+            return index.cumulative_weighted_scores[count - 1] / index.cumulative_weights[count - 1]
+        eligible = tuple(
+            row
+            for row in index.rows[:count]
+            if row.outcome_finalized_at is not None and row.outcome_finalized_at <= available_as_of
+        )
+        if not eligible:
+            return None
+        origin = eligible[0].game_start
+        weighted_score = 0.0
+        total_weight = 0.0
+        for row in eligible:
+            age = (row.game_start - origin).total_seconds() / 86400
+            weight = exp(log(2) * age / self.half_life_days)
+            weighted_score += calculate_fantasy_points(row.box_score, self.scoring_policy) * weight
+            total_weight += weight
+        return weighted_score / total_weight
 
-    def fingerprint_before(self, game_start: datetime) -> str:
-        """Return the rolling identity of observations strictly before tipoff."""
+    def fingerprint_before(self, game_start: datetime, available_as_of: datetime) -> str:
+        """Return the rolling identity of finalized observations available by cutoff."""
         count = bisect_left(self.starts, game_start)
-        return self.prefix_fingerprints[count - 1] if count else "empty"
+        if not count:
+            return "empty"
+        if self._all_finalized_by(count, available_as_of):
+            return self.prefix_fingerprints[count - 1]
+        fingerprint = ""
+        for row in self.rows[:count]:
+            if row.outcome_finalized_at is None or row.outcome_finalized_at > available_as_of:
+                continue
+            fingerprint = hashlib.sha256(
+                f"{fingerprint}:{_row_fingerprint(row)}".encode()
+            ).hexdigest()
+        return fingerprint or "empty"
+
+    def _all_finalized_by(self, count: int, available_as_of: datetime) -> bool:
+        """Return whether a committed prefix is entirely finalized by one cutoff."""
+        if not count:
+            return True
+        latest = self.prefix_latest_finalization[count - 1]
+        return (
+            self.prefix_unfinalized_counts[count - 1] == 0
+            and latest is not None
+            and latest <= available_as_of
+        )
+
+    def _reset(self) -> None:
+        """Clear direct-specific state before replaying an incompatible sequence."""
+        self.processed_count = 0
+        self.rows.clear()
+        self.starts.clear()
+        self.prefix_fingerprints.clear()
+        self.prefix_latest_finalization.clear()
+        self.prefix_unfinalized_counts.clear()
+        self.seasons.clear()
+        self.players.clear()
+        self.rows_by_key.clear()
+        self.duplicate_keys.clear()
 
 
 def _pregame_input_version(
@@ -262,7 +389,7 @@ def _pregame_input_version(
     *,
     history_fingerprint: str,
 ) -> str:
-    """Build the v3 direct-projection input identity without target outcomes."""
+    """Build the v4 direct-projection input identity without target outcomes."""
     payload = {
         "dataset_version": request.dataset_version,
         "feature_schema_version": request.feature_schema_version,
@@ -271,11 +398,6 @@ def _pregame_input_version(
         "game_id": request.game_id,
         "game_start": request.game_start.isoformat(),
         "available_as_of": request.available_as_of.isoformat(),
-        "outcome_finalized_at": [
-            (row.game_id, row.outcome_finalized_at.isoformat())
-            for row in request.history
-            if row.outcome_finalized_at is not None
-        ],
         "source_versions": [
             (source.provider, source.schema_version, source.source_ids)
             for source in request.source_versions
@@ -284,7 +406,7 @@ def _pregame_input_version(
         "history_fingerprint": history_fingerprint,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    return f"projection-input-v3-{hashlib.sha256(encoded).hexdigest()[:12]}"
+    return f"projection-input-v4-{hashlib.sha256(encoded).hexdigest()[:12]}"
 
 
 def _validate_timestamp(value: datetime, field: str) -> None:
@@ -304,6 +426,29 @@ def _history_fingerprint(rows: Sequence[DirectBaselineObservation]) -> str:
     for row in rows:
         fingerprint = hashlib.sha256(f"{fingerprint}:{_row_fingerprint(row)}".encode()).hexdigest()
     return fingerprint
+
+
+def _available_before(
+    row: DirectBaselineObservation,
+    game_start: datetime,
+    available_as_of: datetime,
+) -> bool:
+    """Return whether one outcome is finalized and usable for a target projection."""
+    return (
+        row.game_start < game_start
+        and row.outcome_finalized_at is not None
+        and row.outcome_finalized_at <= available_as_of
+    )
+
+
+def _same_historical_boundary(
+    committed: HistoricalFeatureRow,
+    incoming: HistoricalFeatureRow,
+) -> bool:
+    """Compare reconstructed boundary rows through their compact direct identity."""
+    return _row_fingerprint(
+        DirectBaselineObservation.from_historical_row(committed)
+    ) == _row_fingerprint(DirectBaselineObservation.from_historical_row(incoming))
 
 
 def _row_fingerprint(row: DirectBaselineObservation) -> str:
