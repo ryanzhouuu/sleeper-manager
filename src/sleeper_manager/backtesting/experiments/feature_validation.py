@@ -30,6 +30,7 @@ from sleeper_manager.backtesting.models import (
     BacktestModel,
     ProjectionModel,
 )
+from sleeper_manager.backtesting.progress import ProgressCounter
 from sleeper_manager.backtesting.validation.folds import (
     regular_season_folds,
     run_validation_folds,
@@ -277,7 +278,9 @@ def _build_dataset(
     injuries: InjuryArchiveResult,
     scoring_policy: ScoringPolicy,
     generated_at: datetime,
+    progress: ProgressCounter | None = None,
 ) -> HistoricalFeatureDataset:
+    """Build the versioned feature dataset from resolved experiment evidence."""
     injury_hashes = tuple(
         selection.sha256 for selection in injuries.selections if selection.sha256 is not None
     )
@@ -298,6 +301,7 @@ def _build_dataset(
         dataset_version=version,
         generated_at=generated_at,
         team_box_scores=inputs.team_box_scores,
+        progress=progress,
     )
 
 

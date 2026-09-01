@@ -12,6 +12,7 @@ from sleeper_manager.backtesting.models import (
     BacktestModel,
     BacktestObservation,
 )
+from sleeper_manager.backtesting.progress import ProgressReporter, ProgressStage
 from sleeper_manager.backtesting.validation.models import ChronologicalFold, FoldResult
 from sleeper_manager.domain.scoring import ScoringPolicy
 from sleeper_manager.integrations.nba.historical_feature_models import HistoricalFeatureDataset
@@ -64,25 +65,49 @@ def run_validation_folds(
     folds: Iterable[ChronologicalFold],
     config: BacktestConfig | None = None,
     reference_model: str | None = None,
+    progress: ProgressReporter | None = None,
+    progress_stage: ProgressStage | None = None,
 ) -> tuple[FoldResult, ...]:
+    """Run folds chronologically while preserving projector continuation state.
+
+    When supplied, ``progress`` wraps each fold and delegates target counts to ``run_backtest``.
+    """
+    if (progress is None) != (progress_stage is None):
+        raise ValueError("Fold progress reporter and stage must be supplied together")
     base = config or BacktestConfig(
         thresholds=(20.0, 30.0, 40.0, 50.0, 60.0),
         intervals=((10, 90), (25, 75)),
     )
     records = tuple(models)
-    return tuple(
-        FoldResult(
-            fold,
-            run_backtest(
+    fold_records = tuple(folds)
+    results: list[FoldResult] = []
+    for position, fold in enumerate(fold_records, start=1):
+        if progress is None or progress_stage is None:
+            fold_report = run_backtest(
                 dataset,
                 scoring_policy=scoring_policy,
                 models=records,
                 config=replace(base, start_at=fold.start_at, end_at=fold.end_at),
                 reference_model=reference_model,
-            ),
-        )
-        for fold in folds
-    )
+            )
+        else:
+            with progress.stage(
+                progress_stage,
+                fold_name=fold.name,
+                fold_position=position,
+                fold_count=len(fold_records),
+                unit="targets",
+            ) as counter:
+                fold_report = run_backtest(
+                    dataset,
+                    scoring_policy=scoring_policy,
+                    models=records,
+                    config=replace(base, start_at=fold.start_at, end_at=fold.end_at),
+                    reference_model=reference_model,
+                    progress=counter,
+                )
+        results.append(FoldResult(fold, fold_report))
+    return tuple(results)
 
 
 def cohort_comparison_across_folds(

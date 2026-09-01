@@ -247,6 +247,35 @@ def _fold_summary(result: FoldResult) -> dict[str, Any]:
     }
 
 
+def development_report(
+    *,
+    generated_at: datetime,
+    source_revision: str,
+    manifest: Mapping[str, Any],
+    manifest_path: Path,
+    dataset: HistoricalFeatureDataset,
+    scoring_policy: ScoringPolicy,
+    development_results: tuple[FoldResult, ...],
+) -> dict[str, Any]:
+    """Build the deterministic development-only evidence payload."""
+    return {
+        "report_version": "projection-evaluation-development-v1",
+        "generated_at": generated_at,
+        "modeled": {
+            "source_revision": source_revision,
+            "manifest_path": str(manifest_path),
+            "manifest": manifest,
+            "dataset": {
+                "dataset_version": dataset.dataset_version,
+                "feature_schema_version": dataset.feature_schema_version,
+                "source_versions": dataset.source_versions,
+            },
+            "scoring_policy_version": scoring_policy.version,
+            "development_folds": tuple(_fold_summary(result) for result in development_results),
+        },
+    }
+
+
 def markdown_report(report: Mapping[str, Any]) -> str:
     """Render the deterministic human-readable projection-evaluation report."""
     from sleeper_manager.backtesting.experiments.projection_evaluation import (
@@ -335,6 +364,7 @@ def markdown_report(report: Mapping[str, Any]) -> str:
 
 __all__ = (
     "ProjectionSelectionDecision",
+    "development_report",
     "evaluate_selection",
     "markdown_report",
     "report",

@@ -15,6 +15,13 @@ from sleeper_manager.backtesting import (
     run_validation_folds,
     segment_comparisons,
 )
+from sleeper_manager.backtesting.progress import (
+    ProgressEvent,
+    ProgressMode,
+    ProgressReporter,
+    ProgressStage,
+    ProgressState,
+)
 from sleeper_manager.domain.nba import AvailabilityStatus, SourceMetadata
 from sleeper_manager.domain.projection import ProjectionDistribution, ProjectionSnapshot
 from sleeper_manager.domain.scoring import BoxScoreLine, ScoringPolicy
@@ -189,6 +196,37 @@ def test_validation_bootstrap_and_segments_use_paired_game_blocks() -> None:
     )
     assert decision.recommendation == "promote"
     assert all(gate.passed for gate in decision.gates)
+
+
+def test_validation_folds_emit_fold_and_target_progress() -> None:
+    fold = ChronologicalFold(
+        "fixture-fold",
+        2024,
+        "middle",
+        datetime(2025, 1, 2, tzinfo=UTC),
+        datetime(2025, 1, 4, tzinfo=UTC),
+    )
+    events: list[ProgressEvent] = []
+    results = run_validation_folds(
+        fixture_dataset(),
+        scoring_policy=POLICY,
+        models=(BacktestModel("reference", ConstantProjector(0)),),
+        folds=(fold,),
+        progress=ProgressReporter(ProgressMode.DEVELOPMENT, events.append),
+        progress_stage=ProgressStage.RUN_DEVELOPMENT_FOLD,
+    )
+
+    assert [item.state for item in events] == [
+        ProgressState.STARTED,
+        ProgressState.ADVANCED,
+        ProgressState.ADVANCED,
+        ProgressState.ADVANCED,
+        ProgressState.ADVANCED,
+        ProgressState.COMPLETED,
+    ]
+    assert events[-1].fold_name == "fixture-fold"
+    assert events[-1].fold_position == 1
+    assert events[-1].completed == results[0].report.target_count == 4
 
 
 def test_opponent_identity_cannot_be_promoted() -> None:

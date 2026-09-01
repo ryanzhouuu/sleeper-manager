@@ -83,6 +83,9 @@ def run_backtest(
     current_rank_map: dict[str, int] = {}
     target_cohorts: dict[tuple[str, str], CohortAssignment] = {}
 
+    if progress is not None and not targets:
+        progress.advance(0, 0)
+
     for target_position, target in enumerate(targets, start=1):
         if target.game_start != current_batch_game_start:
             current_rank_map = ranker.rank_players_as_of(
