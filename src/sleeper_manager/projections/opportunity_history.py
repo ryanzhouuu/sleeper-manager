@@ -1,3 +1,9 @@
+"""Point-in-time history and input provenance for opportunity projections.
+
+Opportunity-specific aggregates live here while chronological prefix continuity is
+delegated to the shared incremental-history synchronizer.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -12,6 +18,10 @@ from sleeper_manager.domain.scoring import ScoringPolicy, calculate_fantasy_poin
 from sleeper_manager.integrations.nba.historical_feature_models import (
     HistoricalFeatureDataset,
     HistoricalFeatureRow,
+)
+from sleeper_manager.projections.incremental_history import (
+    IncrementalHistory,
+    IncrementalHistoryError,
 )
 from sleeper_manager.projections.opportunity_statistics import _last
 from sleeper_manager.projections.opportunity_types import (
@@ -61,7 +71,9 @@ class _HistoricalIndex:
         self.scoring_policy = scoring_policy
         self.scoring_policy_version = scoring_policy.version
         self.recency_half_life_days = recency_half_life_days
-        self._rows: list[HistoricalFeatureRow] = []
+        self._history = IncrementalHistory[HistoricalFeatureRow](
+            timestamp=lambda row: row.game_start
+        )
         self._by_target: dict[tuple[str, str], HistoricalFeatureRow] = {}
         self._duplicate_targets: set[tuple[str, str]] = set()
         self._player_rows: dict[str, list[HistoricalFeatureRow]] = {}
@@ -132,34 +144,14 @@ class _HistoricalIndex:
         return prefix.score, prefix.minutes
 
     def _sync(self, rows: Sequence[HistoricalFeatureRow]) -> int:
-        limit = _prior_count(rows)
-        if limit is None:
-            limit = len(rows)
-        committed = len(self._rows)
-        check_index = min(limit, committed) - 1
-        if check_index < 0 or rows[check_index] is self._rows[check_index]:
-            if limit < committed:
-                raise OpportunityModelError(
-                    "Historical index detected a chronological regression: the visible "
-                    f"row prefix shrank from {committed} to {limit} rows for what was "
-                    "already confirmed to be the same underlying sequence."
-                )
-        else:
-            self._reset()
-        self._advance(rows, limit)
-        return limit
-
-    def _advance(self, rows: Sequence[HistoricalFeatureRow], limit: int) -> None:
-        for index in range(len(self._rows), limit):
-            self._commit(rows[index])
+        """Synchronize model aggregates with the shared visible-prefix contract."""
+        try:
+            return self._history.synchronize(rows, commit=self._commit, reset=self._reset)
+        except IncrementalHistoryError as error:
+            raise OpportunityModelError(str(error)) from error
 
     def _commit(self, row: HistoricalFeatureRow) -> None:
-        if self._rows and row.game_start < self._rows[-1].game_start:
-            raise OpportunityModelError(
-                "Historical index requires chronologically ordered rows; encountered "
-                f"{row.game_start.isoformat()} after {self._rows[-1].game_start.isoformat()}."
-            )
-        self._rows.append(row)
+        """Add one validated chronological row to opportunity-specific indexes."""
         key = (row.player_id, row.game_id)
         if key in self._by_target:
             self._duplicate_targets.add(key)
@@ -170,6 +162,7 @@ class _HistoricalIndex:
             self._commit_league_production(row)
 
     def _commit_league_production(self, row: HistoricalFeatureRow) -> None:
+        """Add one played row to weighted league and player production prefixes."""
         if self._league_origin is None:
             self._league_origin = row.game_start
         age_days = (row.game_start - self._league_origin).total_seconds() / 86400
@@ -191,7 +184,7 @@ class _HistoricalIndex:
         )
 
     def _reset(self) -> None:
-        self._rows = []
+        """Clear opportunity-specific state before the shared history replays a sequence."""
         self._by_target = {}
         self._duplicate_targets = set()
         self._player_rows = {}
@@ -203,11 +196,6 @@ class _HistoricalIndex:
         self._league_origin = None
 
 
-def _prior_count(rows: Sequence[HistoricalFeatureRow]) -> int | None:
-    value = getattr(rows, "prior_count", None)
-    return value if isinstance(value, int) else None
-
-
 def _input_version(
     dataset: HistoricalFeatureDataset,
     target: HistoricalFeatureRow,
@@ -216,6 +204,7 @@ def _input_version(
     scoring_policy: ScoringPolicy,
     config: OpportunityModelConfig,
 ) -> str:
+    """Fingerprint every prior and target input that can alter an opportunity projection."""
     payload = {
         "dataset": dataset.dataset_version,
         "feature_schema": dataset.feature_schema_version,
@@ -237,6 +226,7 @@ def _input_version(
 
 
 def _input_row(row: HistoricalFeatureRow) -> tuple[object, ...]:
+    """Return the canonical opportunity-history fields used in input fingerprints."""
     return (
         row.player_id,
         row.game_id,
