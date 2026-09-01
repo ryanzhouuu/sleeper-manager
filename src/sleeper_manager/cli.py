@@ -26,9 +26,8 @@ from sleeper_manager.backtesting.experiments.lock_in import (
     LockInExperimentError,
     run_lock_in_policy_validation,
 )
-from sleeper_manager.backtesting.experiments.projection_evaluation import (
-    ProjectionEvaluationError,
-    run_projection_evaluation,
+from sleeper_manager.backtesting.experiments.projection_evaluation_cli import (
+    run_projection_evaluation_command,
 )
 from sleeper_manager.cloudflare.dispatcher import dispatch_due_work
 from sleeper_manager.cloudflare.planning import collect_cloudflare_planning_inputs
@@ -382,24 +381,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Markdown report: {output.report_markdown_path}")
         return 0
     if args.command == "evaluate-projections":
-        try:
-            evaluation_output = run_projection_evaluation(
-                args.workspace,
-                league_fixture=args.league_fixture,
-                mode=args.mode,
-            )
-        except (ProjectionEvaluationError, OSError, ValueError) as error:
-            print(f"Projection evaluation failed: {error}", file=sys.stderr)
-            return 2
-        print(f"Mode: {evaluation_output.mode}")
-        print(f"Dataset: {evaluation_output.dataset_version}")
-        print(f"Frozen manifest: {evaluation_output.manifest_path}")
-        print(f"Development report: {evaluation_output.development_report_path}")
-        if evaluation_output.report_json_path is not None:
-            print(f"JSON report: {evaluation_output.report_json_path}")
-            print(f"Markdown report: {evaluation_output.report_markdown_path}")
-            print(f"Selected baseline: {evaluation_output.selected_model}")
-        return 0
+        return run_projection_evaluation_command(
+            workspace=args.workspace,
+            league_fixture=args.league_fixture,
+            mode=args.mode,
+        )
     if args.command == "validate-lock-in-policy":
         try:
             lock_output = run_lock_in_policy_validation(
