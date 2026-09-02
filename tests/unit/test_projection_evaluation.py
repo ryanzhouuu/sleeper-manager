@@ -196,7 +196,7 @@ def _build_report(dataset: HistoricalFeatureDataset, generated_at: datetime) -> 
         scoring_policy=POLICY,
         backtest_config=BacktestConfig(),
         component_gate_config=ComponentGateConfig(),
-        development_results=(),
+        development_fold_summaries=(),
         locked_retrospective_results=locked_retrospective_results,
     )
 

@@ -8,6 +8,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from sleeper_manager.backtesting.cohorts import CohortConfig
+from sleeper_manager.backtesting.development_checkpoint import (
+    build_development_checkpoint,
+    calibrated_projectors,
+    checkpoint_fold_summaries,
+    development_checkpoint_path,
+    load_development_checkpoint,
+    restore_development_continuations,
+    write_development_checkpoint,
+)
 from sleeper_manager.backtesting.experiments.data import (
     load_historical_experiment_inputs,
     scoring_policy_from_league_fixture,
@@ -45,6 +54,7 @@ from sleeper_manager.backtesting.experiments.projection_evaluation_config import
 from sleeper_manager.backtesting.experiments.projection_evaluation_report import (
     ProjectionSelectionDecision,
     development_report,
+    fold_summary,
     markdown_report,
     report,
 )
@@ -52,6 +62,7 @@ from sleeper_manager.backtesting.experiments.projection_evaluation_report import
     evaluate_selection as evaluate_selection,
 )
 from sleeper_manager.backtesting.models import BacktestConfig
+from sleeper_manager.backtesting.performance import manifest_fingerprint
 from sleeper_manager.backtesting.progress import (
     ProgressMode,
     ProgressReporter,
@@ -73,6 +84,7 @@ class ProjectionEvaluationOutput:
 
     manifest_path: Path
     development_report_path: Path
+    development_checkpoint_path: Path
     report_json_path: Path | None
     report_markdown_path: Path | None
     dataset_version: str
@@ -90,9 +102,10 @@ def run_projection_evaluation(
 ) -> ProjectionEvaluationOutput:
     """Run the projection evaluation against cached inputs.
 
-    ``mode="development"`` freezes the manifest and runs development folds only. Locked mode
-    requires the frozen manifest, then additionally runs the locked-retrospective folds and writes
-    the complete reports. ``progress`` receives operational events that never enter modeled output.
+    ``mode="development"`` freezes the manifest, writes aggregate development evidence, and
+    publishes calibrated continuation. ``mode="locked_retrospective"`` requires that exact
+    checkpoint, restores it into fresh models, and runs only the 2025-26 locked folds.
+    ``progress`` receives operational events that never enter modeled output.
     """
     if mode not in ("development", "locked_retrospective"):
         raise ProjectionEvaluationError(f"Unknown projection evaluation mode: {mode!r}")
@@ -154,25 +167,23 @@ def run_projection_evaluation(
         source_revision=source_revision,
     )
     manifest_path = reports_dir / "projection-evaluation-manifest.json"
-
-    if mode == "locked_retrospective":
-        assert_manifest_frozen(manifest_path, manifest)
-
     folds = regular_season_folds()
     development_folds = tuple(fold for fold in folds if not fold.holdout)
-    development_results = run_validation_folds(
-        dataset,
-        scoring_policy=scoring_policy,
-        models=comparison_suite,
-        folds=development_folds,
-        config=backtest_config,
-        reference_model=DIRECT_BASELINE_MODEL,
-        progress=reporter,
-        progress_stage=ProgressStage.RUN_DEVELOPMENT_FOLD,
-    )
     development_report_path = reports_dir / "projection-evaluation-development-report.json"
+    checkpoint_path = development_checkpoint_path(workspace, manifest_fingerprint(manifest))
 
     if mode == "development":
+        development_results = run_validation_folds(
+            dataset,
+            scoring_policy=scoring_policy,
+            models=comparison_suite,
+            folds=development_folds,
+            config=backtest_config,
+            reference_model=DIRECT_BASELINE_MODEL,
+            progress=reporter,
+            progress_stage=ProgressStage.RUN_DEVELOPMENT_FOLD,
+        )
+        development_fold_summaries = tuple(fold_summary(result) for result in development_results)
         with reporter.stage(ProgressStage.BUILD_REPORTS):
             development_payload = development_report(
                 generated_at=generated_at,
@@ -181,20 +192,29 @@ def run_projection_evaluation(
                 manifest_path=manifest_path,
                 dataset=dataset,
                 scoring_policy=scoring_policy,
-                development_results=development_results,
+                development_fold_summaries=development_fold_summaries,
+            )
+            checkpoint = build_development_checkpoint(
+                manifest=manifest,
+                folds=development_folds,
+                fold_summaries=development_fold_summaries,
+                models=comparison_suite,
             )
         with reporter.stage(
             ProgressStage.WRITE_ARTIFACTS,
-            total=2,
+            total=3,
             unit="artifacts",
         ) as counter:
             _write_json(development_report_path, development_payload)
-            counter.advance(1, 2, detail="development report")
+            counter.advance(1, 3, detail="development report")
             freeze_manifest(manifest_path, manifest)
-            counter.advance(2, 2, detail="manifest")
+            counter.advance(2, 3, detail="manifest")
+            write_development_checkpoint(checkpoint_path, checkpoint)
+            counter.advance(3, 3, detail="development checkpoint")
         return ProjectionEvaluationOutput(
             manifest_path=manifest_path,
             development_report_path=development_report_path,
+            development_checkpoint_path=checkpoint_path,
             report_json_path=None,
             report_markdown_path=None,
             dataset_version=dataset.dataset_version,
@@ -202,6 +222,25 @@ def run_projection_evaluation(
             selected_model=None,
         )
 
+    assert_manifest_frozen(manifest_path, manifest)
+    with reporter.stage(ProgressStage.VALIDATE_DEVELOPMENT_CHECKPOINT):
+        checkpoint = load_development_checkpoint(
+            checkpoint_path,
+            expected_manifest=manifest,
+            expected_folds=development_folds,
+            expected_models=comparison_suite,
+        )
+    stateful_count = len(calibrated_projectors(comparison_suite))
+    with reporter.stage(
+        ProgressStage.RESTORE_CALIBRATED_CONTINUATION,
+        total=stateful_count,
+        unit="models",
+    ) as counter:
+        restore_development_continuations(
+            checkpoint,
+            comparison_suite,
+            on_restored=lambda position, total, name: counter.advance(position, total, detail=name),
+        )
     locked_retrospective_folds = tuple(fold for fold in folds if fold.holdout)
     locked_retrospective_results = run_validation_folds(
         dataset,
@@ -216,15 +255,6 @@ def run_projection_evaluation(
     report_json_path = reports_dir / "projection-evaluation-report.json"
     report_markdown_path = reports_dir / "projection-evaluation-report.md"
     with reporter.stage(ProgressStage.BUILD_REPORTS):
-        development_payload = development_report(
-            generated_at=generated_at,
-            source_revision=source_revision,
-            manifest=manifest,
-            manifest_path=manifest_path,
-            dataset=dataset,
-            scoring_policy=scoring_policy,
-            development_results=development_results,
-        )
         evaluation_report = report(
             generated_at=generated_at,
             manifest=manifest,
@@ -233,25 +263,24 @@ def run_projection_evaluation(
             scoring_policy=scoring_policy,
             backtest_config=backtest_config,
             component_gate_config=component_gate_config,
-            development_results=development_results,
+            development_fold_summaries=checkpoint_fold_summaries(checkpoint),
             locked_retrospective_results=locked_retrospective_results,
         )
         rendered_report = markdown_report(evaluation_report)
     with reporter.stage(
         ProgressStage.WRITE_ARTIFACTS,
-        total=3,
+        total=2,
         unit="artifacts",
     ) as counter:
-        _write_json(development_report_path, development_payload)
-        counter.advance(1, 3, detail="development report")
         _write_json(report_json_path, evaluation_report)
-        counter.advance(2, 3, detail="JSON report")
+        counter.advance(1, 2, detail="JSON report")
         report_markdown_path.write_text(rendered_report)
-        counter.advance(3, 3, detail="Markdown report")
+        counter.advance(2, 2, detail="Markdown report")
     selection: ProjectionSelectionDecision = evaluation_report["modeled"]["selection"]
     return ProjectionEvaluationOutput(
         manifest_path=manifest_path,
         development_report_path=development_report_path,
+        development_checkpoint_path=checkpoint_path,
         report_json_path=report_json_path,
         report_markdown_path=report_markdown_path,
         dataset_version=dataset.dataset_version,

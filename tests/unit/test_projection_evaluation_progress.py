@@ -10,6 +10,7 @@ from typing import Any
 
 import pytest
 
+from sleeper_manager.backtesting.development_checkpoint import DevelopmentCheckpointError
 from sleeper_manager.backtesting.experiments import projection_evaluation as evaluation
 from sleeper_manager.backtesting.experiments.projection_evaluation import (
     ProjectionSelectionDecision,
@@ -111,6 +112,34 @@ def _install_execution_fakes(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(evaluation, "assert_manifest_frozen", lambda *_: None)
     monkeypatch.setattr(evaluation, "regular_season_folds", lambda: folds)
     monkeypatch.setattr(evaluation, "run_validation_folds", run_folds)
+    checkpoint = SimpleNamespace(calibrated_continuations=())
+    monkeypatch.setattr(evaluation, "build_development_checkpoint", lambda **_: checkpoint)
+    monkeypatch.setattr(evaluation, "checkpoint_fold_summaries", lambda _: ())
+    monkeypatch.setattr(
+        evaluation,
+        "development_checkpoint_path",
+        lambda workspace, _: workspace / "checkpoints" / "checkpoint.json",
+    )
+    monkeypatch.setattr(
+        evaluation,
+        "load_development_checkpoint",
+        lambda *_args, **_kwargs: checkpoint,
+    )
+    monkeypatch.setattr(
+        evaluation,
+        "calibrated_projectors",
+        lambda _: (("calibrated-a", object()), ("calibrated-b", object())),
+    )
+
+    def restore(*_: object, on_restored: Any, **__: object) -> None:
+        on_restored(1, 2, "calibrated-a")
+        on_restored(2, 2, "calibrated-b")
+
+    monkeypatch.setattr(
+        evaluation,
+        "restore_development_continuations",
+        restore,
+    )
     monkeypatch.setattr(evaluation, "development_report", lambda **_: {"kind": "development"})
     monkeypatch.setattr(
         evaluation,
@@ -124,6 +153,12 @@ def _install_execution_fakes(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(evaluation, "_write_json", write_json)
     monkeypatch.setattr(evaluation, "freeze_manifest", write_json)
+
+    def write_checkpoint(path: Path, payload: object) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_json(path, payload)
+
+    monkeypatch.setattr(evaluation, "write_development_checkpoint", write_checkpoint)
 
 
 def _started_stages(events: list[ProgressEvent]) -> list[ProgressStage]:
@@ -156,10 +191,11 @@ def test_development_mode_emits_ordered_stages_and_artifact_counts(
     ]
     writes = [item for item in events if item.stage is ProgressStage.WRITE_ARTIFACTS]
     assert [(item.state, item.completed, item.total) for item in writes] == [
-        (ProgressState.STARTED, 0, 2),
-        (ProgressState.ADVANCED, 1, 2),
-        (ProgressState.ADVANCED, 2, 2),
-        (ProgressState.COMPLETED, 2, 2),
+        (ProgressState.STARTED, 0, 3),
+        (ProgressState.ADVANCED, 1, 3),
+        (ProgressState.ADVANCED, 2, 3),
+        (ProgressState.ADVANCED, 3, 3),
+        (ProgressState.COMPLETED, 3, 3),
     ]
     assert output.report_json_path is None
 
@@ -179,7 +215,9 @@ def test_locked_mode_labels_development_and_locked_folds_separately(
         progress=events.append,
     )
 
-    assert ProgressStage.RUN_DEVELOPMENT_FOLD in _started_stages(events)
+    assert ProgressStage.RUN_DEVELOPMENT_FOLD not in _started_stages(events)
+    assert ProgressStage.VALIDATE_DEVELOPMENT_CHECKPOINT in _started_stages(events)
+    assert ProgressStage.RESTORE_CALIBRATED_CONTINUATION in _started_stages(events)
     assert ProgressStage.RUN_LOCKED_FOLD in _started_stages(events)
     locked_start = next(
         item
@@ -187,14 +225,80 @@ def test_locked_mode_labels_development_and_locked_folds_separately(
         if item.stage is ProgressStage.RUN_LOCKED_FOLD and item.state is ProgressState.STARTED
     )
     assert locked_start.fold_name == "locked-fold"
+    restored = [
+        item
+        for item in events
+        if item.stage is ProgressStage.RESTORE_CALIBRATED_CONTINUATION
+        and item.state is ProgressState.ADVANCED
+    ]
+    assert [(item.completed, item.total, item.detail) for item in restored] == [
+        (1, 2, "calibrated-a"),
+        (2, 2, "calibrated-b"),
+    ]
     writes = [
         item
         for item in events
         if item.stage is ProgressStage.WRITE_ARTIFACTS and item.state is ProgressState.ADVANCED
     ]
     assert [(item.completed, item.total, item.detail) for item in writes] == [
-        (1, 3, "development report"),
-        (2, 3, "JSON report"),
-        (3, 3, "Markdown report"),
+        (1, 2, "JSON report"),
+        (2, 2, "Markdown report"),
     ]
     assert output.selected_model == "direct_baseline"
+    assert not output.development_report_path.exists()
+
+
+def test_development_failure_never_replaces_a_prior_checkpoint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fold failure occurs before checkpoint publication and preserves prior durable evidence."""
+    _install_execution_fakes(monkeypatch)
+    checkpoint_path = tmp_path / "checkpoints" / "checkpoint.json"
+    checkpoint_path.parent.mkdir(parents=True)
+    checkpoint_path.write_text("prior-checkpoint")
+
+    def fail_folds(*_: object, **__: object) -> tuple:
+        raise RuntimeError("development failed")
+
+    monkeypatch.setattr(evaluation, "run_validation_folds", fail_folds)
+
+    with pytest.raises(RuntimeError, match="development failed"):
+        evaluation.run_projection_evaluation(
+            tmp_path,
+            league_fixture=tmp_path / "league.json",
+            mode="development",
+            now=datetime(2026, 8, 31, 12, tzinfo=UTC),
+        )
+
+    assert checkpoint_path.read_text() == "prior-checkpoint"
+
+
+def test_missing_checkpoint_fails_before_any_locked_fold(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Locked mode has no development fallback when checkpoint validation fails."""
+    _install_execution_fakes(monkeypatch)
+    fold_calls = 0
+
+    def count_folds(*_: object, **__: object) -> tuple:
+        nonlocal fold_calls
+        fold_calls += 1
+        return ()
+
+    def reject_checkpoint(*_: object, **__: object) -> object:
+        raise DevelopmentCheckpointError("rerun development evaluation")
+
+    monkeypatch.setattr(evaluation, "run_validation_folds", count_folds)
+    monkeypatch.setattr(evaluation, "load_development_checkpoint", reject_checkpoint)
+
+    with pytest.raises(DevelopmentCheckpointError, match="rerun development"):
+        evaluation.run_projection_evaluation(
+            tmp_path,
+            league_fixture=tmp_path / "league.json",
+            mode="locked_retrospective",
+            now=datetime(2026, 8, 31, 12, tzinfo=UTC),
+        )
+
+    assert fold_calls == 0

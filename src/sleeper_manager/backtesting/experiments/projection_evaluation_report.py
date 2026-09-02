@@ -167,7 +167,7 @@ def report(
     scoring_policy: ScoringPolicy,
     backtest_config: BacktestConfig,
     component_gate_config: ComponentGateConfig,
-    development_results: tuple[FoldResult, ...],
+    development_fold_summaries: tuple[Mapping[str, Any], ...],
     locked_retrospective_results: tuple[FoldResult, ...],
 ) -> dict[str, Any]:
     """Build the complete deterministic projection-evaluation report payload.
@@ -208,7 +208,7 @@ def report(
             },
             "scoring_policy_version": scoring_policy.version,
             "model_names": model_names,
-            "development_folds": tuple(fold_summary(result) for result in development_results),
+            "development_folds": development_fold_summaries,
             "locked_retrospective_folds": tuple(
                 fold_summary(result) for result in locked_retrospective_results
             ),
@@ -255,7 +255,7 @@ def development_report(
     manifest_path: Path,
     dataset: HistoricalFeatureDataset,
     scoring_policy: ScoringPolicy,
-    development_results: tuple[FoldResult, ...],
+    development_fold_summaries: tuple[Mapping[str, Any], ...],
 ) -> dict[str, Any]:
     """Build the deterministic development-only evidence payload."""
     return {
@@ -271,7 +271,7 @@ def development_report(
                 "source_versions": dataset.source_versions,
             },
             "scoring_policy_version": scoring_policy.version,
-            "development_folds": tuple(fold_summary(result) for result in development_results),
+            "development_folds": development_fold_summaries,
         },
     }
 
