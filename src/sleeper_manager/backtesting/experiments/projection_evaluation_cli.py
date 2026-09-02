@@ -221,7 +221,14 @@ def _print_summary(
     print(f"Mode: {output.mode}", file=stream)
     print(f"Dataset: {output.dataset_version}", file=stream)
     print(f"Frozen manifest: {output.manifest_path}", file=stream)
-    print(f"Development report: {output.development_report_path}", file=stream)
+    if output.development_report_path.exists():
+        label = (
+            "Development report"
+            if output.mode == ProgressMode.DEVELOPMENT.value
+            else "Development report (development run)"
+        )
+        print(f"{label}: {output.development_report_path}", file=stream)
+    print(f"Development checkpoint: {output.development_checkpoint_path}", file=stream)
     if output.report_json_path is not None:
         print(f"JSON report: {output.report_json_path}", file=stream)
         print(f"Markdown report: {output.report_markdown_path}", file=stream)

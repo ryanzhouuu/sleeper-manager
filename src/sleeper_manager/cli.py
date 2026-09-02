@@ -145,8 +145,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="development",
         help=(
             "development freezes the manifest and runs development folds only; "
-            "locked_retrospective refuses on a missing/mismatched manifest and writes the "
-            "complete report"
+            "locked_retrospective requires the matching completed development checkpoint, "
+            "never reruns development folds, and writes the complete report"
         ),
     )
     lock_in = subcommands.add_parser(

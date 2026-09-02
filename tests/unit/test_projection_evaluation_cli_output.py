@@ -131,9 +131,13 @@ def _successful_runner(workspace: Path):
         manifest.write_text(json.dumps({"source_revision": "revision", "config": 1}))
         development = reports / "projection-evaluation-development-report.json"
         development.write_text("{}")
+        checkpoint = workspace / "checkpoints" / "projection-evaluation" / "checkpoint.json"
+        checkpoint.parent.mkdir(parents=True)
+        checkpoint.write_text("{}")
         return ProjectionEvaluationOutput(
             manifest_path=manifest,
             development_report_path=development,
+            development_checkpoint_path=checkpoint,
             report_json_path=None,
             report_markdown_path=None,
             dataset_version="dataset-v1",
@@ -166,6 +170,8 @@ def test_command_writes_completed_profile_and_preserves_stdout_stderr_boundary(
     profile = json.loads(profile_path.read_text())
     assert result == 0
     assert "Mode: development" in stdout.getvalue()
+    checkpoint_path = tmp_path / "checkpoints" / "projection-evaluation" / "checkpoint.json"
+    assert f"Development checkpoint: {checkpoint_path}" in stdout.getvalue()
     assert f"Performance profile: {profile_path}" in stdout.getvalue()
     assert "resolve source revision: started" in stderr.getvalue()
     assert profile["status"] == "completed"
@@ -232,3 +238,24 @@ def test_command_writes_interrupted_profile_before_propagating(
     profile = json.loads(profile_path.read_text())
     assert profile["status"] == "interrupted"
     assert profile["failure_type"] == "KeyboardInterrupt"
+
+
+def test_locked_summary_omits_missing_development_report(tmp_path: Path) -> None:
+    """Locked output treats the development report as optional historical evidence."""
+    output = ProjectionEvaluationOutput(
+        manifest_path=tmp_path / "manifest.json",
+        development_report_path=tmp_path / "missing-development-report.json",
+        development_checkpoint_path=tmp_path / "checkpoint.json",
+        report_json_path=tmp_path / "report.json",
+        report_markdown_path=tmp_path / "report.md",
+        dataset_version="dataset-v1",
+        mode="locked_retrospective",
+        selected_model="direct_baseline",
+    )
+    stream = io.StringIO()
+
+    cli._print_summary(output, tmp_path / "profile.json", stream=stream)
+
+    rendered = stream.getvalue()
+    assert "Development report" not in rendered
+    assert f"Development checkpoint: {output.development_checkpoint_path}" in rendered
