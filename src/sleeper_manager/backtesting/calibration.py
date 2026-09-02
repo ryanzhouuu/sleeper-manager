@@ -1,4 +1,9 @@
-"""Chronological residual calibration for backtest projection models."""
+"""Chronological residual calibration and its process-continuation contract.
+
+The persisted contract contains only calibration state required to resume a later fold.
+Dataset row indexes and wrapped-projector caches remain process-local and are rebuilt after
+restore.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +14,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime
 
+from sleeper_manager.backtesting.calibration_continuation import (
+    CALIBRATED_CONTINUATION_VERSION,
+    CalibratedProjectionContinuation,
+    PendingCalibrationContinuation,
+)
 from sleeper_manager.backtesting.models import BacktestError, ProjectionModel
 from sleeper_manager.domain.projection import (
     ProjectionDistribution,
@@ -51,17 +61,22 @@ class CalibratedProjectionModel:
         self._residual_mean = 0.0
         self._last_game_start: datetime | None = None
         self._dataset_version: str | None = None
+        self._scoring_policy_version: str | None = None
         self._indexed_prior_count = 0
         self._rows_by_key: dict[tuple[str, str], HistoricalFeatureRow] = {}
 
     @property
     def model_version(self) -> str:
         """Return the wrapped model and calibration configuration identity."""
-        wrapped_version = getattr(self.projector, "model_version", type(self.projector).__name__)
         return (
-            f"calibrated-{wrapped_version}-v1-{self.min_samples}-"
+            f"calibrated-{self._wrapped_model_version}-v1-{self.min_samples}-"
             f"{self.max_samples}-{self.refresh_interval}"
         )
+
+    @property
+    def _wrapped_model_version(self) -> str:
+        """Return the exact identity of the uncalibrated projector."""
+        return str(getattr(self.projector, "model_version", type(self.projector).__name__))
 
     def project(
         self,
@@ -74,10 +89,7 @@ class CalibratedProjectionModel:
     ) -> ProjectionSnapshot:
         """Project chronologically while resolving only residuals known before this target."""
         target = _find_target(dataset.rows, player_id=player_id, game_id=game_id)
-        if self._dataset_version is None:
-            self._dataset_version = dataset.dataset_version
-        elif self._dataset_version != dataset.dataset_version:
-            raise BacktestError("Calibrated projections cannot mix dataset versions")
+        self._validate_execution_identity(dataset.dataset_version, scoring_policy.version)
         if self._last_game_start is not None and target.game_start < self._last_game_start:
             raise BacktestError("Calibrated projections must be evaluated chronologically")
         self._resolve_pending(dataset, target=target, scoring_policy=scoring_policy)
@@ -117,6 +129,111 @@ class CalibratedProjectionModel:
             distribution=distribution,
             reasons=base.reasons + (calibration_reason,),
         )
+
+    def export_continuation(self) -> CalibratedProjectionContinuation:
+        """Export exact durable calibration state after at least one chronological target."""
+        if (
+            self._dataset_version is None
+            or self._scoring_policy_version is None
+            or self._last_game_start is None
+        ):
+            raise BacktestError("Cannot export uninitialized calibrated continuation")
+        pending = tuple(
+            PendingCalibrationContinuation(
+                player_id,
+                game_id,
+                item.game_start,
+                item.expected_value,
+            )
+            for (player_id, game_id), item in self._pending.items()
+        )
+        return CalibratedProjectionContinuation(
+            continuation_version=CALIBRATED_CONTINUATION_VERSION,
+            model_version=self.model_version,
+            wrapped_model_version=self._wrapped_model_version,
+            min_samples=self.min_samples,
+            max_samples=self.max_samples,
+            refresh_interval=self.refresh_interval,
+            dataset_version=self._dataset_version,
+            scoring_policy_version=self._scoring_policy_version,
+            residuals=tuple(self._residuals),
+            total_residual_count=self._total_residuals,
+            last_refresh_count=self._last_refresh_count,
+            sorted_residuals=self._sorted_residuals,
+            residual_mean=self._residual_mean,
+            pending=pending,
+            last_evaluated_game_start=self._last_game_start,
+        )
+
+    def restore_continuation(
+        self,
+        continuation: CalibratedProjectionContinuation,
+        *,
+        dataset_version: str,
+        scoring_policy_version: str,
+    ) -> None:
+        """Restore into a fresh matching model, leaving transient row indexes empty."""
+        if not self._is_fresh:
+            raise BacktestError("Calibrated continuation can only restore into a fresh model")
+        if continuation.model_version != self.model_version:
+            raise BacktestError("Calibrated continuation model version does not match")
+        if continuation.wrapped_model_version != self._wrapped_model_version:
+            raise BacktestError("Calibrated continuation wrapped model does not match")
+        if (
+            continuation.min_samples,
+            continuation.max_samples,
+            continuation.refresh_interval,
+        ) != (self.min_samples, self.max_samples, self.refresh_interval):
+            raise BacktestError("Calibrated continuation configuration does not match")
+        if continuation.dataset_version != dataset_version:
+            raise BacktestError("Calibrated continuation dataset version does not match")
+        if continuation.scoring_policy_version != scoring_policy_version:
+            raise BacktestError("Calibrated continuation scoring policy does not match")
+        self._residuals = deque(continuation.residuals, maxlen=self.max_samples)
+        self._pending = {
+            (item.player_id, item.game_id): _PendingCalibration(
+                item.game_start, item.expected_value
+            )
+            for item in continuation.pending
+        }
+        self._total_residuals = continuation.total_residual_count
+        self._last_refresh_count = continuation.last_refresh_count
+        self._sorted_residuals = continuation.sorted_residuals
+        self._residual_mean = continuation.residual_mean
+        self._last_game_start = continuation.last_evaluated_game_start
+        self._dataset_version = continuation.dataset_version
+        self._scoring_policy_version = continuation.scoring_policy_version
+
+    @property
+    def _is_fresh(self) -> bool:
+        """Return whether no calibration or transient dataset state has been accumulated."""
+        return not any(
+            (
+                self._residuals,
+                self._pending,
+                self._total_residuals,
+                self._last_refresh_count,
+                self._sorted_residuals,
+                self._last_game_start,
+                self._dataset_version,
+                self._scoring_policy_version,
+                self._indexed_prior_count,
+                self._rows_by_key,
+            )
+        )
+
+    def _validate_execution_identity(
+        self, dataset_version: str, scoring_policy_version: str
+    ) -> None:
+        """Bind the first execution identities and reject later cross-run mixing."""
+        if self._dataset_version is None:
+            self._dataset_version = dataset_version
+        elif self._dataset_version != dataset_version:
+            raise BacktestError("Calibrated projections cannot mix dataset versions")
+        if self._scoring_policy_version is None:
+            self._scoring_policy_version = scoring_policy_version
+        elif self._scoring_policy_version != scoring_policy_version:
+            raise BacktestError("Calibrated projections cannot mix scoring policy versions")
 
     def _resolve_pending(
         self,
@@ -229,4 +346,9 @@ def _quantile(values: tuple[float, ...], fraction: float) -> float:
     return values[lower] * (1 - weight) + values[upper] * weight
 
 
-__all__ = ("CalibratedProjectionModel",)
+__all__ = (
+    "CALIBRATED_CONTINUATION_VERSION",
+    "CalibratedProjectionContinuation",
+    "CalibratedProjectionModel",
+    "PendingCalibrationContinuation",
+)
