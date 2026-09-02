@@ -54,7 +54,7 @@ def evaluate_selection(
     observations. ``backtest_config`` must be the exact configuration used to build the fold
     results; incompatible thresholds fail closed in the comparison layer.
     """
-    from sleeper_manager.backtesting.experiments.projection_evaluation import (
+    from sleeper_manager.backtesting.experiments.projection_evaluation_config import (
         DIRECT_BASELINE_MODEL,
         INTERVAL_TOLERANCE,
         MAX_SELECTION_MAE_DELTA,
@@ -208,9 +208,9 @@ def report(
             },
             "scoring_policy_version": scoring_policy.version,
             "model_names": model_names,
-            "development_folds": tuple(_fold_summary(result) for result in development_results),
+            "development_folds": tuple(fold_summary(result) for result in development_results),
             "locked_retrospective_folds": tuple(
-                _fold_summary(result) for result in locked_retrospective_results
+                fold_summary(result) for result in locked_retrospective_results
             ),
             "limitations": (
                 "The selection is provisional pending future team-week replay "
@@ -223,7 +223,7 @@ def report(
     }
 
 
-def _fold_summary(result: FoldResult) -> dict[str, Any]:
+def fold_summary(result: FoldResult) -> dict[str, Any]:
     """Serialize one fold without adding execution-time or private source data."""
     fold = result.fold
     target_skip_reasons = Counter(skip.reason for skip in result.report.target_skips)
@@ -271,7 +271,7 @@ def development_report(
                 "source_versions": dataset.source_versions,
             },
             "scoring_policy_version": scoring_policy.version,
-            "development_folds": tuple(_fold_summary(result) for result in development_results),
+            "development_folds": tuple(fold_summary(result) for result in development_results),
         },
     }
 
