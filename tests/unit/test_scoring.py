@@ -5,6 +5,7 @@ from sleeper_manager.domain.scoring import (
     ScoringCompatibilityError,
     ScoringPolicy,
     _cached_fantasy_points,
+    _cached_policy_fingerprint,
     calculate_fantasy_points,
     calculate_score_breakdown,
 )
@@ -140,3 +141,15 @@ def test_fantasy_points_reuse_cached_totals() -> None:
         line, LEAGUE_SCORING
     )
     assert _cached_fantasy_points.cache_info().hits == 1
+
+
+def test_policy_fingerprint_reuses_cached_digest() -> None:
+    _cached_policy_fingerprint.cache_clear()
+    policy = ScoringPolicy(points=1, rebounds=1.2)
+
+    first = policy.fingerprint
+    assert ScoringPolicy(points=1, rebounds=1.2).fingerprint == first
+    assert policy.version == f"scoring-policy-v1-{first[:12]}"
+    assert ScoringPolicy(points=2).fingerprint != first
+    info = _cached_policy_fingerprint.cache_info()
+    assert (info.hits, info.misses) == (2, 2)

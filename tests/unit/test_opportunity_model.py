@@ -24,6 +24,7 @@ from sleeper_manager.projections.opportunity_model import InterpretableOpportuni
 from sleeper_manager.projections.opportunity_types import (
     OpportunityModelConfig,
     OpportunityModelError,
+    _cached_opportunity_version,
 )
 
 NOW = datetime(2026, 1, 10, 18, tzinfo=UTC)
@@ -771,3 +772,13 @@ def test_ablation_semantics_change_model_and_input_version() -> None:
     input_versions = {full.input_version, no_pace.input_version, no_defense.input_version}
     assert len(model_versions) == 3
     assert len(input_versions) == 3
+
+
+def test_opportunity_config_version_reuses_cached_digest() -> None:
+    _cached_opportunity_version.cache_clear()
+    config = OpportunityModelConfig()
+
+    assert OpportunityModelConfig().model_version == config.model_version
+    assert OpportunityModelConfig(disable_pace=True).model_version != config.model_version
+    info = _cached_opportunity_version.cache_info()
+    assert (info.hits, info.misses) == (2, 2)

@@ -7,6 +7,7 @@ import json
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from math import exp, isfinite, log
 
 from sleeper_manager.domain.nba_season import nba_season_start_year
@@ -74,16 +75,22 @@ class ProjectionBaselineConfig:
 
     @property
     def model_version(self) -> str:
-        payload = {
-            "recency_half_life_days": self.recency_half_life_days,
-            "season_shrinkage_games": self.season_shrinkage_games,
-            "role_blend": self.role_blend,
-            "percentiles": self.percentiles,
-            "disabled_adjustments": self.disabled_adjustments,
-        }
-        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-        fingerprint = hashlib.sha256(encoded).hexdigest()[:12]
-        return f"projection-baseline-v1-{fingerprint}"
+        return _cached_baseline_version(self)
+
+
+@lru_cache(maxsize=128)
+def _cached_baseline_version(config: ProjectionBaselineConfig) -> str:
+    """Memoize the pure config digest; eviction only recomputes identical values."""
+    payload = {
+        "recency_half_life_days": config.recency_half_life_days,
+        "season_shrinkage_games": config.season_shrinkage_games,
+        "role_blend": config.role_blend,
+        "percentiles": config.percentiles,
+        "disabled_adjustments": config.disabled_adjustments,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    fingerprint = hashlib.sha256(encoded).hexdigest()[:12]
+    return f"projection-baseline-v1-{fingerprint}"
 
 
 class DirectFantasyPointBaseline:

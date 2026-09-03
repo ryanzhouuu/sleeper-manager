@@ -17,6 +17,7 @@ from sleeper_manager.projections.direct_baseline import (
     PregameProjectionRequest,
     ProjectionBaselineConfig,
     ProjectionBaselineError,
+    _cached_baseline_version,
 )
 
 SOURCE = SourceMetadata("fixture", "fixture", datetime(2026, 8, 10, tzinfo=UTC))
@@ -291,3 +292,15 @@ def test_baseline_config_rejects_invalid_or_unknown_adjustments() -> None:
         ProjectionBaselineConfig(recency_half_life_days=0)
     with pytest.raises(ProjectionBaselineError):
         ProjectionBaselineConfig(disabled_adjustments=("weather",))
+
+
+def test_baseline_config_version_reuses_cached_digest() -> None:
+    _cached_baseline_version.cache_clear()
+    config = ProjectionBaselineConfig()
+
+    assert ProjectionBaselineConfig().model_version == config.model_version
+    assert ProjectionBaselineConfig(recency_half_life_days=1).model_version != (
+        config.model_version
+    )
+    info = _cached_baseline_version.cache_info()
+    assert (info.hits, info.misses) == (2, 2)

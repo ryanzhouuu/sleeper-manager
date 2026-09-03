@@ -88,9 +88,7 @@ class ScoringPolicy:
 
     @property
     def fingerprint(self) -> str:
-        values = {key: getattr(self, attribute) for key, attribute in _SLEEPER_FIELDS}
-        encoded = json.dumps(values, sort_keys=True, separators=(",", ":")).encode()
-        return hashlib.sha256(encoded).hexdigest()
+        return _cached_policy_fingerprint(self)
 
     @property
     def version(self) -> str:
@@ -261,6 +259,14 @@ def calculate_fantasy_points(line: BoxScoreLine, policy: ScoringPolicy) -> float
 def _cached_fantasy_points(line: BoxScoreLine, policy: ScoringPolicy) -> float:
     """Memoize the pure box-score total; eviction only recomputes identical values."""
     return calculate_score_breakdown(line, policy).total
+
+
+@lru_cache(maxsize=128)
+def _cached_policy_fingerprint(policy: ScoringPolicy) -> str:
+    """Memoize the pure policy digest; eviction only recomputes identical values."""
+    values = {key: getattr(policy, attribute) for key, attribute in _SLEEPER_FIELDS}
+    encoded = json.dumps(values, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def compare_score_parity(

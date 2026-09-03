@@ -4,6 +4,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
 from math import isfinite
 
 from sleeper_manager.domain.projection import (
@@ -41,17 +42,23 @@ class OpportunityModelConfig:
 
     @property
     def model_version(self) -> str:
-        payload = {
-            "recency_half_life_days": self.recency_half_life_days,
-            "participation_prior_strength": self.participation_prior_strength,
-            "production_shrinkage_minutes": self.production_shrinkage_minutes,
-            "pace_clip": self.pace_clip,
-            "percentiles": self.percentiles,
-            "disable_pace": self.disable_pace,
-            "disable_defense": self.disable_defense,
-        }
-        digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
-        return f"opportunity-v3-{digest}"
+        return _cached_opportunity_version(self)
+
+
+@lru_cache(maxsize=128)
+def _cached_opportunity_version(config: OpportunityModelConfig) -> str:
+    """Memoize the pure config digest; eviction only recomputes identical values."""
+    payload = {
+        "recency_half_life_days": config.recency_half_life_days,
+        "participation_prior_strength": config.participation_prior_strength,
+        "production_shrinkage_minutes": config.production_shrinkage_minutes,
+        "pace_clip": config.pace_clip,
+        "percentiles": config.percentiles,
+        "disable_pace": config.disable_pace,
+        "disable_defense": config.disable_defense,
+    }
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:12]
+    return f"opportunity-v3-{digest}"
 
 
 @dataclass(frozen=True, slots=True)
