@@ -26,6 +26,7 @@ class ProgressStage(StrEnum):
     LOAD_RAW_INPUTS = "load_raw_inputs"
     LOAD_INJURY_ARCHIVE = "load_injury_archive"
     BUILD_HISTORICAL_FEATURES = "build_historical_features"
+    LOAD_CACHED_DATASET = "load_cached_dataset"
     VALIDATE_DEVELOPMENT_CHECKPOINT = "validate_development_checkpoint"
     RUN_DEVELOPMENT_FOLD = "run_development_fold"
     RESTORE_CALIBRATED_CONTINUATION = "restore_calibrated_continuation"

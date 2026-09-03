@@ -12,6 +12,12 @@ import pytest
 
 from sleeper_manager.backtesting.development_checkpoint import DevelopmentCheckpointError
 from sleeper_manager.backtesting.experiments import projection_evaluation as evaluation
+from sleeper_manager.backtesting.experiments.feature_dataset_cache import (
+    compute_cache_key,
+    dataset_cache_path,
+    read_dataset_cache,
+    write_dataset_cache,
+)
 from sleeper_manager.backtesting.experiments.projection_evaluation import (
     ProjectionSelectionDecision,
 )
@@ -302,3 +308,115 @@ def test_missing_checkpoint_fails_before_any_locked_fold(
         )
 
     assert fold_calls == 0
+
+
+def _seed_dataset_cache(tmp_path: Path) -> None:
+    """Persist the fake execution dataset under the key the runner will compute."""
+    (tmp_path / "raw").mkdir(exist_ok=True)
+    (tmp_path / "injuries").mkdir(exist_ok=True)
+    key = compute_cache_key(
+        tmp_path / "raw",
+        tmp_path / "injuries",
+        scoring_policy=ScoringPolicy(points=1),
+        source_revision="revision",
+    )
+    dataset = HistoricalFeatureDataset(
+        "dataset-v1", "schema-v1", datetime(2026, 8, 31, 12, tzinfo=UTC), (), ()
+    )
+    write_dataset_cache(dataset_cache_path(tmp_path), key, dataset)
+
+
+def _forbid_setup_rebuild(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace setup loaders with raisers so any rebuild attempt fails loudly."""
+
+    def forbidden(*_: object, **__: object) -> object:
+        raise AssertionError("cached setup must not reload inputs")
+
+    monkeypatch.setattr(evaluation, "load_historical_experiment_inputs", forbidden)
+    monkeypatch.setattr(evaluation, "acquire_injury_archive", forbidden)
+    monkeypatch.setattr(evaluation, "_build_dataset", forbidden)
+
+
+def test_cached_setup_skips_rebuild_and_reports_cache_stage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reuse a matching dataset cache instead of replaying the slow setup stages."""
+    _install_execution_fakes(monkeypatch)
+    _seed_dataset_cache(tmp_path)
+    _forbid_setup_rebuild(monkeypatch)
+    events: list[ProgressEvent] = []
+
+    output = evaluation.run_projection_evaluation(
+        tmp_path,
+        league_fixture=tmp_path / "league.json",
+        mode="development",
+        now=datetime(2026, 8, 31, 12, tzinfo=UTC),
+        progress=events.append,
+    )
+
+    assert output.dataset_version == "dataset-v1"
+    assert _started_stages(events) == [
+        ProgressStage.RESOLVE_SOURCE_REVISION,
+        ProgressStage.LOAD_CACHED_DATASET,
+        ProgressStage.RUN_DEVELOPMENT_FOLD,
+        ProgressStage.BUILD_REPORTS,
+        ProgressStage.WRITE_ARTIFACTS,
+    ]
+
+
+def test_uncached_setup_rebuilds_and_publishes_dataset_cache(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Publish the cache after a miss so the next identical run restores it."""
+    _install_execution_fakes(monkeypatch)
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "injuries").mkdir()
+    events: list[ProgressEvent] = []
+
+    output = evaluation.run_projection_evaluation(
+        tmp_path,
+        league_fixture=tmp_path / "league.json",
+        mode="development",
+        now=datetime(2026, 8, 31, 12, tzinfo=UTC),
+        progress=events.append,
+    )
+
+    assert output.dataset_version == "dataset-v1"
+    assert _started_stages(events) == [
+        ProgressStage.RESOLVE_SOURCE_REVISION,
+        ProgressStage.LOAD_RAW_INPUTS,
+        ProgressStage.LOAD_INJURY_ARCHIVE,
+        ProgressStage.BUILD_HISTORICAL_FEATURES,
+        ProgressStage.RUN_DEVELOPMENT_FOLD,
+        ProgressStage.BUILD_REPORTS,
+        ProgressStage.WRITE_ARTIFACTS,
+    ]
+    key = compute_cache_key(
+        tmp_path / "raw",
+        tmp_path / "injuries",
+        scoring_policy=ScoringPolicy(points=1),
+        source_revision="revision",
+    )
+    assert read_dataset_cache(dataset_cache_path(tmp_path), key).dataset_version == "dataset-v1"
+
+
+def test_unwritable_dataset_cache_leaves_evaluation_on_uncached_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Never fail an evaluation because the best-effort cache cannot persist."""
+    _install_execution_fakes(monkeypatch)
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "injuries").mkdir()
+    dataset_cache_path(tmp_path).mkdir()
+
+    output = evaluation.run_projection_evaluation(
+        tmp_path,
+        league_fixture=tmp_path / "league.json",
+        mode="development",
+        now=datetime(2026, 8, 31, 12, tzinfo=UTC),
+    )
+
+    assert output.dataset_version == "dataset-v1"

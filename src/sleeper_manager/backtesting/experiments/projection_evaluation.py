@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,6 +20,13 @@ from sleeper_manager.backtesting.development_checkpoint import (
 from sleeper_manager.backtesting.experiments.data import (
     load_historical_experiment_inputs,
     scoring_policy_from_league_fixture,
+)
+from sleeper_manager.backtesting.experiments.feature_dataset_cache import (
+    FeatureDatasetCacheError,
+    compute_cache_key,
+    dataset_cache_path,
+    read_dataset_cache,
+    write_dataset_cache,
 )
 from sleeper_manager.backtesting.experiments.feature_validation import (
     _build_dataset,
@@ -76,6 +83,8 @@ from sleeper_manager.backtesting.validation.folds import (
 from sleeper_manager.backtesting.validation.models import (
     ComponentGateConfig,
 )
+from sleeper_manager.domain.scoring import ScoringPolicy
+from sleeper_manager.integrations.nba.historical_feature_models import HistoricalFeatureDataset
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,6 +115,8 @@ def run_projection_evaluation(
     publishes calibrated continuation. ``mode="locked_retrospective"`` requires that exact
     checkpoint, restores it into fresh models, and runs only the 2025-26 locked folds.
     ``progress`` receives operational events that never enter modeled output.
+    Setup restores the versioned local dataset cache when its inputs are unchanged and
+    rebuilds it otherwise.
     """
     if mode not in ("development", "locked_retrospective"):
         raise ProjectionEvaluationError(f"Unknown projection evaluation mode: {mode!r}")
@@ -120,33 +131,14 @@ def run_projection_evaluation(
     reports_dir = workspace / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
     scoring_policy = scoring_policy_from_league_fixture(league_fixture)
-    with reporter.stage(ProgressStage.LOAD_RAW_INPUTS, unit="resources") as counter:
-        inputs = load_historical_experiment_inputs(
-            raw_dir,
-            retrieved_at=generated_at,
-            progress=counter,
-        )
-    with reporter.stage(ProgressStage.LOAD_INJURY_ARCHIVE, unit="cutoffs") as counter:
-        injuries = acquire_injury_archive(
-            inputs.games,
-            inputs.provider_players,
-            workspace / "injuries",
-            retrieved_at=generated_at,
-            historical_player_ids_by_date_team=_historical_player_ids_by_date_team(inputs),
-            progress=counter,
-        )
-    with reporter.stage(
-        ProgressStage.BUILD_HISTORICAL_FEATURES,
-        total=len(inputs.player_box_scores),
-        unit="rows",
-    ) as counter:
-        dataset = _build_dataset(
-            inputs,
-            injuries,
-            scoring_policy,
-            generated_at,
-            progress=counter,
-        )
+    dataset = _setup_dataset(
+        workspace,
+        raw_dir=raw_dir,
+        scoring_policy=scoring_policy,
+        source_revision=source_revision,
+        generated_at=generated_at,
+        reporter=reporter,
+    )
     backtest_config = BacktestConfig(
         thresholds=(20.0, 30.0, 40.0, 50.0, 60.0),
         intervals=((10, 90), (25, 75)),
@@ -287,6 +279,87 @@ def run_projection_evaluation(
         mode=mode,
         selected_model=selection.selected_model,
     )
+
+
+def _setup_dataset(
+    workspace: Path,
+    *,
+    raw_dir: Path,
+    scoring_policy: ScoringPolicy,
+    source_revision: str,
+    generated_at: datetime,
+    reporter: ProgressReporter,
+) -> HistoricalFeatureDataset:
+    """Restore the cached dataset on a key hit, else rebuild it and refresh the cache."""
+    cache_path = dataset_cache_path(workspace)
+    try:
+        key = compute_cache_key(
+            raw_dir,
+            workspace / "injuries",
+            scoring_policy=scoring_policy,
+            source_revision=source_revision,
+        )
+    except FeatureDatasetCacheError:
+        key = None
+    cached: HistoricalFeatureDataset | None = None
+    if key is not None:
+        try:
+            cached = read_dataset_cache(cache_path, key)
+        except FeatureDatasetCacheError:
+            cached = None
+    if cached is not None:
+        with reporter.stage(ProgressStage.LOAD_CACHED_DATASET, unit="rows") as counter:
+            counter.advance(len(cached.rows), len(cached.rows), detail="cache hit")
+            return replace(cached, generated_at=generated_at)
+    with reporter.stage(ProgressStage.LOAD_RAW_INPUTS, unit="resources") as counter:
+        inputs = load_historical_experiment_inputs(
+            raw_dir,
+            retrieved_at=generated_at,
+            progress=counter,
+        )
+    with reporter.stage(ProgressStage.LOAD_INJURY_ARCHIVE, unit="cutoffs") as counter:
+        injuries = acquire_injury_archive(
+            inputs.games,
+            inputs.provider_players,
+            workspace / "injuries",
+            retrieved_at=generated_at,
+            historical_player_ids_by_date_team=_historical_player_ids_by_date_team(inputs),
+            progress=counter,
+        )
+    with reporter.stage(
+        ProgressStage.BUILD_HISTORICAL_FEATURES,
+        total=len(inputs.player_box_scores),
+        unit="rows",
+    ) as counter:
+        dataset = _build_dataset(
+            inputs,
+            injuries,
+            scoring_policy,
+            generated_at,
+            progress=counter,
+        )
+    _refresh_dataset_cache(cache_path, workspace, scoring_policy, source_revision, dataset)
+    return dataset
+
+
+def _refresh_dataset_cache(
+    cache_path: Path,
+    workspace: Path,
+    scoring_policy: ScoringPolicy,
+    source_revision: str,
+    dataset: HistoricalFeatureDataset,
+) -> None:
+    """Republish the dataset cache; failures leave evaluation on the uncached path."""
+    try:
+        key = compute_cache_key(
+            workspace / "raw",
+            workspace / "injuries",
+            scoring_policy=scoring_policy,
+            source_revision=source_revision,
+        )
+        write_dataset_cache(cache_path, key, dataset)
+    except FeatureDatasetCacheError:
+        pass
 
 
 def _git_source_revision() -> str:
