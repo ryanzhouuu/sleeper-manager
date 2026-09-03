@@ -122,7 +122,7 @@ class InterpretableOpportunityModel:
             input_version=_input_version(
                 dataset,
                 target,
-                player_prior_rows,
+                index.player_prior_fingerprint(player_id, target.game_start),
                 league_prior.fingerprint,
                 scoring_policy,
                 self.config,

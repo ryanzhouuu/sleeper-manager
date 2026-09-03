@@ -77,6 +77,7 @@ class _HistoricalIndex:
         self._by_target: dict[tuple[str, str], HistoricalFeatureRow] = {}
         self._duplicate_targets: set[tuple[str, str]] = set()
         self._player_rows: dict[str, list[HistoricalFeatureRow]] = {}
+        self._player_fingerprints: dict[str, list[str]] = {}
         self._league_starts: list[datetime] = []
         self._league_score_prefix: list[float] = []
         self._league_minutes_prefix: list[float] = []
@@ -114,6 +115,17 @@ class _HistoricalIndex:
             return ()
         count = bisect_left(rows, cutoff, key=lambda candidate: candidate.game_start)
         return tuple(rows[:count])
+
+    def player_prior_fingerprint(self, player_id: str, cutoff: datetime) -> str:
+        """Return the rolling identity of one player's strict prior prefix."""
+        rows = self._player_rows.get(player_id)
+        digests = self._player_fingerprints.get(player_id)
+        if not rows or not digests:
+            return "empty"
+        count = bisect_left(rows, cutoff, key=lambda candidate: candidate.game_start)
+        if not count:
+            return "empty"
+        return digests[count - 1]
 
     def league_production_prior(self, player_id: str, cutoff: datetime) -> _LeagueProductionPrior:
         count = bisect_left(self._league_starts, cutoff)
@@ -158,6 +170,10 @@ class _HistoricalIndex:
         else:
             self._by_target[key] = row
         self._player_rows.setdefault(row.player_id, []).append(row)
+        chain = self._player_fingerprints.setdefault(row.player_id, [])
+        prior_fingerprint = chain[-1] if chain else ""
+        encoded = json.dumps(_input_row(row), separators=(",", ":")).encode()
+        chain.append(hashlib.sha256(prior_fingerprint.encode() + encoded).hexdigest())
         if row.target_did_play and row.target_minutes is not None and row.target_minutes > 0:
             self._commit_league_production(row)
 
@@ -188,6 +204,7 @@ class _HistoricalIndex:
         self._by_target = {}
         self._duplicate_targets = set()
         self._player_rows = {}
+        self._player_fingerprints = {}
         self._league_starts = []
         self._league_score_prefix = []
         self._league_minutes_prefix = []
@@ -199,7 +216,7 @@ class _HistoricalIndex:
 def _input_version(
     dataset: HistoricalFeatureDataset,
     target: HistoricalFeatureRow,
-    prior_rows: Sequence[HistoricalFeatureRow],
+    player_prior_fingerprint: str,
     league_prior_fingerprint: str,
     scoring_policy: ScoringPolicy,
     config: OpportunityModelConfig,
@@ -218,11 +235,13 @@ def _input_version(
             target.is_back_to_back,
             target.time_zone_change_hours,
         ),
-        "player_prior": tuple(_input_row(row) for row in prior_rows),
+        "player_prior": player_prior_fingerprint,
         "league_prior": league_prior_fingerprint,
         "scoring": scoring_policy.version,
     }
-    return "inputs-" + hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
+    return (
+        "inputs-v2-" + hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()[:16]
+    )
 
 
 def _input_row(row: HistoricalFeatureRow) -> tuple[object, ...]:
