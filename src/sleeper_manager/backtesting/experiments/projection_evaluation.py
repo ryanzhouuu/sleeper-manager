@@ -292,23 +292,25 @@ def _setup_dataset(
 ) -> HistoricalFeatureDataset:
     """Restore the cached dataset on a key hit, else rebuild it and refresh the cache."""
     cache_path = dataset_cache_path(workspace)
-    try:
-        key = compute_cache_key(
-            raw_dir,
-            workspace / "injuries",
-            scoring_policy=scoring_policy,
-            source_revision=source_revision,
-        )
-    except FeatureDatasetCacheError:
-        key = None
-    cached: HistoricalFeatureDataset | None = None
-    if key is not None:
+    with reporter.stage(ProgressStage.LOAD_CACHED_DATASET, unit="rows") as counter:
         try:
-            cached = read_dataset_cache(cache_path, key)
+            key = compute_cache_key(
+                raw_dir,
+                workspace / "injuries",
+                scoring_policy=scoring_policy,
+                source_revision=source_revision,
+            )
         except FeatureDatasetCacheError:
-            cached = None
-    if cached is not None:
-        with reporter.stage(ProgressStage.LOAD_CACHED_DATASET, unit="rows") as counter:
+            key = None
+        cached: HistoricalFeatureDataset | None = None
+        if key is not None:
+            try:
+                cached = read_dataset_cache(cache_path, key)
+            except FeatureDatasetCacheError:
+                cached = None
+        if cached is None:
+            counter.advance(0, 0, detail="cache miss")
+        else:
             counter.advance(len(cached.rows), len(cached.rows), detail="cache hit")
             return replace(cached, generated_at=generated_at)
     with reporter.stage(ProgressStage.LOAD_RAW_INPUTS, unit="resources") as counter:

@@ -188,6 +188,7 @@ def test_development_mode_emits_ordered_stages_and_artifact_counts(
 
     assert _started_stages(events) == [
         ProgressStage.RESOLVE_SOURCE_REVISION,
+        ProgressStage.LOAD_CACHED_DATASET,
         ProgressStage.LOAD_RAW_INPUTS,
         ProgressStage.LOAD_INJURY_ARCHIVE,
         ProgressStage.BUILD_HISTORICAL_FEATURES,
@@ -363,6 +364,12 @@ def test_cached_setup_skips_rebuild_and_reports_cache_stage(
         ProgressStage.BUILD_REPORTS,
         ProgressStage.WRITE_ARTIFACTS,
     ]
+    cached = [
+        item
+        for item in events
+        if item.stage is ProgressStage.LOAD_CACHED_DATASET and item.state is ProgressState.ADVANCED
+    ]
+    assert [(item.completed, item.total, item.detail) for item in cached] == [(0, 0, "cache hit")]
 
 
 def test_uncached_setup_rebuilds_and_publishes_dataset_cache(
@@ -386,6 +393,7 @@ def test_uncached_setup_rebuilds_and_publishes_dataset_cache(
     assert output.dataset_version == "dataset-v1"
     assert _started_stages(events) == [
         ProgressStage.RESOLVE_SOURCE_REVISION,
+        ProgressStage.LOAD_CACHED_DATASET,
         ProgressStage.LOAD_RAW_INPUTS,
         ProgressStage.LOAD_INJURY_ARCHIVE,
         ProgressStage.BUILD_HISTORICAL_FEATURES,
@@ -393,6 +401,12 @@ def test_uncached_setup_rebuilds_and_publishes_dataset_cache(
         ProgressStage.BUILD_REPORTS,
         ProgressStage.WRITE_ARTIFACTS,
     ]
+    cached = [
+        item
+        for item in events
+        if item.stage is ProgressStage.LOAD_CACHED_DATASET and item.state is ProgressState.ADVANCED
+    ]
+    assert [(item.completed, item.total, item.detail) for item in cached] == [(0, 0, "cache miss")]
     key = compute_cache_key(
         tmp_path / "raw",
         tmp_path / "injuries",
