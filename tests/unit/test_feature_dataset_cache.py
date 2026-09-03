@@ -4,17 +4,23 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
 
 from sleeper_manager.backtesting.experiments.feature_dataset_cache import (
+    DatasetCacheKey,
     FeatureDatasetCacheError,
+    compute_cache_key,
+    dataset_cache_path,
     decode_dataset,
     encode_dataset,
+    read_dataset_cache,
+    write_dataset_cache,
 )
 from sleeper_manager.domain.nba import AvailabilityStatus, SourceMetadata
-from sleeper_manager.domain.scoring import BoxScoreLine
+from sleeper_manager.domain.scoring import BoxScoreLine, ScoringPolicy
 from sleeper_manager.integrations.nba.historical_feature_models import (
     AvailabilityObservation,
     DatasetSourceVersion,
@@ -218,3 +224,116 @@ def test_decode_rejects_non_mapping_payload() -> None:
     """Refuse top-level corruption before any field is trusted."""
     with pytest.raises(FeatureDatasetCacheError, match="must be a mapping"):
         decode_dataset([])
+
+
+def _write_sources(root: Path) -> tuple[Path, Path]:
+    """Create minimal raw and injury trees for cache-key fixtures."""
+    raw_dir = root / "raw"
+    injuries_dir = root / "injuries"
+    raw_dir.mkdir(parents=True)
+    injuries_dir.mkdir(parents=True)
+    (raw_dir / "schedule.rds").write_bytes(b"schedule-bytes")
+    (raw_dir / "boxes.rds").write_bytes(b"box-bytes")
+    (injuries_dir / "report.pdf").write_bytes(b"pdf-bytes")
+    return raw_dir, injuries_dir
+
+
+def _cache_key(root: Path, policy: ScoringPolicy | None = None) -> DatasetCacheKey:
+    """Compute the fixture cache key for one workspace tree."""
+    raw_dir, injuries_dir = _write_sources(root)
+    return compute_cache_key(
+        raw_dir,
+        injuries_dir,
+        scoring_policy=policy or ScoringPolicy(points=1),
+        source_revision="rev-1",
+    )
+
+
+def test_cache_key_tracks_source_bytes_policy_and_revision(tmp_path: Path) -> None:
+    """Invalidate the lookup on any input, policy, or code change."""
+    baseline = _cache_key(tmp_path)
+    assert baseline.raw_files == ("boxes.rds", "schedule.rds")
+    assert baseline.injury_files == ("report.pdf",)
+
+    raw_dir = tmp_path / "raw"
+    (raw_dir / "schedule.rds").write_bytes(b"changed-bytes")
+    changed = compute_cache_key(
+        raw_dir,
+        tmp_path / "injuries",
+        scoring_policy=ScoringPolicy(points=1),
+        source_revision="rev-1",
+    )
+    assert changed.raw_digest != baseline.raw_digest
+    other_policy = compute_cache_key(
+        raw_dir,
+        tmp_path / "injuries",
+        scoring_policy=ScoringPolicy(points=2),
+        source_revision="rev-1",
+    )
+    assert other_policy.scoring_policy_version != baseline.scoring_policy_version
+    other_revision = compute_cache_key(
+        raw_dir,
+        tmp_path / "injuries",
+        scoring_policy=ScoringPolicy(points=1),
+        source_revision="rev-2",
+    )
+    assert other_revision.source_revision != baseline.source_revision
+
+
+def test_cache_key_requires_present_source_directories(tmp_path: Path) -> None:
+    """Fail the lookup instead of trusting an incomplete source tree."""
+    raw_dir, injuries_dir = _write_sources(tmp_path)
+    policy = ScoringPolicy(points=1)
+    with pytest.raises(FeatureDatasetCacheError, match="missing"):
+        compute_cache_key(
+            tmp_path / "absent", injuries_dir, scoring_policy=policy, source_revision="rev-1"
+        )
+    with pytest.raises(FeatureDatasetCacheError, match="empty"):
+        compute_cache_key(raw_dir, injuries_dir, scoring_policy=policy, source_revision="  ")
+
+
+def test_cache_round_trip_restores_matching_key(tmp_path: Path) -> None:
+    """Restore one dataset when every content identity still matches."""
+    key = _cache_key(tmp_path)
+    original = dataset((row("g1"), row("g2")))
+    path = dataset_cache_path(tmp_path)
+
+    write_dataset_cache(path, key, original)
+
+    assert read_dataset_cache(path, key) == original
+
+
+def test_cache_rejects_stale_corrupt_and_incompatible_payloads(tmp_path: Path) -> None:
+    """Never use a cache whose inputs, bytes, or format changed."""
+    key = _cache_key(tmp_path)
+    path = dataset_cache_path(tmp_path)
+    write_dataset_cache(path, key, dataset((row("g1"),)))
+
+    raw_dir = tmp_path / "raw"
+    (raw_dir / "schedule.rds").write_bytes(b"changed-bytes")
+    stale = compute_cache_key(
+        raw_dir,
+        tmp_path / "injuries",
+        scoring_policy=ScoringPolicy(points=1),
+        source_revision="rev-1",
+    )
+    with pytest.raises(FeatureDatasetCacheError, match="stale"):
+        read_dataset_cache(path, stale)
+
+    payload = json.loads(path.read_text())
+    payload["dataset"]["rows"][0]["player_id"] = "intruder"
+    path.write_text(json.dumps(payload))
+    with pytest.raises(FeatureDatasetCacheError, match="integrity"):
+        read_dataset_cache(path, key)
+
+    path.write_text("{truncated")
+    with pytest.raises(FeatureDatasetCacheError, match="unreadable"):
+        read_dataset_cache(path, key)
+
+    payload = {"format_version": "unknown-v9", "content_hash": "x", "key": {}, "dataset": {}}
+    path.write_text(json.dumps(payload))
+    with pytest.raises(FeatureDatasetCacheError, match="unsupported format"):
+        read_dataset_cache(path, key)
+
+    with pytest.raises(FeatureDatasetCacheError, match="unreadable"):
+        read_dataset_cache(tmp_path / "absent.json", key)

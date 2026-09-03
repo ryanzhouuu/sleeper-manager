@@ -9,13 +9,19 @@ cache falls back to a full rebuild; a bad cache is never used.
 
 from __future__ import annotations
 
+import hashlib
+import json
+from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
+from sleeper_manager.backtesting.artifacts import atomic_write_json, canonical_json_bytes
 from sleeper_manager.domain.nba import AvailabilityStatus, SourceMetadata
-from sleeper_manager.domain.scoring import BoxScoreLine
+from sleeper_manager.domain.scoring import BoxScoreLine, ScoringPolicy
 from sleeper_manager.integrations.nba.historical_feature_models import (
+    FEATURE_SCHEMA_VERSION,
     AvailabilityObservation,
     DatasetSourceVersion,
     HistoricalFeatureDataset,
@@ -23,6 +29,10 @@ from sleeper_manager.integrations.nba.historical_feature_models import (
     OpponentStatsFallback,
     PaceStatsFallback,
 )
+
+CACHE_FORMAT_VERSION = "historical-feature-dataset-cache-v1"
+
+_CACHE_FILENAME = "historical-feature-dataset-cache.json"
 
 _ROW_FIELDS: tuple[str, ...] = (
     "dataset_version",
@@ -494,8 +504,173 @@ def _as_enum[EnumT: Enum](kind: type[EnumT], value: object, label: str) -> EnumT
         raise FeatureDatasetCacheError(f"Cached {label} has an unknown value") from error
 
 
+@dataclass(frozen=True, slots=True)
+class DatasetCacheKey:
+    """Content identities that must match before a cached dataset is reused."""
+
+    raw_digest: str
+    raw_files: tuple[str, ...]
+    injuries_digest: str
+    injury_files: tuple[str, ...]
+    scoring_policy_version: str
+    feature_schema_version: str
+    source_revision: str
+
+
+def dataset_cache_path(workspace: Path) -> Path:
+    """Return the stable workspace location of the built dataset cache."""
+    return workspace / _CACHE_FILENAME
+
+
+def compute_cache_key(
+    raw_dir: Path,
+    injuries_dir: Path,
+    *,
+    scoring_policy: ScoringPolicy,
+    source_revision: str,
+) -> DatasetCacheKey:
+    """Hash workspace source bytes without parsing them; missing inputs fail the lookup."""
+    if not source_revision.strip():
+        raise FeatureDatasetCacheError("Dataset cache source revision must not be empty")
+    raw_digest, raw_files = _hash_tree(raw_dir, "raw sources")
+    injuries_digest, injury_files = _hash_tree(injuries_dir, "injury archive")
+    return DatasetCacheKey(
+        raw_digest=raw_digest,
+        raw_files=raw_files,
+        injuries_digest=injuries_digest,
+        injury_files=injury_files,
+        scoring_policy_version=scoring_policy.version,
+        feature_schema_version=FEATURE_SCHEMA_VERSION,
+        source_revision=source_revision,
+    )
+
+
+def write_dataset_cache(
+    path: Path, key: DatasetCacheKey, dataset: HistoricalFeatureDataset
+) -> None:
+    """Atomically persist one dataset with its key under a tamper-evident digest."""
+    body = {
+        "format_version": CACHE_FORMAT_VERSION,
+        "key": {
+            "raw_digest": key.raw_digest,
+            "raw_files": list(key.raw_files),
+            "injuries_digest": key.injuries_digest,
+            "injury_files": list(key.injury_files),
+            "scoring_policy_version": key.scoring_policy_version,
+            "feature_schema_version": key.feature_schema_version,
+            "source_revision": key.source_revision,
+        },
+        "dataset": encode_dataset(dataset),
+    }
+    digest = hashlib.sha256(canonical_json_bytes(body)).hexdigest()
+    try:
+        atomic_write_json(path, {**body, "content_hash": digest})
+    except OSError as error:
+        raise FeatureDatasetCacheError(f"Could not write dataset cache at {path}") from error
+
+
+def read_dataset_cache(path: Path, expected: DatasetCacheKey) -> HistoricalFeatureDataset:
+    """Restore one dataset, rejecting any integrity, format, or freshness mismatch."""
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError) as error:
+        raise FeatureDatasetCacheError(f"Dataset cache at {path} is unreadable") from error
+    if not isinstance(payload, dict):
+        raise FeatureDatasetCacheError(f"Dataset cache at {path} must be a mapping")
+    if payload.get("format_version") != CACHE_FORMAT_VERSION:
+        raise FeatureDatasetCacheError(f"Dataset cache at {path} has an unsupported format")
+    stored_hash = payload.get("content_hash")
+    if not isinstance(stored_hash, str):
+        raise FeatureDatasetCacheError(f"Dataset cache at {path} has no content hash")
+    body = {key: value for key, value in payload.items() if key != "content_hash"}
+    digest = hashlib.sha256(canonical_json_bytes(body)).hexdigest()
+    if stored_hash != digest:
+        raise FeatureDatasetCacheError(f"Dataset cache at {path} failed integrity verification")
+    key = _decode_key(body.get("key"), path)
+    if key != expected:
+        raise FeatureDatasetCacheError(f"Dataset cache at {path} is stale")
+    if "dataset" not in body:
+        raise FeatureDatasetCacheError(f"Dataset cache at {path} has no dataset")
+    return decode_dataset(body["dataset"])
+
+
+def _decode_key(payload: object, path: Path) -> DatasetCacheKey:
+    """Rebuild a cache key, rejecting any schema drift in its fields."""
+    if not isinstance(payload, dict):
+        raise FeatureDatasetCacheError(f"Dataset cache at {path} has no key")
+    names = (
+        "raw_digest",
+        "raw_files",
+        "injuries_digest",
+        "injury_files",
+        "scoring_policy_version",
+        "feature_schema_version",
+        "source_revision",
+    )
+    missing = [name for name in names if name not in payload]
+    if missing:
+        raise FeatureDatasetCacheError(f"Dataset cache at {path} key is missing {sorted(missing)}")
+    unknown = [key for key in payload if key not in names]
+    if unknown:
+        raise FeatureDatasetCacheError(f"Dataset cache at {path} key has unknown {sorted(unknown)}")
+    raw_files = payload["raw_files"]
+    injury_files = payload["injury_files"]
+    if not isinstance(raw_files, list) or not all(isinstance(item, str) for item in raw_files):
+        raise FeatureDatasetCacheError(f"Dataset cache at {path} key has invalid raw files")
+    if not isinstance(injury_files, list) or not all(
+        isinstance(item, str) for item in injury_files
+    ):
+        raise FeatureDatasetCacheError(f"Dataset cache at {path} key has invalid injury files")
+    for name in (
+        "raw_digest",
+        "injuries_digest",
+        "scoring_policy_version",
+        "feature_schema_version",
+        "source_revision",
+    ):
+        if not isinstance(payload[name], str):
+            raise FeatureDatasetCacheError(f"Dataset cache at {path} key has invalid {name}")
+    return DatasetCacheKey(
+        raw_digest=payload["raw_digest"],
+        raw_files=tuple(raw_files),
+        injuries_digest=payload["injuries_digest"],
+        injury_files=tuple(injury_files),
+        scoring_policy_version=payload["scoring_policy_version"],
+        feature_schema_version=payload["feature_schema_version"],
+        source_revision=payload["source_revision"],
+    )
+
+
+def _hash_tree(root: Path, label: str) -> tuple[str, tuple[str, ...]]:
+    """Hash every file under one directory in stable order with names and sizes."""
+    if not root.is_dir():
+        raise FeatureDatasetCacheError(f"Dataset cache {label} directory is missing: {root}")
+    digest = hashlib.sha256()
+    names: list[str] = []
+    for path in sorted(root.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(root).as_posix()
+        names.append(relative)
+        digest.update(relative.encode())
+        digest.update(path.stat().st_size.to_bytes(8, "big"))
+        try:
+            with path.open("rb") as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        except OSError as error:
+            raise FeatureDatasetCacheError(f"Dataset cache cannot hash {path}") from error
+    return digest.hexdigest(), tuple(names)
+
+
 __all__ = (
+    "CACHE_FORMAT_VERSION",
+    "DatasetCacheKey",
     "FeatureDatasetCacheError",
+    "compute_cache_key",
+    "dataset_cache_path",
     "decode_dataset",
     "encode_dataset",
+    "read_dataset_cache",
+    "write_dataset_cache",
 )
