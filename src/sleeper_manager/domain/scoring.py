@@ -2,6 +2,7 @@ import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from functools import lru_cache
 from math import isfinite
 from typing import Any
 
@@ -253,6 +254,12 @@ def calculate_score_breakdown(line: BoxScoreLine, policy: ScoringPolicy) -> Scor
 
 
 def calculate_fantasy_points(line: BoxScoreLine, policy: ScoringPolicy) -> float:
+    return _cached_fantasy_points(line, policy)
+
+
+@lru_cache(maxsize=131072)
+def _cached_fantasy_points(line: BoxScoreLine, policy: ScoringPolicy) -> float:
+    """Memoize the pure box-score total; eviction only recomputes identical values."""
     return calculate_score_breakdown(line, policy).total
 
 

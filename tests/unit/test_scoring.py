@@ -4,6 +4,7 @@ from sleeper_manager.domain.scoring import (
     BoxScoreLine,
     ScoringCompatibilityError,
     ScoringPolicy,
+    _cached_fantasy_points,
     calculate_fantasy_points,
     calculate_score_breakdown,
 )
@@ -116,3 +117,26 @@ def test_threshold_bonuses_stack_at_upper_boundaries() -> None:
         "bonus_ast_15p",
         "bonus_reb_20p",
     )
+
+
+def test_fantasy_points_match_breakdown_across_policies() -> None:
+    """Prove cache keys separate box-score and policy identities."""
+    lines = (
+        BoxScoreLine(),
+        BoxScoreLine(points=40, rebounds=20, assists=15, steals=10, blocks=10),
+        BoxScoreLine(points=29, rebounds=12, assists=10, turnovers=7, technical_fouls=2),
+    )
+    for line in lines:
+        for policy in (LEAGUE_SCORING, ScoringPolicy(points=1, rebounds=1, assists=1)):
+            expected = calculate_score_breakdown(line, policy).total
+            assert calculate_fantasy_points(line, policy) == expected
+
+
+def test_fantasy_points_reuse_cached_totals() -> None:
+    _cached_fantasy_points.cache_clear()
+    line = BoxScoreLine(points=25, rebounds=8, assists=8)
+
+    assert calculate_fantasy_points(line, LEAGUE_SCORING) == calculate_fantasy_points(
+        line, LEAGUE_SCORING
+    )
+    assert _cached_fantasy_points.cache_info().hits == 1
