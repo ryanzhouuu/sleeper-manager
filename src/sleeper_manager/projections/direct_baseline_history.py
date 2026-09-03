@@ -13,6 +13,7 @@ from bisect import bisect_left
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import lru_cache
 from math import exp, isfinite, log
 
 from sleeper_manager.domain.nba_season import nba_season_start_year
@@ -63,6 +64,7 @@ class DirectBaselineObservation:
             raise ProjectionBaselineError("Projection observations require a source version")
 
     @classmethod
+    @lru_cache(maxsize=131072)
     def from_historical_row(cls, row: HistoricalFeatureRow) -> DirectBaselineObservation:
         """Compact a feature row to the finalized outcome fields used by the baseline."""
         source_version = hashlib.sha256(
@@ -437,6 +439,7 @@ def _same_historical_boundary(
     ) == _row_fingerprint(DirectBaselineObservation.from_historical_row(incoming))
 
 
+@lru_cache(maxsize=131072)
 def _row_fingerprint(row: DirectBaselineObservation) -> str:
     """Fingerprint every compact outcome field that can alter a direct projection."""
     payload = {

@@ -25,7 +25,10 @@ from sleeper_manager.projections.direct_baseline import (
     PregameProjectionRequest,
     ProjectionBaselineError,
 )
-from sleeper_manager.projections.direct_baseline_history import _DirectBaselineHistoryIndex
+from sleeper_manager.projections.direct_baseline_history import (
+    _DirectBaselineHistoryIndex,
+    _row_fingerprint,
+)
 
 BASE = datetime(2025, 1, 1, 18, tzinfo=UTC)
 POLICY = ScoringPolicy(points=1)
@@ -606,3 +609,27 @@ def test_finalized_prefix_check_matches_explicit_scan() -> None:
             assert index._all_finalized_by(count, cutoff) == reference_all_finalized(
                 index, count, cutoff
             )
+
+
+def test_historical_row_compaction_reuses_cached_observations() -> None:
+    """Avoid recompacting identical boundary rows on every incremental sync."""
+    first = row("g0", "p1", BASE, 10)
+    equal = row("g0", "p1", BASE, 10)
+    changed = row("g0", "p1", BASE, 12)
+
+    assert hash(first) == hash(equal)
+    assert DirectBaselineObservation.from_historical_row(first) is (
+        DirectBaselineObservation.from_historical_row(equal)
+    )
+    assert DirectBaselineObservation.from_historical_row(first) != (
+        DirectBaselineObservation.from_historical_row(changed)
+    )
+
+
+def test_row_fingerprint_reuses_cached_digests() -> None:
+    """Keep provenance digests stable without re-serializing identical rows."""
+    observation = DirectBaselineObservation.from_historical_row(row("g0", "p1", BASE, 10))
+    _row_fingerprint.cache_clear()
+
+    assert _row_fingerprint(observation) == _row_fingerprint(observation)
+    assert _row_fingerprint.cache_info().hits == 1
