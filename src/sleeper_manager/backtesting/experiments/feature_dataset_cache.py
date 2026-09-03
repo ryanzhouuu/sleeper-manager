@@ -573,7 +573,7 @@ def read_dataset_cache(path: Path, expected: DatasetCacheKey) -> HistoricalFeatu
     """Restore one dataset, rejecting any integrity, format, or freshness mismatch."""
     try:
         payload = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError) as error:
+    except (OSError, ValueError) as error:
         raise FeatureDatasetCacheError(f"Dataset cache at {path} is unreadable") from error
     if not isinstance(payload, dict):
         raise FeatureDatasetCacheError(f"Dataset cache at {path} must be a mapping")

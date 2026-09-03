@@ -330,6 +330,10 @@ def test_cache_rejects_stale_corrupt_and_incompatible_payloads(tmp_path: Path) -
     with pytest.raises(FeatureDatasetCacheError, match="unreadable"):
         read_dataset_cache(path, key)
 
+    path.write_bytes(b"\xff\xfe\x00not-utf8")
+    with pytest.raises(FeatureDatasetCacheError, match="unreadable"):
+        read_dataset_cache(path, key)
+
     payload = {"format_version": "unknown-v9", "content_hash": "x", "key": {}, "dataset": {}}
     path.write_text(json.dumps(payload))
     with pytest.raises(FeatureDatasetCacheError, match="unsupported format"):
