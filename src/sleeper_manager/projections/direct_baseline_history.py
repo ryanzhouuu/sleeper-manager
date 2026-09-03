@@ -176,7 +176,6 @@ class _DirectBaselineHistoryIndex:
     starts: list[datetime] = field(default_factory=list)
     prefix_fingerprints: list[str] = field(default_factory=list)
     prefix_latest_finalization: list[datetime | None] = field(default_factory=list)
-    prefix_unfinalized_counts: list[int] = field(default_factory=list)
     seasons: dict[int, _SeasonIndex] = field(default_factory=dict)
     players: dict[tuple[str, int], list[DirectBaselineObservation]] = field(default_factory=dict)
     rows_by_key: dict[tuple[str, str], DirectBaselineObservation] = field(default_factory=dict)
@@ -273,10 +272,6 @@ class _DirectBaselineHistoryIndex:
         if prior_latest is not None and (latest is None or prior_latest > latest):
             latest = prior_latest
         self.prefix_latest_finalization.append(latest)
-        prior_unfinalized = self.prefix_unfinalized_counts[-1] if len(self.rows) > 1 else 0
-        self.prefix_unfinalized_counts.append(
-            prior_unfinalized + int(row.outcome_finalized_at is None)
-        )
 
     def player_rows_before(
         self,
@@ -358,10 +353,8 @@ class _DirectBaselineHistoryIndex:
         """Return whether prefix aggregates already exclude unavailable explicit outcomes."""
         if not count:
             return True
-        return all(
-            row.outcome_finalized_at is None or row.outcome_finalized_at <= available_as_of
-            for row in self.rows[:count]
-        )
+        latest = self.prefix_latest_finalization[count - 1]
+        return latest is None or latest <= available_as_of
 
     def _reset(self) -> None:
         """Clear direct-specific state before replaying an incompatible sequence."""
@@ -370,7 +363,6 @@ class _DirectBaselineHistoryIndex:
         self.starts.clear()
         self.prefix_fingerprints.clear()
         self.prefix_latest_finalization.clear()
-        self.prefix_unfinalized_counts.clear()
         self.seasons.clear()
         self.players.clear()
         self.rows_by_key.clear()
