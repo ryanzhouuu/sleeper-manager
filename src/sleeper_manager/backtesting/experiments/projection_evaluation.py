@@ -22,6 +22,7 @@ from sleeper_manager.backtesting.experiments.data import (
     scoring_policy_from_league_fixture,
 )
 from sleeper_manager.backtesting.experiments.feature_dataset_cache import (
+    DatasetCacheKey,
     FeatureDatasetCacheError,
     compute_cache_key,
     dataset_cache_path,
@@ -292,20 +293,21 @@ def _setup_dataset(
 ) -> HistoricalFeatureDataset:
     """Restore the cached dataset on a key hit, else rebuild it and refresh the cache."""
     cache_path = dataset_cache_path(workspace)
+    pre_key: DatasetCacheKey | None = None
     with reporter.stage(ProgressStage.LOAD_CACHED_DATASET, unit="rows") as counter:
         try:
-            key = compute_cache_key(
+            pre_key = compute_cache_key(
                 raw_dir,
                 workspace / "injuries",
                 scoring_policy=scoring_policy,
                 source_revision=source_revision,
             )
         except FeatureDatasetCacheError:
-            key = None
+            pre_key = None
         cached: HistoricalFeatureDataset | None = None
-        if key is not None:
+        if pre_key is not None:
             try:
-                cached = read_dataset_cache(cache_path, key)
+                cached = read_dataset_cache(cache_path, pre_key)
             except FeatureDatasetCacheError:
                 cached = None
         if cached is None:
@@ -340,7 +342,9 @@ def _setup_dataset(
             generated_at,
             progress=counter,
         )
-    _refresh_dataset_cache(cache_path, workspace, scoring_policy, source_revision, dataset)
+    _refresh_dataset_cache(
+        cache_path, workspace, scoring_policy, source_revision, dataset, pre_key=pre_key
+    )
     return dataset
 
 
@@ -350,16 +354,23 @@ def _refresh_dataset_cache(
     scoring_policy: ScoringPolicy,
     source_revision: str,
     dataset: HistoricalFeatureDataset,
+    *,
+    pre_key: DatasetCacheKey | None,
 ) -> None:
-    """Republish the dataset cache; failures leave evaluation on the uncached path."""
+    """Republish the cache only when sources were quiescent during the build."""
     try:
-        key = compute_cache_key(
+        post_key = compute_cache_key(
             workspace / "raw",
             workspace / "injuries",
             scoring_policy=scoring_policy,
             source_revision=source_revision,
         )
-        write_dataset_cache(cache_path, key, dataset)
+    except FeatureDatasetCacheError:
+        return
+    if pre_key is not None and post_key != pre_key:
+        return
+    try:
+        write_dataset_cache(cache_path, post_key, dataset)
     except FeatureDatasetCacheError:
         pass
 

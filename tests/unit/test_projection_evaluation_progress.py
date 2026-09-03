@@ -13,6 +13,7 @@ import pytest
 from sleeper_manager.backtesting.development_checkpoint import DevelopmentCheckpointError
 from sleeper_manager.backtesting.experiments import projection_evaluation as evaluation
 from sleeper_manager.backtesting.experiments.feature_dataset_cache import (
+    DatasetCacheKey,
     compute_cache_key,
     dataset_cache_path,
     read_dataset_cache,
@@ -434,3 +435,42 @@ def test_unwritable_dataset_cache_leaves_evaluation_on_uncached_path(
     )
 
     assert output.dataset_version == "dataset-v1"
+
+
+def test_cache_publication_skips_mid_build_source_changes(tmp_path: Path) -> None:
+    """Never label a dataset with source bytes it was not built from."""
+    (tmp_path / "raw").mkdir()
+    (tmp_path / "injuries").mkdir()
+    (tmp_path / "raw" / "a.rds").write_bytes(b"a")
+    policy = ScoringPolicy(points=1)
+    dataset = HistoricalFeatureDataset(
+        "dataset-v1", "schema-v1", datetime(2026, 8, 31, 12, tzinfo=UTC), (), ()
+    )
+    pre_key = compute_cache_key(
+        tmp_path / "raw",
+        tmp_path / "injuries",
+        scoring_policy=policy,
+        source_revision="revision",
+    )
+
+    def refresh(path: Path, *, pre: DatasetCacheKey | None) -> None:
+        evaluation._refresh_dataset_cache(path, tmp_path, policy, "revision", dataset, pre_key=pre)
+
+    published = tmp_path / "published.json"
+    refresh(published, pre=pre_key)
+    assert read_dataset_cache(published, pre_key).dataset_version == "dataset-v1"
+
+    (tmp_path / "raw" / "b.rds").write_bytes(b"mid-build change")
+    skipped = tmp_path / "skipped.json"
+    refresh(skipped, pre=pre_key)
+    assert not skipped.exists()
+
+    fallback = tmp_path / "fallback.json"
+    refresh(fallback, pre=None)
+    post_key = compute_cache_key(
+        tmp_path / "raw",
+        tmp_path / "injuries",
+        scoring_policy=policy,
+        source_revision="revision",
+    )
+    assert read_dataset_cache(fallback, post_key).dataset_version == "dataset-v1"
