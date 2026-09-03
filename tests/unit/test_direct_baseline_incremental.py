@@ -16,6 +16,7 @@ from sleeper_manager.domain.projection import ProjectionSnapshot
 from sleeper_manager.domain.scoring import BoxScoreLine, ScoringPolicy
 from sleeper_manager.integrations.nba.historical_feature_models import (
     AvailabilityObservation,
+    DatasetSourceVersion,
     HistoricalFeatureDataset,
     HistoricalFeatureRow,
 )
@@ -223,7 +224,7 @@ def test_incremental_path_matches_explicit_history_and_compacts_each_row_once(
 
     assert actual == expected
     assert conversions == 4
-    assert all(snapshot.input_version.startswith("projection-input-v4-") for snapshot in actual)
+    assert all(snapshot.input_version.startswith("projection-input-v5-") for snapshot in actual)
 
 
 def test_incremental_path_projects_when_prior_outcome_finalization_is_missing() -> None:
@@ -252,7 +253,7 @@ def test_incremental_path_projects_when_prior_outcome_finalization_is_missing() 
     )
 
     assert incremental.distribution == reference.distribution
-    assert incremental.input_version.startswith("projection-input-v4-")
+    assert incremental.input_version.startswith("projection-input-v5-")
     assert incremental.input_version != reference.input_version
 
 
@@ -312,7 +313,7 @@ def test_incremental_fingerprint_includes_missing_finalization_history() -> None
             scoring_policy=POLICY,
         )
 
-    assert snapshot.input_version.startswith("projection-input-v4-")
+    assert snapshot.input_version.startswith("projection-input-v5-")
 
     changed_prior = replace(prior, target_line_points=11, target_box_score=BoxScoreLine(points=11))
     changed = DirectFantasyPointBaseline().project(
@@ -409,7 +410,7 @@ def test_incremental_path_rejects_duplicate_prior_player_games() -> None:
         )
 
 
-def test_input_v4_tracks_prior_provenance_target_metadata_and_scoring() -> None:
+def test_input_v5_tracks_prior_provenance_target_metadata_and_scoring() -> None:
     """Fingerprint every modeled input while continuing to ignore realized target output."""
     prior = DirectBaselineObservation.from_historical_row(row("prior", "p1", BASE, 10))
     target_start = BASE + timedelta(days=1)
@@ -438,7 +439,7 @@ def test_input_v4_tracks_prior_provenance_target_metadata_and_scoring() -> None:
         )
 
     baseline = version(request)
-    assert baseline.startswith("projection-input-v4-")
+    assert baseline.startswith("projection-input-v5-")
     changed_score = replace(prior, box_score=BoxScoreLine(points=11))
     assert version(replace(request, history=(changed_score,))) != baseline
     assert (
@@ -464,6 +465,16 @@ def test_input_v4_tracks_prior_provenance_target_metadata_and_scoring() -> None:
     assert version(changed_cutoff) != baseline
     assert version(replace(request, game_id="other-target")) != baseline
     assert version(request, ScoringPolicy(points=2)) != baseline
+    changed_sources = replace(
+        request,
+        source_versions=(DatasetSourceVersion("fixture", "v2", ("game-1",)),),
+    )
+    assert version(changed_sources) != baseline
+    changed_source_ids = replace(
+        request,
+        source_versions=(DatasetSourceVersion("fixture", "v2", ("game-1", "game-2")),),
+    )
+    assert version(changed_source_ids) != version(changed_sources)
 
 
 class ExplicitHistoryProjector:

@@ -371,13 +371,24 @@ class _DirectBaselineHistoryIndex:
         self.duplicate_keys.clear()
 
 
+@lru_cache(maxsize=128)
+def _source_versions_digest(source_versions: tuple[DatasetSourceVersion, ...]) -> str:
+    """Memoize the pure source-identity digest; eviction only recomputes identical values."""
+    encoded = json.dumps(
+        [(source.provider, source.schema_version, source.source_ids) for source in source_versions],
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _pregame_input_version(
     request: PregameProjectionRequest,
     policy: ScoringPolicy,
     *,
     history_fingerprint: str,
 ) -> str:
-    """Build the v4 direct-projection input identity without target outcomes."""
+    """Build the v5 direct-projection input identity without target outcomes."""
     payload = {
         "dataset_version": request.dataset_version,
         "feature_schema_version": request.feature_schema_version,
@@ -386,15 +397,12 @@ def _pregame_input_version(
         "game_id": request.game_id,
         "game_start": request.game_start.isoformat(),
         "available_as_of": request.available_as_of.isoformat(),
-        "source_versions": [
-            (source.provider, source.schema_version, source.source_ids)
-            for source in request.source_versions
-        ],
+        "source_versions_digest": _source_versions_digest(request.source_versions),
         "scoring_policy_version": policy.version,
         "history_fingerprint": history_fingerprint,
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    return f"projection-input-v4-{hashlib.sha256(encoded).hexdigest()[:12]}"
+    return f"projection-input-v5-{hashlib.sha256(encoded).hexdigest()[:12]}"
 
 
 def _validate_timestamp(value: datetime, field: str) -> None:

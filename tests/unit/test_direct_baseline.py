@@ -107,7 +107,7 @@ def test_direct_baseline_projects_sleeper_points_with_versions_reasons_and_excee
         snapshot.distribution.probability_of_exceeding(12)
     )
     assert snapshot.model_version.startswith("projection-baseline-v1-")
-    assert snapshot.input_version.startswith("projection-input-v4-")
+    assert snapshot.input_version.startswith("projection-input-v5-")
     assert snapshot.scoring_policy_version == POLICY.version
     assert any(reason.code == "minutes_role" for reason in snapshot.reasons)
     assert any(reason.code == "season_shrinkage" for reason in snapshot.reasons)
