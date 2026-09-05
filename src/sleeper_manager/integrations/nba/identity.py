@@ -90,16 +90,17 @@ class PlayerIdentityMapper:
         *,
         overrides: Mapping[str, str] | None = None,
     ) -> MappingReport:
+        """Count stable player IDs within each alias, preserving historical team matches."""
         candidates = tuple(provider_players)
         by_id = {player.provider_id: player for player in candidates}
-        by_name: dict[str, list[ProviderPlayer]] = {}
-        by_name_team: dict[tuple[str, str], list[ProviderPlayer]] = {}
+        by_name: dict[str, dict[str, ProviderPlayer]] = {}
+        by_name_team: dict[tuple[str, str], dict[str, ProviderPlayer]] = {}
         for player in candidates:
             name_key = normalize_player_name(player.full_name)
-            by_name.setdefault(name_key, []).append(player)
+            by_name.setdefault(name_key, {})[player.provider_id] = player
             team_key = normalize_team(player.team_abbreviation)
             if team_key is not None:
-                by_name_team.setdefault((name_key, team_key), []).append(player)
+                by_name_team.setdefault((name_key, team_key), {})[player.provider_id] = player
 
         mapping_results: list[PlayerMapping] = []
         warnings: list[str] = []
@@ -148,7 +149,9 @@ class PlayerIdentityMapper:
             name_key = normalize_player_name(sleeper_player.full_name)
             team_key = normalize_team(sleeper_player.team)
             team_matches = (
-                by_name_team.get((name_key, team_key), []) if team_key is not None else []
+                tuple(by_name_team.get((name_key, team_key), {}).values())
+                if team_key is not None
+                else ()
             )
             if len(team_matches) == 1:
                 match = team_matches[0]
@@ -172,7 +175,7 @@ class PlayerIdentityMapper:
                 )
                 continue
 
-            name_matches = by_name.get(name_key, [])
+            name_matches = tuple(by_name.get(name_key, {}).values())
             if len(name_matches) == 1:
                 match = name_matches[0]
                 mapping_results.append(

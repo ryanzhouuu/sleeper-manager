@@ -1,5 +1,7 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from sleeper_manager.domain.nba import ProviderPlayer, SourceMetadata
 from sleeper_manager.integrations.nba.identity import (
     MappingConfidence,
@@ -49,3 +51,60 @@ def test_identity_mapping_does_not_guess_ambiguous_names_or_invalid_overrides() 
     assert len(result.unresolved) == 2
     assert all(mapping.method is MappingMethod.UNRESOLVED for mapping in result.unresolved)
     assert result.warnings
+
+
+@pytest.mark.parametrize("team", [None, "BOS", "DEN", "LAL"])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_identity_mapping_counts_one_player_across_duplicate_and_traded_rows(
+    team: str | None, reverse: bool
+) -> None:
+    candidates = [
+        provider("espn-1", "Traded Player", "DEN"),
+        provider("espn-1", "Traded Player", "DEN"),
+        provider("espn-1", "Traded Player", "LAL"),
+    ]
+    result = PlayerIdentityMapper().resolve(
+        [SleeperPlayerIdentity("traded", "Traded Player", team)],
+        reversed(candidates) if reverse else candidates,
+    )
+
+    mapping = result.mappings[0]
+    assert mapping.espn_id == "espn-1"
+    if team in {"DEN", "LAL"}:
+        assert mapping.method is MappingMethod.NORMALIZED_NAME_TEAM
+        assert mapping.confidence is MappingConfidence.MEDIUM
+    else:
+        assert mapping.method is MappingMethod.NORMALIZED_NAME_ONLY
+        assert mapping.confidence is MappingConfidence.LOW
+
+
+@pytest.mark.parametrize("team", [None, "DEN"])
+def test_duplicate_rows_do_not_hide_distinct_players_with_the_same_name(
+    team: str | None,
+) -> None:
+    result = PlayerIdentityMapper().resolve(
+        [SleeperPlayerIdentity("ambiguous", "Same Name", team)],
+        [
+            provider("espn-1", "Same Name", "DEN"),
+            provider("espn-1", "Same Name", "DEN"),
+            provider("espn-2", "Same Name", "DEN"),
+        ],
+    )
+
+    mapping = result.mappings[0]
+    assert mapping.espn_id is None
+    assert mapping.method is MappingMethod.UNRESOLVED
+    assert mapping.candidate_ids == ("espn-1", "espn-2")
+
+
+def test_identity_mapping_preserves_name_aliases_for_one_provider_id() -> None:
+    result = PlayerIdentityMapper().resolve(
+        [SleeperPlayerIdentity("alias", "Old Name", "DEN")],
+        [
+            provider("espn-1", "Old Name", "DEN"),
+            provider("espn-1", "New Name", "LAL"),
+        ],
+    )
+
+    assert result.mappings[0].espn_id == "espn-1"
+    assert result.mappings[0].method is MappingMethod.NORMALIZED_NAME_TEAM
