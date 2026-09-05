@@ -102,6 +102,9 @@ def _coverage(payload: dict[str, Any]) -> ReplayCoverageSummary:
         scored_player_games=_require_int(payload, "scored_player_games"),
         missing_evidence=tuple(missing),
         projected_player_games=_require_int(payload, "projected_player_games"),
+        inferred_team_membership=_require_int(
+            {"inferred_team_membership": 0, **payload}, "inferred_team_membership"
+        ),
     )
 
 

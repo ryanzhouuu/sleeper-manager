@@ -16,6 +16,7 @@ from sleeper_manager.backtesting.replay.inputs.manifest import (
 from sleeper_manager.backtesting.replay.inputs.models import (
     HistoricalReplayBuildInput,
     HistoricalTeamWeekInput,
+    PlayerTeamObservation,
     ReplayCoverageSummary,
     ReplayInputError,
     ReplayInputExclusion,
@@ -27,6 +28,7 @@ __all__ = (
     "HistoricalReplayBuildInput",
     "HistoricalTeamWeekArtifactError",
     "HistoricalTeamWeekInput",
+    "PlayerTeamObservation",
     "ReplayCoverageSummary",
     "ReplayInputError",
     "ReplayInputExclusion",

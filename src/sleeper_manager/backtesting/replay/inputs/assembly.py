@@ -11,6 +11,7 @@ from sleeper_manager.backtesting.replay.inputs._indexes import (
     _index_mappings,
     _index_schedules,
 )
+from sleeper_manager.backtesting.replay.inputs._opportunities import expected_inventory
 from sleeper_manager.backtesting.replay.inputs.manifest import build_replay_input_manifest
 from sleeper_manager.backtesting.replay.inputs.models import (
     HistoricalReplayBuildInput,
@@ -190,6 +191,19 @@ def assemble_historical_team_week_inputs(
             scope = f"league={inputs.archive.league_id}:week={boundary.week}:roster={roster_id}"
             scope_issues = list(issues_by_scope.get((boundary.week, roster_id), ()))
             candidates = joined_by_scope.get((boundary.week, roster_id), [])
+            expected = expected_inventory(
+                inputs, boundary, roster_id, schedule_by_id, mapping_by_provider
+            )
+            scope_issues.extend(expected.exclusions)
+            joined_keys = {(item.sleeper_id, item.game.provider_id) for item in candidates}
+            for player, game_id in sorted(expected.teams.keys() - joined_keys):
+                scope_issues.append(
+                    ReplayInputExclusion(
+                        PlanningReasonCode.MISSING_GAME_RESULT,
+                        f"{scope}:sleeper-player={player}:game={game_id}",
+                        "Expected rostered player-game has no box score; absence is not a DNP.",
+                    )
+                )
             player_games: list[ReplayPlayerGame] = []
             exact_count = 0
             best_known_count = 0
@@ -197,6 +211,25 @@ def assemble_historical_team_week_inputs(
             projected_count = 0
             missing_evidence: dict[PlanningReasonCode, int] = defaultdict(int)
             for candidate in candidates:
+                if candidate.game.status is not GameStatus.FINAL:
+                    scope_issues.append(
+                        ReplayInputExclusion(
+                            PlanningReasonCode.MISSING_GAME_RESULT,
+                            f"{scope}:game={candidate.game.provider_id}",
+                            "A player-game outcome cannot be scored before the game is final.",
+                        )
+                    )
+                    continue
+                key = candidate.sleeper_id, candidate.game.provider_id
+                if expected.teams.get(key) != candidate.box_score.team_id:
+                    scope_issues.append(
+                        ReplayInputExclusion(
+                            PlanningReasonCode.MISSING_NBA_TEAM_HISTORY,
+                            f"{scope}:sleeper-player={key[0]}:game={key[1]}",
+                            "Box-score team disagrees with the independently expected opportunity.",
+                        )
+                    )
+                    continue
                 positions, quality = _eligibility_at(
                     candidate.sleeper_id,
                     candidate.game.start_time,
@@ -247,17 +280,18 @@ def assemble_historical_team_week_inputs(
                     )
                 )
 
-            for issue in scope_issues:
-                missing_evidence[issue.reason] += 1
             excluded = _unique_exclusions(scope_issues)
+            for issue in excluded:
+                missing_evidence[issue.reason] += 1
             coverage = ReplayCoverageSummary(
-                expected_player_games=len(candidates) + len(excluded),
+                expected_player_games=len(expected.teams),
                 joined_player_games=len(candidates),
-                resolved_identities=len(candidates),
+                resolved_identities=len(expected.teams),
                 exact_eligibility=exact_count,
                 best_known_eligibility=best_known_count,
                 scored_player_games=scored_count,
                 projected_player_games=projected_count,
+                inferred_team_membership=expected.inferred_count,
                 missing_evidence=tuple(
                     sorted(missing_evidence.items(), key=lambda item: item[0].value)
                 ),
@@ -499,7 +533,7 @@ def _assembly_quality(
         return PlanningQuality.PARTIAL
     if coverage.complete:
         return PlanningQuality.EXACT
-    if coverage.best_known_eligibility:
+    if coverage.best_known_eligibility or coverage.inferred_team_membership:
         return PlanningQuality.BEST_KNOWN_CONSTRAINTS_ORACLE
     return PlanningQuality.PARTIAL
 

@@ -14,10 +14,11 @@ from sleeper_manager.backtesting.experiments.data import (
     HistoricalExperimentInputs,
     dataset_version_for,
 )
+from sleeper_manager.backtesting.replay.inputs.models import PlayerTeamObservation
 from sleeper_manager.backtesting.replay.league_archive import HistoricalLeagueArchive
 from sleeper_manager.backtesting.replay.roster_timeline import EASTERN_TIME, FantasyWeekBoundary
 from sleeper_manager.backtesting.replay.team_week_sources import HistoricalTeamWeekBundleError
-from sleeper_manager.domain.nba import PlayerBoxScore, ScheduledGame
+from sleeper_manager.domain.nba import GameStatus, PlayerBoxScore, ScheduledGame
 from sleeper_manager.domain.projection import ProjectionSnapshot
 from sleeper_manager.integrations.nba.historical_feature_models import FEATURE_SCHEMA_VERSION
 from sleeper_manager.integrations.nba.identity import (
@@ -133,7 +134,7 @@ def selected_games_and_box_scores(
     mappings: Sequence[PlayerMapping],
     boundary: FantasyWeekBoundary,
 ) -> tuple[tuple[ScheduledGame, ...], tuple[PlayerBoxScore, ...]]:
-    """Return mapped player-games and replay schedules finalized by the approximate bound."""
+    """Keep the entire week's schedule even when mapped player outcomes are absent."""
 
     games_by_id = {game.provider_id: game for game in nba_inputs.games}
     mapped_provider_ids = {mapping.espn_id for mapping in mappings if mapping.espn_id is not None}
@@ -144,16 +145,41 @@ def selected_games_and_box_scores(
         and (game := games_by_id.get(box_score.game_id)) is not None
         and boundary.utc_start <= game.start_time < boundary.utc_end
     )
-    player_game_ids = {box_score.game_id for box_score in box_scores}
     games = tuple(
         replace(
             game,
             finalized_at=game.finalized_at or approximate_finalization_at(game.start_time),
         )
+        if game.status is GameStatus.FINAL
+        else game
         for game in nba_inputs.games
-        if game.provider_id in player_game_ids
+        if boundary.utc_start <= game.start_time < boundary.utc_end
     )
     return games, box_scores
+
+
+def team_observations(
+    nba_inputs: HistoricalExperimentInputs, mappings: Sequence[PlayerMapping]
+) -> tuple[PlayerTeamObservation, ...]:
+    """Freeze season-wide team associations separately from selected-week outcome rows."""
+    games = {game.provider_id: game for game in nba_inputs.games}
+    providers = {mapping.espn_id for mapping in mappings if mapping.espn_id is not None}
+    observations = {
+        PlayerTeamObservation(
+            box.player_id,
+            box.team_id,
+            games[box.game_id].start_time,
+            f"{box.source.provider}:player-box:{box.game_id}:{box.player_id}",
+        )
+        for box in nba_inputs.player_box_scores
+        if box.player_id in providers and box.game_id in games
+    }
+    return tuple(
+        sorted(
+            observations,
+            key=lambda item: (item.provider_player_id, item.observed_at, item.team_id, item.source),
+        )
+    )
 
 
 def approximate_finalization_at(start: datetime) -> datetime:
@@ -200,4 +226,5 @@ __all__ = (
     "player_mappings",
     "projection_snapshots",
     "selected_games_and_box_scores",
+    "team_observations",
 )

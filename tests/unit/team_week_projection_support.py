@@ -65,6 +65,7 @@ def _nba_inputs(
         boxes.extend(
             (
                 _box("prior", datetime(2026, 1, 31, 20, tzinfo=UTC), 8, "provider-2"),
+                _box("same-day", datetime(2026, 2, 2, 15, tzinfo=UTC), 5, "provider-2"),
                 _box("target", datetime(2026, 2, 2, 20, tzinfo=UTC), 12, "provider-2"),
             )
         )

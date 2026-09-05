@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+import pytest
 from team_week_projection_support import (
     _nba_inputs,
 )
@@ -15,6 +17,7 @@ from team_week_source_support import (
 )
 
 from sleeper_manager.backtesting.replay.team_week_bundle import (
+    HistoricalTeamWeekBundleError,
     HistoricalTeamWeekBundleRequest,
     bootstrap_historical_team_week_bundle,
 )
@@ -129,3 +132,34 @@ def test_bundle_marks_only_observed_starters_as_best_known_lock_eligible(tmp_pat
     }
     assert lock_eligibility == {"sleeper-1": True, "sleeper-2": False}
     assert output.team_week.roster_player_ids == ("sleeper-1", "sleeper-2")
+
+
+def test_bootstrap_detects_a_game_missing_from_the_raw_player_outcomes(tmp_path: Path) -> None:
+    """A schedule-only game between agreeing team records must block complete assembly."""
+    _write_archive(tmp_path)
+    inputs = _nba_inputs()
+    missing = replace(
+        inputs.games[-1], provider_id="missing", start_time=datetime(2026, 2, 2, 18, tzinfo=UTC)
+    )
+    request = HistoricalTeamWeekBundleRequest(LEAGUE_ID, 4, 16, date(2026, 2, 2))
+    with pytest.raises(HistoricalTeamWeekBundleError, match="no joined player-game evidence"):
+        bootstrap_historical_team_week_bundle(
+            tmp_path,
+            request,
+            nba_inputs=replace(inputs, games=(*inputs.games, missing)),
+            now=RETRIEVED_AT,
+        )
+
+    filled = replace(inputs.player_box_scores[1], game_id="missing", played_at=missing.start_time)
+    result = bootstrap_historical_team_week_bundle(
+        tmp_path,
+        request,
+        nba_inputs=replace(
+            inputs,
+            games=(*inputs.games, missing),
+            player_box_scores=(*inputs.player_box_scores, filled),
+        ),
+        now=RETRIEVED_AT,
+    )
+    assert result.team_week.coverage.expected_player_games == 3
+    assert result.team_week.coverage.scored_player_games == 3

@@ -7,6 +7,7 @@ import pytest
 from sleeper_manager.backtesting.replay.inputs import (
     HistoricalReplayBuildInput,
     HistoricalTeamWeekInput,
+    PlayerTeamObservation,
     ReplayCoverageSummary,
     ReplayInputError,
     ReplayInputExclusion,
@@ -321,6 +322,10 @@ def _historical_join_inputs() -> HistoricalReplayBuildInput:
         week_boundaries=boundaries,
         games=games,
         box_scores=box_scores,
+        team_observations=tuple(
+            PlayerTeamObservation("provider-p1", "home", game.start_time, "fixture")
+            for game in games[:2]
+        ),
         player_mappings=(
             PlayerMapping(
                 "p1",

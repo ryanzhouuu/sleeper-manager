@@ -37,6 +37,8 @@ class PlanningReasonCode(StrEnum):
     MISSING_ROSTER_SNAPSHOT = "missing_roster_snapshot"
     ROSTER_STATE_MISMATCH = "roster_state_mismatch"
     MISSING_GAME_SCHEDULE = "missing_game_schedule"
+    MISSING_GAME_RESULT = "missing_game_result"
+    MISSING_NBA_TEAM_HISTORY = "missing_nba_team_history"
     AMBIGUOUS_GAME_TIME = "ambiguous_game_time"
     UNRESOLVED_PLAYER_IDENTITY = "unresolved_player_identity"
     MISSING_PROJECTION = "missing_projection"

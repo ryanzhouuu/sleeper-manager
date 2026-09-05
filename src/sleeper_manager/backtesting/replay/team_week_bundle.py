@@ -37,6 +37,7 @@ from sleeper_manager.backtesting.replay.team_week_projection import (
     player_mappings,
     projection_snapshots,
     selected_games_and_box_scores,
+    team_observations,
 )
 from sleeper_manager.backtesting.replay.team_week_sources import (
     HistoricalTeamWeekBundleError,
@@ -174,6 +175,7 @@ def _write_team_week_bundle(
         week_boundaries=(boundary,),
         games=games,
         box_scores=box_scores,
+        team_observations=team_observations(nba_inputs, mappings),
         player_mappings=mappings,
         scoring_policy=anchored_archive.scoring_policy,
         eligibility_evidence=anchored_archive.player_eligibility,
@@ -187,7 +189,7 @@ def _write_team_week_bundle(
         ),
         eligibility_policy_version=_ELIGIBILITY_POLICY_VERSION,
         projection_config_version=baseline.config.model_version,
-        builder_version="historical-team-week-bundle-v1",
+        builder_version="historical-team-week-bundle-v2",
     )
     manifest = build_replay_input_manifest(inputs)
     team_weeks = assemble_historical_team_week_inputs(

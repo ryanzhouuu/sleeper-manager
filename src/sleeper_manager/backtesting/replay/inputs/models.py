@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from sleeper_manager.backtesting.artifacts import canonical_json, canonicalize, sha256_text
@@ -22,6 +23,23 @@ from sleeper_manager.integrations.nba.identity import PlayerMapping
 
 class ReplayInputError(ValueError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class PlayerTeamObservation:
+    """A historical team association, kept separately from selected game outcomes."""
+
+    provider_player_id: str
+    team_id: str
+    observed_at: datetime
+    source: str
+
+    def __post_init__(self) -> None:
+        """Require attributable, timezone-aware evidence for membership reconstruction."""
+        if not all(value.strip() for value in (self.provider_player_id, self.team_id, self.source)):
+            raise ReplayInputError("Team observations require player, team and source identities")
+        if self.observed_at.tzinfo is None or self.observed_at.utcoffset() is None:
+            raise ReplayInputError("Team observation time must be timezone-aware")
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +71,8 @@ class HistoricalReplayBuildInput:
     source_fingerprints: tuple[SourceFingerprint, ...] = ()
     eligibility_policy_version: str = "eligibility-v2"
     projection_config_version: str = "projection-unconfigured"
-    builder_version: str = "historical-replay-inputs-v1"
+    builder_version: str = "historical-replay-inputs-v2"
+    team_observations: tuple[PlayerTeamObservation, ...] = ()
 
     def __post_init__(self) -> None:
         if self.archive.scoring_policy.fingerprint != self.scoring_policy.fingerprint:
@@ -139,6 +158,7 @@ class ReplayCoverageSummary:
     scored_player_games: int
     missing_evidence: tuple[tuple[PlanningReasonCode, int], ...] = ()
     projected_player_games: int = 0
+    inferred_team_membership: int = 0
 
     def __post_init__(self) -> None:
         for label, value in (
@@ -149,9 +169,12 @@ class ReplayCoverageSummary:
             ("best-known eligibility", self.best_known_eligibility),
             ("scored player-games", self.scored_player_games),
             ("projected player-games", self.projected_player_games),
+            ("inferred team membership", self.inferred_team_membership),
         ):
             if value < 0:
                 raise ReplayInputError(f"{label} counts must be non-negative")
+        if self.inferred_team_membership > self.expected_player_games:
+            raise ReplayInputError("Inferred membership cannot exceed expected player-games")
         keys = tuple(reason for reason, _ in self.missing_evidence)
         if len(set(keys)) != len(keys):
             raise ReplayInputError("Coverage missing-evidence reasons must be unique")
@@ -166,6 +189,7 @@ class ReplayCoverageSummary:
             and self.exact_eligibility == self.expected_player_games
             and self.scored_player_games == self.expected_player_games
             and self.projected_player_games == self.expected_player_games
+            and not self.inferred_team_membership
             and not self.missing_evidence
         )
 
@@ -206,6 +230,7 @@ def _unique_source_names(fingerprints: tuple[SourceFingerprint, ...]) -> None:
 __all__ = (
     "HistoricalReplayBuildInput",
     "HistoricalTeamWeekInput",
+    "PlayerTeamObservation",
     "ReplayCoverageSummary",
     "ReplayInputError",
     "ReplayInputExclusion",
