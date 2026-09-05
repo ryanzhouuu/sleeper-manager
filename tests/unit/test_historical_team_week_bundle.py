@@ -62,7 +62,7 @@ def test_bootstrap_writes_one_labeled_team_week_with_pregame_projection(tmp_path
     assert finalization_bound.version == "approximate-next-eastern-day-0600-v1"
     assert (
         output.manifest.eligibility_policy_version
-        == "observed-weekly-starters-current-catalog-best-known-v1"
+        == "observed-weekly-starters-current-catalog-best-known-v2"
     )
 
 

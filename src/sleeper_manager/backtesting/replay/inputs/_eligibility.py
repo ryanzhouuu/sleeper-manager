@@ -12,32 +12,34 @@ def _eligibility_at(
     cutoff: datetime,
     evidence: Sequence[PlayerEligibilitySnapshot],
 ) -> tuple[tuple[str, ...], PlanningQuality]:
+    """Use the latest available positions without upgrading their declared provenance."""
     snapshots = tuple(
         sorted(
             (snapshot for snapshot in evidence if snapshot.sleeper_id == sleeper_id),
             key=lambda snapshot: snapshot.available_as_of,
         )
     )
-    exact = tuple(snapshot for snapshot in snapshots if snapshot.available_as_of <= cutoff)
-    if exact:
-        snapshot = exact[-1]
-        same_time = tuple(
-            item for item in exact if item.available_as_of == snapshot.available_as_of
-        )
-        positions = _consistent_positions(same_time)
-        return positions, PlanningQuality.EXACT if positions else PlanningQuality.PARTIAL
-    if snapshots:
-        positions = _consistent_positions((snapshots[0],))
-        return (
-            positions,
-            PlanningQuality.BEST_KNOWN_CONSTRAINTS_ORACLE if positions else PlanningQuality.PARTIAL,
-        )
-    return (), PlanningQuality.PARTIAL
+    if not snapshots:
+        return (), PlanningQuality.PARTIAL
+    available = tuple(snapshot for snapshot in snapshots if snapshot.available_as_of <= cutoff)
+    selected = available[-1] if available else snapshots[0]
+    same_time = tuple(
+        item for item in snapshots if item.available_as_of == selected.available_as_of
+    )
+    positions = _consistent_positions(same_time)
+    if not positions:
+        return (), PlanningQuality.PARTIAL
+    exact = bool(available) and all(
+        item.confidence == "exact" and item.source.strip() for item in same_time
+    )
+    quality = PlanningQuality.EXACT if exact else PlanningQuality.BEST_KNOWN_CONSTRAINTS_ORACLE
+    return positions, quality
 
 
 def _consistent_positions(
     snapshots: Sequence[PlayerEligibilitySnapshot],
 ) -> tuple[str, ...]:
+    """Reject conflicting snapshots rather than choosing by input order."""
     position_sets = {
         tuple(
             sorted(

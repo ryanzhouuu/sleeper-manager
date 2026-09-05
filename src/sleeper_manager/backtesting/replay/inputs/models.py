@@ -51,7 +51,7 @@ class HistoricalReplayBuildInput:
     eligibility_evidence: tuple[PlayerEligibilitySnapshot, ...] = ()
     projection_snapshots: tuple[ProjectionSnapshot, ...] = ()
     source_fingerprints: tuple[SourceFingerprint, ...] = ()
-    eligibility_policy_version: str = "eligibility-v1"
+    eligibility_policy_version: str = "eligibility-v2"
     projection_config_version: str = "projection-unconfigured"
     builder_version: str = "historical-replay-inputs-v1"
 

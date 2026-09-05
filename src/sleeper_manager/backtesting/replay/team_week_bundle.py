@@ -48,7 +48,7 @@ from sleeper_manager.backtesting.replay.team_week_sources import (
 )
 from sleeper_manager.projections.direct_baseline import DirectFantasyPointBaseline
 
-_ELIGIBILITY_POLICY_VERSION = "observed-weekly-starters-current-catalog-best-known-v1"
+_ELIGIBILITY_POLICY_VERSION = "observed-weekly-starters-current-catalog-best-known-v2"
 
 
 @dataclass(frozen=True, slots=True)
