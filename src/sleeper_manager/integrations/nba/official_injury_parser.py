@@ -459,6 +459,11 @@ def _tokenized_player_name_start(tokens: list[str], index: int, status_index: in
 
 def _normalize_tokenized_report_text(text: str) -> str:
     """Restore logical rows from pypdf's one-word-per-line extraction mode."""
+    text = re.sub(
+        r"(?m)^\s*([^\W\d_][^\s,]*-)\s*\n\s*([^\W\d_][^\s,]*,)\s*$",
+        r"\1\2",
+        text,
+    )
     tokens = [token.strip() for token in text.splitlines() if token.strip()]
     lines: list[str] = []
     index = 0
