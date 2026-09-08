@@ -83,8 +83,13 @@ def projection_snapshots(
     boundary: FantasyWeekBoundary,
     archive: HistoricalLeagueArchive,
     baseline: DirectFantasyPointBaseline,
+    *,
+    targets: Sequence[PlayerBoxScore] | None = None,
 ) -> tuple[ProjectionSnapshot, ...]:
-    """Generate selected-game projections from only outcomes finalized before each decision."""
+    """Project targets using only finalized history from the original NBA input cache.
+
+    Supplemental targets select requests; their outcomes never enter training history.
+    """
 
     games = {game.provider_id: game for game in nba_inputs.games}
     mapping_by_provider = {
@@ -102,7 +107,7 @@ def projection_snapshots(
         feature_schema_version=FEATURE_SCHEMA_VERSION,
     )
     snapshots: list[ProjectionSnapshot] = []
-    for box_score in nba_inputs.player_box_scores:
+    for box_score in nba_inputs.player_box_scores if targets is None else targets:
         game = games.get(box_score.game_id)
         mapping = mapping_by_provider.get(box_score.player_id)
         if game is None or mapping is None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import NoReturn
 
 import pytest
@@ -41,3 +42,32 @@ def _raise_sleeper(*_args: object, **_kwargs: object) -> NoReturn:
     """Raise the provider failure used to verify the command's error path."""
 
     raise SleeperAPIError("Sleeper request failed")
+
+
+def test_module_passes_explicit_inactive_evidence_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    ledger = tmp_path / "reviewed.json"
+
+    def capture(*args: object, **kwargs: object) -> NoReturn:
+        assert kwargs["inactive_evidence_path"] == ledger
+        raise ValueError("Captured evidence path")
+
+    monkeypatch.setattr(team_week_bundle, "bootstrap_historical_team_week_bundle", capture)
+    assert (
+        team_week_bundle.main(
+            [
+                "--league-id",
+                LEAGUE_ID,
+                "--roster-id",
+                "4",
+                "--week",
+                "16",
+                "--monday",
+                "2026-02-02",
+                "--inactive-evidence",
+                str(ledger),
+            ]
+        )
+        == 2
+    )

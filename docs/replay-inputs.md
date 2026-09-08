@@ -20,3 +20,41 @@ Eligibility is exact only when selected snapshots are available by the cutoff, e
 The assembler retains coverage and exclusions for incomplete team-weeks. The selected-bundle CLI currently rejects bundles whose exclusions leave no executable player-games. Consumers that need failure accounting should inspect assembler results rather than treating successful CLI output as the sample denominator.
 
 Builder versions `historical-replay-inputs-v2` and `historical-team-week-bundle-v2` fingerprint team observations in the manifest. Eligibility policies use `eligibility-v2` and `observed-weekly-starters-current-catalog-best-known-v2`. Existing bundles are not rewritten. Older artifacts without `inferred_team_membership` remain readable with a default of zero; this compatibility default does not certify that their old opportunity accounting was independently verified. Rebuild them before using the new coverage checks.
+
+## Reviewed final inactive outcomes
+
+The bundle API accepts an optional `inactive_evidence_path`; its CLI equivalent is
+`--inactive-evidence /path/to/reviewed.json`. Without it, no supplemental outcome is
+loaded. The supplied JSON uses `schema_version: "reviewed-final-inactive-v1"` and
+an array named `records`. Each record requires:
+
+| Field | Meaning |
+| --- | --- |
+| `player_id`, `player_name` | Existing NBA provider ID and matching full name |
+| `game_id`, `team_id`, `game_start` | Existing final game, participating NBA team and exact timezone-aware scheduled tipoff |
+| `status` | Literal `confirmed_final_inactive` |
+| `pdf_path`, `pdf_sha256` | Retained official final PDF and its SHA-256 hash; relative paths resolve beside the ledger |
+| `report_url`, `page` | Official `https://statsdmz.nba.com/pdfs/YYYYMMDD/YYYYMMDD_AWAYHOME.pdf` source and positive page number |
+| `retrieved_at`, `verification` | Timezone-aware retrieval time and nonempty explanation of the identity/game/status review |
+
+This is a reviewed-data import boundary, not an automatic PDF parser. The reviewer
+must verify the full player identity, team, game and final inactive listing in the
+PDF. The importer checks the schema, identities, game finality, tipoff, team,
+report date, retained PDF signature/hash and conflicting existing results. It
+rejects duplicate player-games, PDFs assigned to different games, missing files
+and contradictory outcomes. It never substitutes a pregame Out report or absence
+of a box score for confirmation. Compatible existing zero/DNP rows retain their
+original source plus the final report attribution.
+
+The bundle fingerprints the complete ledger and supporting PDF hashes. Only
+selected roster/week outcomes are merged for scoring; each new outcome has zero
+statistics and `did_play=False`. Supplements do not enter team-history observations
+or projection training history. They can request the existing pregame projection
+for a recovered target using the original historical inputs. Thus membership
+uncertainty and approximate finalization/eligibility labels remain unchanged, and
+unresolved team-weeks can still fail assembly after scoring recovery.
+
+`historical-team-week-bundle-v3` identifies this integration. Prior immutable
+bundles remain intact. A supplied ledger is validated in full against the loaded
+NBA inputs, so callers should select a ledger for those seasons. This mechanism
+supports bounded reviewed recovery; it does not certify broad historical coverage.

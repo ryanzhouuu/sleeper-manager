@@ -29,6 +29,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--roster-id", required=True, type=int)
     parser.add_argument("--week", required=True, type=int)
     parser.add_argument("--monday", required=True, type=_parse_monday)
+    parser.add_argument(
+        "--inactive-evidence",
+        type=Path,
+        help="Reviewed final-inactive JSON ledger with retained PDFs",
+    )
     return parser
 
 
@@ -45,6 +50,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.week,
                 args.monday,
             ),
+            inactive_evidence_path=args.inactive_evidence,
         )
     except (
         team_week_bundle.HistoricalTeamWeekBundleError,
