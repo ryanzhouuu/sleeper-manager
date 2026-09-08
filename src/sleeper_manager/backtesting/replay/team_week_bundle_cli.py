@@ -37,6 +37,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--identity-evidence", type=Path, help="Hashed ESPN roster identity sources"
     )
+    parser.add_argument(
+        "--injury-team-evidence",
+        type=Path,
+        help="Hashed injury reports for approximate historical teams",
+    )
     return parser
 
 
@@ -55,6 +60,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
             inactive_evidence_path=args.inactive_evidence,
             identity_evidence_path=args.identity_evidence,
+            injury_team_evidence_path=args.injury_team_evidence,
         )
     except (
         team_week_bundle.HistoricalTeamWeekBundleError,

@@ -33,6 +33,7 @@ class PlayerTeamObservation:
     team_id: str
     observed_at: datetime
     source: str
+    approximate: bool = False
 
     def __post_init__(self) -> None:
         """Require attributable, timezone-aware evidence for membership reconstruction."""
@@ -40,6 +41,8 @@ class PlayerTeamObservation:
             raise ReplayInputError("Team observations require player, team and source identities")
         if self.observed_at.tzinfo is None or self.observed_at.utcoffset() is None:
             raise ReplayInputError("Team observation time must be timezone-aware")
+        if not isinstance(self.approximate, bool):
+            raise ReplayInputError("Team observation approximation must be boolean")
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +74,7 @@ class HistoricalReplayBuildInput:
     source_fingerprints: tuple[SourceFingerprint, ...] = ()
     eligibility_policy_version: str = "eligibility-v2"
     projection_config_version: str = "projection-unconfigured"
-    builder_version: str = "historical-replay-inputs-v2"
+    builder_version: str = "historical-replay-inputs-v3"
     team_observations: tuple[PlayerTeamObservation, ...] = ()
 
     def __post_init__(self) -> None:

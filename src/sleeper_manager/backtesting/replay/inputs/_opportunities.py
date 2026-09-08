@@ -66,9 +66,12 @@ def expected_inventory(
             )
             continue
         history: dict[datetime, set[str]] = defaultdict(set)
+        approximate_times: set[datetime] = set()
         for observation in inputs.team_observations:
             if observation.provider_player_id == providers[0]:
                 history[observation.observed_at].add(observation.team_id)
+                if observation.approximate:
+                    approximate_times.add(observation.observed_at)
         times = sorted(history)
         if not times:
             issues.append(_unknown_team(scope))
@@ -94,7 +97,7 @@ def expected_inventory(
                 continue
             if team in (game.home_team_id, game.away_team_id):
                 teams[(player, game.provider_id)] = team
-                inferred_count += int(inferred)
+                inferred_count += int(inferred or game.start_time in approximate_times)
     return ExpectedInventory(teams, inferred_count, tuple(dict.fromkeys(issues)))
 
 

@@ -76,3 +76,38 @@ removed from recovered identities, so current rosters do not establish historica
 membership or add outcome/training data. Recovered IDs can also validate explicitly
 supplied final-inactive evidence. `historical-team-week-bundle-v4` identifies this
 additional evidence path; all prior immutable artifacts remain intact.
+
+## Injury-report team proxies
+
+The optional `--injury-team-evidence /path/to/reports.json` flag (API
+`injury_team_evidence_path`) accepts a ledger with
+`schema_version: "injury-team-proxies-v1"` and `reports`, an array of parsed-cache
+`path` / `sha256` objects. Each version-2 injury cache must retain its neighboring
+`.pdf`; the loader verifies both cache and PDF hashes and publication metadata.
+All selected input hashes and the selection policy enter the manifest.
+
+For each completed game and team, select the latest supplied team report published
+no later than scheduled tipoff. Match the schedule by Eastern game date and both
+teams; ambiguous schedule matches are rejected. A player omitted by that report
+is not carried forward from an older one. Tied reports must agree on the player
+association, names must resolve to one provider ID, and `Trade Pending` entries
+are excluded. An unsubmitted team report supplies no observation. This policy
+means latest **among supplied reports**; the ledger must contain the intended
+report window, and it does not certify that every historical publication was
+captured.
+
+Each supported association is a `PlayerTeamObservation(approximate=True)` at that
+game's scheduled tipoff. This is an explicit retrospective proxy, not a claim of
+exact legal affiliation. The existing agreeing-neighbor rule still determines
+membership between observations and still flags trade gaps and endpoints.
+`inferred_team_membership` also counts direct approximate observations, including
+when an agreeing exact observation exists at the same time. Such evidence cannot
+produce strict completeness. The approximation flag defaults to false for
+existing direct records and is fingerprinted. Versions
+`historical-replay-inputs-v3` and `historical-team-week-bundle-v5` identify this
+provenance-aware behavior.
+
+Team proxies do not create zero outcomes, projections, or training observations.
+Newly established opportunities can expose more missing game results; those need
+independent final outcome evidence before scoring. Pre-tipoff availability data
+used by an eventual policy must separately respect its actual decision cutoff.

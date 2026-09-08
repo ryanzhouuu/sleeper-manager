@@ -179,3 +179,22 @@ def test_unresolved_identity_is_not_counted_twice_by_the_inventory_and_join() ->
     assert result.coverage.missing_evidence == ((PlanningReasonCode.UNRESOLVED_PLAYER_IDENTITY, 1),)
     assert result.coverage.expected_player_games == 0
     assert not result.complete
+
+
+def test_direct_proxy_observations_never_claim_exact_complete_membership() -> None:
+    inputs = _historical_join_inputs()
+    assert assemble_historical_team_week_inputs(inputs)[0].complete
+    approximate = replace(
+        inputs,
+        team_observations=tuple(
+            replace(observation, approximate=True) for observation in inputs.team_observations
+        ),
+    )
+    result = assemble_historical_team_week_inputs(approximate)[0]
+    assert result.coverage.expected_player_games == result.coverage.joined_player_games == 2
+    assert result.coverage.inferred_team_membership == 2
+    assert not result.complete
+    assert (
+        build_replay_input_manifest(inputs).manifest_id
+        != build_replay_input_manifest(approximate).manifest_id
+    )
