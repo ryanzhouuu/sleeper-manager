@@ -58,3 +58,21 @@ unresolved team-weeks can still fail assembly after scoring recovery.
 bundles remain intact. A supplied ledger is validated in full against the loaded
 NBA inputs, so callers should select a ledger for those seasons. This mechanism
 supports bounded reviewed recovery; it does not certify broad historical coverage.
+
+## Supplemental provider identities
+
+`--identity-evidence /path/to/sources.json` (API `identity_evidence_path`) can
+recover otherwise unresolved player IDs from retained ESPN roster responses.
+The source ledger has `schema_version: "espn-roster-identities-v1"` and `sources`,
+whose entries contain `path`, `url`, `retrieved_at` and `sha256`. Paths are relative
+to the ledger unless absolute; URLs identify ESPN's NBA `/teams/{id}/roster`
+endpoint. Raw response bytes and the ledger are fingerprinted.
+
+Recovery requires a unique provider ID matching the cached Sleeper full name and
+birth date. Missing dates, conflicting identities and ambiguous matches remain
+unresolved; invalid schemas or changed source hashes raise an error. Only
+unresolved mappings are eligible. Current team and active-state fields are
+removed from recovered identities, so current rosters do not establish historical
+membership or add outcome/training data. Recovered IDs can also validate explicitly
+supplied final-inactive evidence. `historical-team-week-bundle-v4` identifies this
+additional evidence path; all prior immutable artifacts remain intact.

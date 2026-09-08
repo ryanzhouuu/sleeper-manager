@@ -34,6 +34,9 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         help="Reviewed final-inactive JSON ledger with retained PDFs",
     )
+    parser.add_argument(
+        "--identity-evidence", type=Path, help="Hashed ESPN roster identity sources"
+    )
     return parser
 
 
@@ -51,6 +54,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.monday,
             ),
             inactive_evidence_path=args.inactive_evidence,
+            identity_evidence_path=args.identity_evidence,
         )
     except (
         team_week_bundle.HistoricalTeamWeekBundleError,

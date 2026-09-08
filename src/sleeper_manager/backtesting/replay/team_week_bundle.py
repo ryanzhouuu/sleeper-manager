@@ -15,6 +15,10 @@ from sleeper_manager.backtesting.experiments.data import (
     HistoricalExperimentInputs,
     load_historical_experiment_inputs,
 )
+from sleeper_manager.backtesting.replay.identity_evidence import (
+    IdentityEvidence,
+    load_identity_evidence,
+)
 from sleeper_manager.backtesting.replay.inactive_evidence import (
     InactiveEvidence,
     load_inactive_evidence,
@@ -114,6 +118,7 @@ def bootstrap_historical_team_week_bundle(
     *,
     nba_inputs: HistoricalExperimentInputs | None = None,
     inactive_evidence_path: Path | None = None,
+    identity_evidence_path: Path | None = None,
     now: datetime | None = None,
 ) -> HistoricalTeamWeekBundleOutput:
     """Acquire selected evidence and persist one deterministic replay-input bundle."""
@@ -141,12 +146,15 @@ def bootstrap_historical_team_week_bundle(
         seasons=(nba_season_from_archive(archive),),
         retrieved_at=retrieved_at,
     )
-    inactive = (
-        load_inactive_evidence(inactive_evidence_path, resolved_inputs)
-        if inactive_evidence_path is not None
-        else InactiveEvidence()
+    return _write_team_week_bundle(
+        workspace,
+        request,
+        archive,
+        resolved_inputs,
+        acquired,
+        inactive_evidence_path,
+        identity_evidence_path,
     )
-    return _write_team_week_bundle(workspace, request, archive, resolved_inputs, acquired, inactive)
 
 
 def _write_team_week_bundle(
@@ -155,7 +163,8 @@ def _write_team_week_bundle(
     archive: HistoricalLeagueArchive,
     nba_inputs: HistoricalExperimentInputs,
     archive_acquired: bool,
-    inactive: InactiveEvidence,
+    inactive_evidence_path: Path | None,
+    identity_evidence_path: Path | None,
 ) -> HistoricalTeamWeekBundleOutput:
     """Assemble the selected roster-week and write it beneath its manifest hash."""
 
@@ -172,10 +181,33 @@ def _write_team_week_bundle(
         boundary.utc_start,
         boundary.utc_end,
     )
-    mappings = player_mappings(
-        roster_player_ids,
-        player_catalog(workspace, request.league_id),
-        nba_inputs,
+    catalog = player_catalog(workspace, request.league_id)
+    mappings = player_mappings(roster_player_ids, catalog, nba_inputs)
+    identities = IdentityEvidence()
+    if identity_evidence_path is not None:
+        identities = load_identity_evidence(
+            identity_evidence_path,
+            catalog,
+            tuple(mapping.sleeper_id for mapping in mappings if mapping.espn_id is None),
+            nba_inputs.provider_players,
+        )
+        recovered = player_mappings(
+            tuple(mapping.sleeper_id for mapping in mappings if mapping.espn_id is None),
+            catalog,
+            replace(
+                nba_inputs, provider_players=(*nba_inputs.provider_players, *identities.players)
+            ),
+        )
+        mappings = tuple(mapping for mapping in mappings if mapping.espn_id is not None) + recovered
+    inactive = (
+        load_inactive_evidence(
+            inactive_evidence_path,
+            replace(
+                nba_inputs, provider_players=(*nba_inputs.provider_players, *identities.players)
+            ),
+        )
+        if inactive_evidence_path is not None
+        else InactiveEvidence()
     )
     baseline = DirectFantasyPointBaseline()
     games, box_scores = selected_games_and_box_scores(nba_inputs, mappings, boundary)
@@ -212,10 +244,11 @@ def _write_team_week_bundle(
             nba_inputs=nba_inputs,
             finalization_policy_version=APPROXIMATE_FINALIZATION_POLICY_VERSION,
         )
-        + inactive.source_fingerprints,
+        + inactive.source_fingerprints
+        + identities.source_fingerprints,
         eligibility_policy_version=_ELIGIBILITY_POLICY_VERSION,
         projection_config_version=baseline.config.model_version,
-        builder_version="historical-team-week-bundle-v3",
+        builder_version="historical-team-week-bundle-v4",
     )
     manifest = build_replay_input_manifest(inputs)
     team_weeks = assemble_historical_team_week_inputs(

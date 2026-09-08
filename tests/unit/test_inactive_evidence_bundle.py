@@ -60,7 +60,7 @@ def test_supplement_recovers_scoring_without_changing_membership_or_history(tmp_
     inactive = next(row for row in recovered.team_week.player_games if row.game_id == "missing")
     assert inactive.actual_score == 0
     assert inactive.projection is not None
-    assert recovered.manifest.builder_version == "historical-team-week-bundle-v3"
+    assert recovered.manifest.builder_version == "historical-team-week-bundle-v4"
     original_manifest = recovered.manifest_path.read_bytes()
     payload = json.loads(ledger.read_text())
     payload["records"][0]["verification"] += " additional review"
