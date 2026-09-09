@@ -116,6 +116,14 @@ class HistoricalTeamWeekBundleOutput:
         )
 
 
+class HistoricalTeamWeekAssemblyError(HistoricalTeamWeekBundleError):
+    """Retain an unusable assembled bundle for sample accounting without admitting replay."""
+
+    def __init__(self, output: HistoricalTeamWeekBundleOutput) -> None:
+        super().__init__("Selected team-week has no joined player-game evidence")
+        self.output = output
+
+
 def bootstrap_historical_team_week_bundle(
     workspace: Path,
     request: HistoricalTeamWeekBundleRequest,
@@ -285,10 +293,11 @@ def _write_team_week_bundle(
             "Selected source evidence did not produce exactly one team-week"
         )
     team_week = _with_observed_starter_lock_eligibility(team_weeks[0])
-    if not team_week.player_games:
-        raise HistoricalTeamWeekBundleError("Selected team-week has no joined player-game evidence")
     bundle_root = write_replay_input_bundle(workspace / "team-week-inputs", manifest, (team_week,))
-    return HistoricalTeamWeekBundleOutput(archive_acquired, bundle_root, manifest, team_week)
+    output = HistoricalTeamWeekBundleOutput(archive_acquired, bundle_root, manifest, team_week)
+    if not team_week.player_games:
+        raise HistoricalTeamWeekAssemblyError(output)
+    return output
 
 
 def _week_boundary(request: HistoricalTeamWeekBundleRequest) -> FantasyWeekBoundary:
@@ -354,6 +363,7 @@ if __name__ == "__main__":
 
 
 __all__ = (
+    "HistoricalTeamWeekAssemblyError",
     "HistoricalTeamWeekBundleError",
     "HistoricalTeamWeekBundleOutput",
     "HistoricalTeamWeekBundleRequest",

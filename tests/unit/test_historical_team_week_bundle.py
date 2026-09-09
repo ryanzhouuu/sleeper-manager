@@ -16,7 +16,9 @@ from team_week_source_support import (
     _write_archive,
 )
 
+from sleeper_manager.backtesting.replay.inputs.artifact import load_historical_team_week_artifact
 from sleeper_manager.backtesting.replay.team_week_bundle import (
+    HistoricalTeamWeekAssemblyError,
     HistoricalTeamWeekBundleError,
     HistoricalTeamWeekBundleRequest,
     bootstrap_historical_team_week_bundle,
@@ -142,13 +144,29 @@ def test_bootstrap_detects_a_game_missing_from_the_raw_player_outcomes(tmp_path:
         inputs.games[-1], provider_id="missing", start_time=datetime(2026, 2, 2, 18, tzinfo=UTC)
     )
     request = HistoricalTeamWeekBundleRequest(LEAGUE_ID, 4, 16, date(2026, 2, 2))
-    with pytest.raises(HistoricalTeamWeekBundleError, match="no joined player-game evidence"):
+    with pytest.raises(
+        HistoricalTeamWeekBundleError, match="no joined player-game evidence"
+    ) as caught:
         bootstrap_historical_team_week_bundle(
             tmp_path,
             request,
             nba_inputs=replace(inputs, games=(*inputs.games, missing)),
             now=RETRIEVED_AT,
         )
+
+    assert isinstance(caught.value, HistoricalTeamWeekAssemblyError)
+    assert caught.value.output.team_week_path.is_file()
+    failed_paths = tuple(
+        (tmp_path / "team-week-inputs").glob("*/team-weeks/*/week-*/roster-*.json")
+    )
+    assert len(failed_paths) == 1
+    failed = load_historical_team_week_artifact(failed_paths[0])
+    assert failed.coverage.expected_player_games == 3
+    assert failed.coverage.scored_player_games == 2
+    assert failed.exclusions
+    assert not failed.player_games
+    assert not failed.complete
+    original_bytes = failed_paths[0].read_bytes()
 
     filled = replace(inputs.player_box_scores[1], game_id="missing", played_at=missing.start_time)
     result = bootstrap_historical_team_week_bundle(
@@ -163,3 +181,6 @@ def test_bootstrap_detects_a_game_missing_from_the_raw_player_outcomes(tmp_path:
     )
     assert result.team_week.coverage.expected_player_games == 3
     assert result.team_week.coverage.scored_player_games == 3
+
+    assert failed_paths[0].read_bytes() == original_bytes
+    assert result.team_week_path != failed_paths[0]

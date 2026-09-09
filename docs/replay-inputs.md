@@ -17,7 +17,7 @@ Coverage fields:
 
 Eligibility is exact only when selected snapshots are available by the cutoff, explicitly labeled `exact`, attributed to a source, and consistent at that timestamp. Current-catalog or proxy snapshots remain best-known even when timestamped before a game. Conflicting tied snapshots fail closed, including future fallbacks.
 
-The assembler retains coverage and exclusions for incomplete team-weeks. The selected-bundle CLI currently rejects bundles whose exclusions leave no executable player-games. Consumers that need failure accounting should inspect assembler results rather than treating successful CLI output as the sample denominator.
+The assembler retains coverage and exclusions for incomplete team-weeks. The selected-bundle builder persists these immutable artifacts before rejecting bundles with no executable player-games. It raises `HistoricalTeamWeekAssemblyError`, a `HistoricalTeamWeekBundleError` subclass whose `output` contains the manifest, team-week and retained paths. The CLI still fails for these inputs. Earlier source failures can occur before a bundle exists; consumers must retain those failed attempts separately. Successful CLI output alone is never the sample denominator.
 
 Builder versions `historical-replay-inputs-v2` and `historical-team-week-bundle-v2` fingerprint team observations in the manifest. Eligibility policies use `eligibility-v2` and `observed-weekly-starters-current-catalog-best-known-v2`. Existing bundles are not rewritten. Older artifacts without `inferred_team_membership` remain readable with a default of zero; this compatibility default does not certify that their old opportunity accounting was independently verified. Rebuild them before using the new coverage checks.
 
