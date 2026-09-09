@@ -52,7 +52,9 @@ exactly one of:
 - `bundle`: file references named `manifest` and `team_week`, including for
   assembled-but-unusable bundles. Coverage and exclusions come from that artifact.
 - `failure`: a stable `reason`, explanatory `detail`, and retained `evidence`
-  reference for an attempt that failed before an artifact existed.
+  reference. `stage` defaults to `before_assembly`; use `artifact_validation`
+  when a produced artifact fails validation, retaining its references in the
+  failure evidence. This records the failure without admitting the invalid bundle.
 
 Optional `outputs` retain hashed result references without treating them as a
 validated replay result. The helper `file_reference(Path(...))` captures absolute
@@ -69,7 +71,7 @@ leagues use their own manifests; no cross-league manifest is required.
 
 ## Accounting and limits
 
-Every expected key has one status: `unprocessed`, `failed_before_assembly`,
+Every expected key has one status: `unprocessed`, `failed_before_assembly`, `failed_artifact_validation`,
 `incomplete`, `empty`, or `assembled`. Missing work and evidence failures stay in
 the denominator. `assembled` means the selected artifact has matching opportunity,
 identity, eligibility, outcome and projection counts, retained player-games, and

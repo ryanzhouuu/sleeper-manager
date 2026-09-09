@@ -71,6 +71,7 @@ class BundleReference(IndexRecord):
 
 
 class FailedAttempt(IndexRecord):
+    stage: Literal["before_assembly", "artifact_validation"] = "before_assembly"
     reason: Text
     detail: Text
     evidence: FileReference

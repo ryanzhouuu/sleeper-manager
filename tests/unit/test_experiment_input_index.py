@@ -256,3 +256,36 @@ def test_projection_versions_are_checked_against_manifest(tmp_path: Path) -> Non
     )
     with pytest.raises(ExperimentInputIndexError, match="Projection disagrees"):
         build_input_inventory(index, base=tmp_path)
+
+
+def test_rejected_artifact_remains_counted_as_a_validation_failure(tmp_path: Path) -> None:
+    index = sample_index(tmp_path)
+    selection = index.selections[0]
+    assert selection.bundle is not None
+    path = Path(selection.bundle.team_week.path)
+    payload = json.loads(path.read_bytes())
+    payload["observed_starter_ids"] = ["absent-player"]
+    path.write_text(json.dumps(payload))
+    bundle = selection.bundle.model_copy(update={"team_week": file_reference(path)})
+    invalid = selection.model_copy(update={"bundle": bundle})
+    with pytest.raises(ValueError, match="Observed starters"):
+        build_input_inventory(index.model_copy(update={"selections": (invalid,)}), base=tmp_path)
+    failure = InputSelection(
+        key=selection.key,
+        failure=FailedAttempt(
+            stage="artifact_validation",
+            reason="invalid_roster_relationship",
+            detail="Observed starter is absent from the reconstructed roster",
+            evidence=file_reference(path),
+        ),
+    )
+    report = build_input_inventory(
+        index.model_copy(update={"selections": (failure,)}), base=tmp_path
+    )
+    assert report["expected_team_weeks"] == 2
+    assert report["leagues"][0]["status_counts"] == {
+        "failed_artifact_validation": 1,
+        "unprocessed": 1,
+    }
+    assert report["team_weeks"][0]["strict_complete"] is False
+    assert report["replay_readiness"] == "not_evaluated"

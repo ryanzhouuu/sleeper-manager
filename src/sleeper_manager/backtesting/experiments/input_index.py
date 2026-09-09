@@ -103,7 +103,9 @@ def build_input_inventory(index: ExperimentInputIndex, *, base: Path) -> dict[st
             row["selection"] = chosen.model_dump(mode="json")
             if chosen.failure is not None:
                 _verified_path(chosen.failure.evidence, base)
-                row.update(status="failed_before_assembly", failure=chosen.failure.model_dump())
+                row.update(
+                    status=f"failed_{chosen.failure.stage}", failure=chosen.failure.model_dump()
+                )
             else:
                 row.update(_bundle_inventory(index, expected[key], chosen, base))
         rows.append(row)
