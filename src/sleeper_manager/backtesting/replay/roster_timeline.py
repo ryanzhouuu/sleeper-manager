@@ -1,3 +1,9 @@
+"""Reconstruct historical fantasy-roster membership on explicit time windows.
+
+Selected roster snapshots anchor the end state. Only transactions effective
+inside the half-open reconstruction window are reversed and replayed.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
@@ -123,6 +129,8 @@ def reconstruct_roster_timeline(
     season_end: datetime | None = None,
     weekly_players: Mapping[tuple[int, int], Iterable[str]] | None = None,
 ) -> RosterTimeline:
+    """Reconstruct membership without applying transactions outside the requested window."""
+
     boundaries = tuple(sorted(week_boundaries, key=lambda week: week.utc_start))
     start = season_start or (boundaries[0].utc_start if boundaries else _default_start(archive))
     end = season_end or (boundaries[-1].utc_end if boundaries else _default_end(archive, start))
@@ -141,6 +149,9 @@ def reconstruct_roster_timeline(
         if transaction.effective_at is None:
             exclusions.append(f"missing_effective_timestamp:{transaction.transaction_id}")
             continue
+        if not start <= transaction.effective_at < end:
+            exclusions.append(f"transaction_outside_season:{transaction.transaction_id}")
+            continue
         usable_transactions.append(transaction)
 
     for transaction in reversed(usable_transactions):
@@ -158,9 +169,6 @@ def reconstruct_roster_timeline(
     for transaction in usable_transactions:
         effective_at = transaction.effective_at
         assert effective_at is not None
-        if not start <= effective_at <= end:
-            exclusions.append(f"transaction_outside_season:{transaction.transaction_id}")
-            continue
         for player_id, roster_id in transaction.drops:
             _close_membership(
                 active,

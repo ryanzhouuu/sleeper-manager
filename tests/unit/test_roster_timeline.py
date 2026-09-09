@@ -1,3 +1,5 @@
+"""Roster reconstruction and Eastern fantasy-week boundary regressions."""
+
 from datetime import UTC, date, datetime
 
 from sleeper_manager.backtesting.replay.league_archive import parse_historical_league_archive
@@ -43,6 +45,19 @@ def test_timeline_reverse_reconstructs_initial_membership_and_replays_drop_add()
     assert not timeline.membership_at(1, "p1", datetime(2025, 10, 7, 16, tzinfo=UTC))
     assert timeline.membership_at(1, "p2", datetime(2025, 10, 7, 16, tzinfo=UTC))
     assert timeline.exclusions == ()
+
+
+def test_timeline_does_not_reverse_transactions_before_reconstruction_window() -> None:
+    """Keep an anchor roster intact when its add/drop transaction predates the window."""
+
+    weeks = build_fantasy_week_boundaries({2: date(2025, 10, 13)})
+
+    timeline = reconstruct_roster_timeline(_archive(), week_boundaries=weeks)
+
+    assert timeline.players_at(1, weeks[0].utc_start) == ("p2",)
+    assert any(
+        reason.startswith("transaction_outside_season:tx-1") for reason in timeline.exclusions
+    )
 
 
 def test_timeline_exposes_membership_intervals_and_week_overlap() -> None:
