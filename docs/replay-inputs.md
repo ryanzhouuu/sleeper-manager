@@ -111,3 +111,12 @@ Team proxies do not create zero outcomes, projections, or training observations.
 Newly established opportunities can expose more missing game results; those need
 independent final outcome evidence before scoring. Pre-tipoff availability data
 used by an eventual policy must separately respect its actual decision cutoff.
+
+## Complete sample accounting
+
+Use the [experiment input index](experiment-input-index.md) to select immutable
+bundles explicitly and retain all declared team-weeks, including unprocessed
+keys and failed inputs. `HistoricalTeamWeekAssemblyError.output` supplies the
+retained bundle references for assembly failures. Errors before assembly need a
+separate failed-attempt evidence record. Input assembly counts and strict evidence
+quality remain separate from full-advisor replay readiness.
