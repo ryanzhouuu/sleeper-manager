@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 
 import pytest
@@ -11,6 +12,9 @@ from sleeper_manager.backtesting.experiments.lock_in_diagnostic import (
     LockInDiagnosticError,
     LockInDiagnosticRequest,
     run_lock_in_diagnostic,
+)
+from sleeper_manager.backtesting.experiments.lock_in_diagnostic_adapter import (
+    DiagnosticPolicyAdapter,
 )
 from sleeper_manager.backtesting.replay.engine import ReplayError
 from sleeper_manager.backtesting.replay.inputs.models import (
@@ -75,6 +79,35 @@ def test_all_deferred_run_is_blocked_without_success_comparison() -> None:
     assert result.comparison is None
     assert result.deferrals
     assert any(item.terminal for item in result.deferrals)
+
+
+def test_restricted_diagnostic_filters_roster_members_to_observed_starters() -> None:
+    """Keep historical-start diagnostics restricted after membership is persisted separately."""
+
+    team_week = _team_week(p1_actual=30, p2_expected=1, p2_actual=1)
+    bench_game = replace(
+        _player_game(
+            "bench",
+            "g1",
+            12,
+            expected=12,
+            available_as_of=BASE - timedelta(hours=1),
+        ),
+        rostered_at_tipoff=True,
+    )
+    restricted = DiagnosticPolicyAdapter(
+        LockInDiagnosticRequest(
+            replace(team_week, player_games=(*team_week.player_games, bench_game))
+        )
+    )
+
+    membership = {
+        player_game.sleeper_id: player_game.rostered_at_tipoff
+        for player_game in restricted.state.player_games
+    }
+    assert membership["bench"] is False
+    assert membership["p1"] is True
+    assert membership["p2"] is True
 
 
 def test_infeasible_oracle_deadline_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 
 from sleeper_manager.backtesting.experiments.lock_in_diagnostic_models import (
@@ -36,10 +37,21 @@ class DiagnosticPolicyAdapter:
         """Initialize replay state and trace collectors for one admitted request."""
 
         self.request = request
+        observed_starters = {
+            player_id
+            for player_id in request.team_week.observed_starter_ids
+            if player_id is not None
+        }
         self.state = ReplayState(
             starter_slots=request.team_week.starter_slots,
             games=request.team_week.games,
-            player_games=request.team_week.player_games,
+            player_games=tuple(
+                replace(
+                    player_game,
+                    rostered_at_tipoff=player_game.sleeper_id in observed_starters,
+                )
+                for player_game in request.team_week.player_games
+            ),
         )
         self.policy = ScoreMaximizingLockInPolicy(request.policy_config)
         self.decided: set[str] = set()

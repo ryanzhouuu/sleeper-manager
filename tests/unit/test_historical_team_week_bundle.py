@@ -67,7 +67,7 @@ def test_bootstrap_writes_one_labeled_team_week_with_pregame_projection(tmp_path
     assert finalization_bound.version == "approximate-next-eastern-day-0600-v1"
     assert (
         output.manifest.eligibility_policy_version
-        == "observed-weekly-starters-current-catalog-best-known-v2"
+        == "roster-timeline-current-catalog-best-known-v3"
     )
 
 
@@ -110,8 +110,8 @@ def test_bootstrap_excludes_same_day_outcome_from_pregame_projection(tmp_path: P
     assert first.input_version == second.input_version
 
 
-def test_bundle_marks_only_observed_starters_as_best_known_lock_eligible(tmp_path: Path) -> None:
-    """Keep roster membership visible without granting unobserved bench lock permission."""
+def test_bundle_keeps_roster_membership_separate_from_observed_starters(tmp_path: Path) -> None:
+    """Persist every rostered opportunity for counterfactual lineup execution."""
 
     _write_archive(tmp_path, include_bench=True)
 
@@ -127,12 +127,12 @@ def test_bundle_marks_only_observed_starters_as_best_known_lock_eligible(tmp_pat
         now=RETRIEVED_AT,
     )
 
-    lock_eligibility = {
+    roster_membership = {
         player_game.sleeper_id: player_game.rostered_at_tipoff
         for player_game in output.team_week.player_games
         if player_game.game_id == "target"
     }
-    assert lock_eligibility == {"sleeper-1": True, "sleeper-2": False}
+    assert roster_membership == {"sleeper-1": True, "sleeper-2": True}
     assert output.team_week.roster_player_ids == ("sleeper-1", "sleeper-2")
 
 

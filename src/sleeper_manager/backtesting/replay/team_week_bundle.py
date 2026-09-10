@@ -61,7 +61,7 @@ from sleeper_manager.backtesting.replay.team_week_sources import (
 )
 from sleeper_manager.projections.direct_baseline import DirectFantasyPointBaseline
 
-_ELIGIBILITY_POLICY_VERSION = "observed-weekly-starters-current-catalog-best-known-v2"
+_ELIGIBILITY_POLICY_VERSION = "roster-timeline-current-catalog-best-known-v3"
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,7 +279,7 @@ def _write_team_week_bundle(
         + injury_teams.source_fingerprints,
         eligibility_policy_version=_ELIGIBILITY_POLICY_VERSION,
         projection_config_version=baseline.config.model_version,
-        builder_version="historical-team-week-bundle-v5",
+        builder_version="historical-team-week-bundle-v6",
     )
     manifest = build_replay_input_manifest(inputs)
     team_weeks = assemble_historical_team_week_inputs(
@@ -292,7 +292,7 @@ def _write_team_week_bundle(
         raise HistoricalTeamWeekBundleError(
             "Selected source evidence did not produce exactly one team-week"
         )
-    team_week = _with_observed_starter_lock_eligibility(team_weeks[0])
+    team_week = team_weeks[0]
     bundle_root = write_replay_input_bundle(workspace / "team-week-inputs", manifest, (team_week,))
     output = HistoricalTeamWeekBundleOutput(archive_acquired, bundle_root, manifest, team_week)
     if not team_week.player_games:
@@ -325,28 +325,6 @@ def _anchor_archive_to_week(
     return replace(
         archive,
         final_rosters=(ArchivedRoster(request.roster_id, matchup.player_ids, matchup.starter_ids),),
-    )
-
-
-def _with_observed_starter_lock_eligibility(
-    team_week: HistoricalTeamWeekInput,
-) -> HistoricalTeamWeekInput:
-    """Treat only observed weekly starters as best-known Lock-In eligible pending a richer contract.
-
-    Roster timeline membership remains separate from this conservative policy
-    permission until the shared replay contract represents both facts.
-    """
-
-    observed_starters = set(team_week.observed_starter_ids)
-    return replace(
-        team_week,
-        player_games=tuple(
-            replace(
-                player_game,
-                rostered_at_tipoff=player_game.sleeper_id in observed_starters,
-            )
-            for player_game in team_week.player_games
-        ),
     )
 
 
