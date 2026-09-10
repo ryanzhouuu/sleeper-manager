@@ -157,6 +157,27 @@ def test_bitmask_assignment_matches_exhaustive_oracle_with_fixed_and_constrained
     )
 
 
+def test_assignment_scales_by_slots_without_reusing_players() -> None:
+    """Choose the best nine of fifteen players without player-subset expansion."""
+
+    candidates = tuple(
+        AssignmentCandidate(
+            candidate_id=f"candidate-{index:02d}",
+            player_id=f"player-{index:02d}",
+            score=float(index),
+            eligible_positions=("PG",),
+        )
+        for index in range(15)
+    )
+
+    result = maximum_weight_assignment(candidates, ("UTIL",) * 9)
+
+    assert result.score == sum(range(6, 15))
+    assert {assignment.player_id for assignment in result.assignments} == {
+        f"player-{index:02d}" for index in range(6, 15)
+    }
+
+
 def _exhaustive_assignment(
     candidates: tuple[AssignmentCandidate, ...],
     slots: tuple[str, ...],

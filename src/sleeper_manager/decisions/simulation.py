@@ -151,6 +151,7 @@ def rollout_scenario_assignments(
     results: list[AssignmentResult] = []
     fixed_players = {candidate.player_id for candidate in fixed_assignments}
     for scenario in scenarios:
+        scenario_values = dict(scenario.values)
         candidates: list[AssignmentCandidate] = []
         for record in remaining:
             if record.candidate_id in excluded_candidate_ids:
@@ -161,7 +162,7 @@ def rollout_scenario_assignments(
                 AssignmentCandidate(
                     candidate_id=record.candidate_id,
                     player_id=record.player_id,
-                    score=scenario.value_for(record.candidate_id),
+                    score=scenario_values.get(record.candidate_id, 0.0),
                     eligible_positions=record.eligible_positions,
                     game_id=record.game_id,
                     eligible_slot_indices=record.eligible_slot_indices,
