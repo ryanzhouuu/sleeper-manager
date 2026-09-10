@@ -120,3 +120,20 @@ keys and failed inputs. `HistoricalTeamWeekAssemblyError.output` supplies the
 retained bundle references for assembly failures. Errors before assembly need a
 separate failed-attempt evidence record. Input assembly counts and strict evidence
 quality remain separate from full-advisor replay readiness.
+
+## Full-advisor replay
+
+`run_full_advisor_replay(FullAdvisorReplayRequest(...))` executes the current weekly
+planner and live Lock-In evaluator over one admitted team-week. It starts with an empty
+simulated lineup, plans before each tipoff batch, records which simulated starters make
+each player-game Lock-In eligible, preserves active and fixed slots, assigns legal
+automatic-final scores, and compares the realized result with the constrained hindsight
+oracle. Historical `observed_starter_ids` are not policy inputs on this path.
+
+The default reference configuration is `full-advisor-replay-v1`: weekly planner and
+Lock-In policy each use 2,000 scenarios, seed 0, and tie tolerance 0.01; lineup moves use
+a ten-minute lead and the live balanced confidence threshold is 0.70. A run fails closed
+on blocked point-in-time projections, active-player moves, infeasible Lock placement,
+automatic-final cardinality gaps, and oracle deadline violations. Callers running a
+sample must retain those failures and bind outputs to immutable input hashes; a raised
+error is not permission to drop the team-week.

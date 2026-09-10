@@ -48,9 +48,11 @@ def option_candidates(
 def next_actionable_batch(state: TeamWeekState) -> tuple[GameOpportunity, ...] | None:
     """Return the earliest unpassed scheduled opportunities sharing a tipoff."""
     passed = {(item.player_id, item.game_id) for item in state.passed_opportunities}
+    locked_players = {item.player_id for item in state.fixed_slots}
     candidates = tuple(
         opportunity
         for opportunity in state.opportunities
+        if opportunity.sleeper_player_id not in locked_players
         if opportunity.status is PlanningGameStatus.SCHEDULED
         and opportunity.scheduled_start > state.decision_time
         and opportunity.rostered_at_tipoff is True
@@ -76,11 +78,13 @@ def future_opportunities(
 ) -> tuple[GameOpportunity, ...]:
     """Return later rostered opportunities still eligible for replanning."""
     passed = {(item.player_id, item.game_id) for item in state.passed_opportunities}
+    locked_players = {item.player_id for item in state.fixed_slots}
     return tuple(
         sorted(
             (
                 opportunity
                 for opportunity in state.opportunities
+                if opportunity.sleeper_player_id not in locked_players
                 if opportunity.scheduled_start > batch_start
                 and opportunity.status in (PlanningGameStatus.SCHEDULED, PlanningGameStatus.ACTIVE)
                 and opportunity.rostered_at_tipoff is True

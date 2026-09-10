@@ -328,6 +328,36 @@ def test_build_weekly_plan_never_moves_a_fixed_slot() -> None:
     assert plan.status is PlanStatus.ACTION_REQUIRED
 
 
+def test_build_weekly_plan_ignores_later_games_for_locked_players() -> None:
+    """Do not duplicate a fixed player into an open slot on a later game."""
+
+    fixed_opportunity = _opportunity(
+        "p3",
+        "g0",
+        NOW - timedelta(hours=2),
+        ("PG",),
+        ((20, 1),),
+        status=PlanningGameStatus.FINAL,
+        completed_score=20,
+        finalized_at=NOW - timedelta(hours=1),
+    )
+    state = _state(
+        (
+            fixed_opportunity,
+            _opportunity("p3", "g1", NOW + timedelta(hours=1), ("PG",), ((100, 1),)),
+            _opportunity("p2", "g2", NOW + timedelta(hours=2), ("PG",), ((10, 1),)),
+        ),
+        observed=(ObservedStarter(0, "p3", ("PG",)),),
+        fixed=(FixedSlot(0, "G", "p3", "g0", 20, NOW, "lock-1", "fixture"),),
+    )
+
+    plan = build_weekly_plan(state)
+
+    assert plan.status is PlanStatus.ACTION_REQUIRED
+    assert plan.desired_assignments[0] == _planned(0, "G", "p3")
+    assert plan.desired_assignments[1] == _planned(1, "UTIL", "p2")
+
+
 def test_build_weekly_plan_without_remaining_games_needs_no_action() -> None:
     finalized_at = NOW - timedelta(hours=1)
     state = _state(
