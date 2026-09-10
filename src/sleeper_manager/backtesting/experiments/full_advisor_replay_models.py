@@ -10,12 +10,15 @@ from typing import Any
 from sleeper_manager.backtesting.artifacts import canonical_json, canonicalize, sha256_text
 from sleeper_manager.backtesting.replay.inputs.models import HistoricalTeamWeekInput
 from sleeper_manager.backtesting.replay.models import TeamWeekComparison, TeamWeekReplayResult
+from sleeper_manager.backtesting.replay.projection_surface_models import (
+    HistoricalProjectionSurface,
+)
 from sleeper_manager.decisions.lock_in import LockInPolicyConfig
 from sleeper_manager.decisions.weekly_plan import WeeklyPlanPolicyConfig
 from sleeper_manager.domain.lock_in import LockInEvaluation
 from sleeper_manager.domain.planning import WeeklyPlan
 
-FULL_ADVISOR_EXECUTOR_VERSION = "full-advisor-replay-v1"
+FULL_ADVISOR_EXECUTOR_VERSION = "full-advisor-replay-v2"
 
 
 class FullAdvisorReplayError(ValueError):
@@ -27,6 +30,7 @@ class FullAdvisorReplayRequest:
     """Configure one deterministic current/current full-advisor replay."""
 
     team_week: HistoricalTeamWeekInput
+    projection_surface: HistoricalProjectionSurface
     weekly_policy_config: WeeklyPlanPolicyConfig = field(default_factory=WeeklyPlanPolicyConfig)
     lock_in_policy_config: LockInPolicyConfig = field(default_factory=LockInPolicyConfig)
     minimum_confidence: float = 0.70

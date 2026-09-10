@@ -32,6 +32,20 @@ from sleeper_manager.backtesting.replay.planning_adapter import (
     PlanningAdapterError,
     team_week_state_from_replay,
 )
+from sleeper_manager.backtesting.replay.projection_surface import (
+    HistoricalProjectionSurface,
+    HistoricalProjectionSurfaceError,
+    ProjectionSurfaceEntry,
+    build_historical_projection_surface,
+    full_advisor_events,
+    full_advisor_planning_cutoffs,
+    team_week_fingerprint,
+    validate_historical_projection_surface,
+)
+from sleeper_manager.backtesting.replay.projection_surface_artifact import (
+    load_historical_projection_surface_artifact,
+    write_historical_projection_surface_artifact,
+)
 from sleeper_manager.backtesting.replay.report import markdown_report, report_payload, write_report
 from sleeper_manager.backtesting.replay.runner import (
     ChronologicalReplayRunner,
@@ -61,11 +75,14 @@ __all__ = (
     "BootstrapInterval",
     "ChronologicalReplayRunner",
     "HistoricalReplayBuildInput",
+    "HistoricalProjectionSurface",
+    "HistoricalProjectionSurfaceError",
     "HistoricalTeamWeekInput",
     "LockCandidate",
     "PairedPolicyDelta",
     "PlanningAdapterError",
     "PolicyScore",
+    "ProjectionSurfaceEntry",
     "ReplayConfig",
     "ReplayError",
     "ReplayEvent",
@@ -91,8 +108,12 @@ __all__ = (
     "assemble_historical_team_week_inputs",
     "bootstrap_mean_interval",
     "build_replay_input_manifest",
+    "build_historical_projection_surface",
     "build_chronological_events",
     "compare_team_week",
+    "full_advisor_events",
+    "full_advisor_planning_cutoffs",
+    "load_historical_projection_surface_artifact",
     "markdown_report",
     "optimize_oracle",
     "oracle_team_week_result",
@@ -102,8 +123,11 @@ __all__ = (
     "summarize_team_weeks",
     "summarize_with_exclusions",
     "team_week_state_from_replay",
+    "team_week_fingerprint",
     "report_payload",
     "write_report",
     "run_chronological_replay",
+    "validate_historical_projection_surface",
+    "write_historical_projection_surface_artifact",
     "write_replay_input_bundle",
 )

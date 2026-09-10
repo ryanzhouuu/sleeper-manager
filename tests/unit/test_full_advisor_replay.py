@@ -5,13 +5,14 @@ from __future__ import annotations
 from datetime import timedelta
 
 import pytest
-from lock_in_diagnostic_support import BASE, _team_week
+from lock_in_diagnostic_support import BASE, _projection_surface, _team_week
 
 from sleeper_manager.backtesting.experiments.full_advisor_replay import (
     FullAdvisorReplayError,
     FullAdvisorReplayRequest,
     run_full_advisor_replay,
 )
+from sleeper_manager.backtesting.replay.projection_surface import full_advisor_planning_cutoffs
 from sleeper_manager.decisions.lock_in import LockInPolicyConfig
 from sleeper_manager.decisions.weekly_plan import WeeklyPlanPolicyConfig
 
@@ -19,8 +20,10 @@ from sleeper_manager.decisions.weekly_plan import WeeklyPlanPolicyConfig
 def _request(**team_week_overrides: object) -> FullAdvisorReplayRequest:
     """Build a small deterministic current/current replay request."""
 
+    team_week = _team_week(**team_week_overrides)
     return FullAdvisorReplayRequest(
-        team_week=_team_week(**team_week_overrides),
+        team_week=team_week,
+        projection_surface=_projection_surface(team_week),
         weekly_policy_config=WeeklyPlanPolicyConfig(scenario_count=32, seed=0),
         lock_in_policy_config=LockInPolicyConfig(scenario_count=32, seed=0),
         minimum_confidence=0,
@@ -42,10 +45,29 @@ def test_full_replay_builds_lineups_and_scores_a_legal_week() -> None:
     assert all(passed for _, passed in first.invariant_results)
 
 
-def test_full_replay_rejects_future_projection_at_the_first_cutoff() -> None:
-    """Fail closed instead of using a later pregame projection in an earlier plan."""
+def test_full_replay_ignores_bundle_projection_timestamps() -> None:
+    """Use the explicit cutoff surface instead of bundle diagnostic projections."""
 
     request = _request(future_projection_available_as_of=BASE + timedelta(hours=10))
 
-    with pytest.raises(FullAdvisorReplayError, match="projection_after_decision"):
+    assert run_full_advisor_replay(request).status == "success"
+
+
+def test_full_replay_rejects_recorded_surface_failure() -> None:
+    """Fail closed when the exact first-cutoff projection could not be generated."""
+
+    team_week = _team_week()
+    first_cutoff = full_advisor_planning_cutoffs(team_week)[0]
+    request = FullAdvisorReplayRequest(
+        team_week=team_week,
+        projection_surface=_projection_surface(
+            team_week,
+            fail_key=(first_cutoff, "p1", "g1"),
+        ),
+        weekly_policy_config=WeeklyPlanPolicyConfig(scenario_count=32, seed=0),
+        lock_in_policy_config=LockInPolicyConfig(scenario_count=32, seed=0),
+        minimum_confidence=0,
+    )
+
+    with pytest.raises(FullAdvisorReplayError, match="projection_surface_failure"):
         run_full_advisor_replay(request)

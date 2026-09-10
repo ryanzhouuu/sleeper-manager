@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from dataclasses import replace
+from datetime import datetime
 
 from sleeper_manager.backtesting.experiments.full_advisor_replay_legality import (
     automatic_final_scores,
@@ -26,10 +27,16 @@ from sleeper_manager.backtesting.experiments.lock_in_diagnostic_oracle import (
 from sleeper_manager.backtesting.replay.engine import ReplayConfig, compare_team_week
 from sleeper_manager.backtesting.replay.models import ReplayPlayerGame, TeamWeekReplayResult
 from sleeper_manager.backtesting.replay.planning_adapter import team_week_state_from_replay
+from sleeper_manager.backtesting.replay.projection_surface import (
+    HistoricalProjectionSurfaceError,
+    full_advisor_events,
+    full_advisor_planning_cutoffs,
+    player_games_with_projection_surface,
+    validate_historical_projection_surface,
+)
 from sleeper_manager.backtesting.replay.runner import (
     ReplayEvent,
     ReplayEventKind,
-    build_chronological_events,
 )
 from sleeper_manager.backtesting.replay.state import ReplayState
 from sleeper_manager.decisions.live_lock_in import (
@@ -69,9 +76,17 @@ class _FullAdvisorExecutor:
         self.evaluations: list[LockInEvaluation] = []
         self.lineup_traces: list[ReplayLineupTrace] = []
         self.policy = ScoreMaximizingLockInPolicy(request.lock_in_policy_config)
-        self.events = build_chronological_events(
-            self.state,
-            planning_lead_time=request.planning_lead_time + timedelta(microseconds=1),
+        try:
+            validate_historical_projection_surface(
+                request.projection_surface,
+                team_week=self.team_week,
+                planning_lead_time=request.planning_lead_time,
+            )
+        except HistoricalProjectionSurfaceError as error:
+            raise FullAdvisorReplayError(f"projection_surface_invalid:{error}") from error
+        self.events = full_advisor_events(self.team_week, request.planning_lead_time)
+        self.planning_cutoffs = frozenset(
+            full_advisor_planning_cutoffs(self.team_week, request.planning_lead_time)
         )
         self.week_end = next(
             event.at for event in self.events if event.kind is ReplayEventKind.WEEK_END
@@ -286,8 +301,20 @@ class _FullAdvisorExecutor:
     ) -> TeamWeekState:
         """Adapt current transitions and simulated assignments at one decision time."""
 
+        source_state = replay_state or self.state
+        try:
+            projected_games = player_games_with_projection_surface(
+                source_state.player_games,
+                self.request.projection_surface,
+                game_starts={game.game_id: game.start_time for game in source_state.games},
+                decision_time=at,
+                exact_cutoff=at in self.planning_cutoffs,
+            )
+        except HistoricalProjectionSurfaceError as error:
+            raise FullAdvisorReplayError(str(error)) from error
+        projected_state = replace(source_state, player_games=projected_games)
         return team_week_state_from_replay(
-            replay_state or self.state,
+            projected_state,
             config=ReplayConfig(
                 self.team_week.starter_slots,
                 self.team_week.league_id,
@@ -303,7 +330,11 @@ class _FullAdvisorExecutor:
             ),
             roster_player_ids=self.team_week.roster_player_ids,
             manager_policy_version=self.request.policy_name,
-            input_version=(f"{self.team_week.manifest_id}:{FULL_ADVISOR_EXECUTOR_VERSION}"),
+            input_version=(
+                f"{self.team_week.manifest_id}:"
+                f"{self.request.projection_surface.fingerprint}:"
+                f"{FULL_ADVISOR_EXECUTOR_VERSION}"
+            ),
         )
 
     def _deadline(self, player_game: ReplayPlayerGame) -> datetime:

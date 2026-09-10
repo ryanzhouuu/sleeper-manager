@@ -123,14 +123,29 @@ quality remain separate from full-advisor replay readiness.
 
 ## Full-advisor replay
 
-`run_full_advisor_replay(FullAdvisorReplayRequest(...))` executes the current weekly
-planner and live Lock-In evaluator over one admitted team-week. It starts with an empty
+`run_full_advisor_replay(FullAdvisorReplayRequest(...))` requires both an admitted
+team-week and a matching `HistoricalProjectionSurface`. The surface is an immutable
+sidecar containing one projection or explicit generation failure for every not-yet-started
+player-game at every full-advisor planning cutoff. The executor never falls back to the
+single near-tipoff projections embedded in historical bundles; those remain restricted
+diagnostic evidence.
+
+Surface schema `historical-projection-surface-v1` binds the team-week fingerprint,
+projection and scoring versions, source fingerprints, approximate finalization policy,
+ten-minute cutoff schedule, and all logical cutoff/player/game keys. Loading fails closed
+on missing, extra, duplicate, post-tipoff, mismatched, or corrupt entries. At planning
+events the exact cutoff snapshot is required. At finalization and Lock-In events replay
+uses the newest surface snapshot available no later than the event and the target tipoff.
+Generation uses the existing direct baseline with `available_as_of` set to the planning
+cutoff, so only outcomes finalized by then enter its input fingerprint.
+
+The executor then runs the current weekly planner and live Lock-In evaluator. It starts with an empty
 simulated lineup, plans before each tipoff batch, records which simulated starters make
 each player-game Lock-In eligible, preserves active and fixed slots, assigns legal
 automatic-final scores, and compares the realized result with the constrained hindsight
 oracle. Historical `observed_starter_ids` are not policy inputs on this path.
 
-The default reference configuration is `full-advisor-replay-v1`: weekly planner and
+The default reference configuration is `full-advisor-replay-v2`: weekly planner and
 Lock-In policy each use 2,000 scenarios, seed 0, and tie tolerance 0.01; lineup moves use
 a ten-minute lead and the live balanced confidence threshold is 0.70. A run fails closed
 on blocked point-in-time projections, active-player moves, infeasible Lock placement,
