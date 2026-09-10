@@ -1,8 +1,10 @@
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from itertools import permutations
 
 import pytest
 
+from sleeper_manager.decisions._weekly_plan_moves import plan_moves
 from sleeper_manager.decisions.weekly_plan import (
     WEEKLY_PLANNER_VERSION,
     build_weekly_plan,
@@ -487,6 +489,45 @@ def test_swap_moves_require_a_temporary_bench_step() -> None:
 
     assert plan.status is PlanStatus.ACTION_REQUIRED
     assert plan.material_hash
+
+
+def test_generated_moves_preserve_explicit_empty_slots() -> None:
+    """Reach every target permutation without dropping empty slot records."""
+
+    start = NOW + timedelta(hours=1)
+    opportunities = (
+        _opportunity("a", "g-a", start, ("PG",), ((10, 1),), eligible_slot_indices=(0, 1, 2)),
+        _opportunity("b", "g-b", start, ("PG",), ((10, 1),), eligible_slot_indices=(0, 1, 2)),
+    )
+    slots = tuple(StarterSlot(index, "UTIL") for index in range(3))
+    lineups = tuple(permutations(("a", "b", None)))
+
+    for observed_players in lineups:
+        state = _state(
+            opportunities,
+            observed=tuple(
+                ObservedStarter(index, player_id, ("PG",))
+                for index, player_id in enumerate(observed_players)
+                if player_id is not None
+            ),
+            starter_slots=slots,
+        )
+        observed = tuple(
+            _planned(index, "UTIL", player_id) for index, player_id in enumerate(observed_players)
+        )
+        for desired_players in lineups:
+            desired = tuple(
+                _planned(index, "UTIL", player_id)
+                for index, player_id in enumerate(desired_players)
+            )
+            moves = plan_moves(state, desired, start, timedelta(minutes=10))
+
+            _plan(
+                status=PlanStatus.ACTION_REQUIRED if moves else PlanStatus.NO_ACTION,
+                observed_assignments=observed,
+                desired_assignments=desired,
+                moves=moves,
+            )
 
 
 def test_double_occupying_move_orders_fail_closed() -> None:

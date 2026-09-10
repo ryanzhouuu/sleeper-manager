@@ -594,7 +594,7 @@ class WeeklyPlan:
             if move.source_slot_index is not None:
                 if simulated.get(move.source_slot_index) != move.player_id:
                     raise PlanningStateError("A lineup move source does not hold its player")
-                del simulated[move.source_slot_index]
+                simulated[move.source_slot_index] = None
             elif move.player_id in set(simulated.values()):
                 raise PlanningStateError("A bench-source move requires a benched player")
             if move.target_slot_index is not None:
