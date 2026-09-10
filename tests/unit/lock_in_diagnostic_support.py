@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 from sleeper_manager.backtesting.replay.inputs.models import (
@@ -9,6 +10,12 @@ from sleeper_manager.backtesting.replay.inputs.models import (
     ReplayCoverageSummary,
 )
 from sleeper_manager.backtesting.replay.models import ReplayGame, ReplayGameStatus, ReplayPlayerGame
+from sleeper_manager.backtesting.replay.projection_surface import (
+    HistoricalProjectionSurface,
+    ProjectionSurfaceEntry,
+    full_advisor_planning_cutoffs,
+    team_week_fingerprint,
+)
 from sleeper_manager.domain.planning import PlanningQuality
 from sleeper_manager.domain.projection import ProjectionDistribution, ProjectionSnapshot
 
@@ -125,4 +132,52 @@ def _player_game(
             distribution=ProjectionDistribution.from_weighted_observations(((expected, 1.0),)),
             reasons=(),
         ),
+    )
+
+
+def _projection_surface(
+    team_week: HistoricalTeamWeekInput,
+    *,
+    fail_key: tuple[datetime, str, str] | None = None,
+) -> HistoricalProjectionSurface:
+    """Build a complete cutoff surface from fixture projection distributions."""
+
+    games = {game.game_id: game for game in team_week.games}
+    entries = []
+    for cutoff in full_advisor_planning_cutoffs(team_week):
+        for player_game in team_week.player_games:
+            if games[player_game.game_id].start_time <= cutoff:
+                continue
+            key = (cutoff, player_game.sleeper_id, player_game.game_id)
+            if key == fail_key:
+                entries.append(
+                    ProjectionSurfaceEntry(
+                        cutoff,
+                        player_game.sleeper_id,
+                        player_game.game_id,
+                        failure_reason="missing_warmup_history",
+                        failure_detail="fixture failure",
+                    )
+                )
+                continue
+            assert player_game.projection is not None
+            entries.append(
+                ProjectionSurfaceEntry(
+                    cutoff,
+                    player_game.sleeper_id,
+                    player_game.game_id,
+                    projection=replace(player_game.projection, available_as_of=cutoff),
+                )
+            )
+    return HistoricalProjectionSurface(
+        team_week_manifest_id=team_week.manifest_id,
+        league_id=team_week.league_id,
+        season=team_week.season,
+        week=team_week.week,
+        roster_id=team_week.roster_id,
+        team_week_fingerprint=team_week_fingerprint(team_week),
+        projection_config_version="fixture-model",
+        scoring_policy_version="scoring-v1",
+        source_fingerprints=(),
+        entries=tuple(entries),
     )
