@@ -2,7 +2,7 @@
 
 > Source: [Sleeper Support — Lock-In Mode Details](https://support.sleeper.com/en/articles/6522833-lock-in-mode-details)
 >
-> Article updated February 18, 2026. This summary was prepared August 3, 2026.
+> Article updated February 18, 2026. This summary was last reviewed September 10, 2026.
 
 ## Overview
 
@@ -28,13 +28,32 @@ After a player completes a game, you can either:
 
 ### Moving a player between starting positions
 
-Before locking in, you may move a player between eligible **starting** roster positions without losing the ability to lock in the completed game's score.
+Before locking in, you may move a player between eligible **starting** roster positions without losing the ability to lock in the completed game's score. Sleeper's published rule does not impose a game-in-progress freeze on this starter-to-starter movement.
 
 After locking in, the player cannot be moved to another position.
 
 ### Moving a bench player after a game
 
 You cannot move a player from the bench into a starting position after their game and then lock in that game's score. The player must have been in your starting lineup when the game was played.
+
+Sleeper's published rule confirms starter-to-starter movement and rejects retroactive bench-to-starter eligibility. It does not state whether moving an eligible starter to the bench preserves that game's Lock-In eligibility. Do not infer that starter-to-starter flexibility also permits eligibility-preserving bench moves without additional evidence.
+
+### Active and locked players are different states
+
+An active starter has begun a qualifying game but has not yet accepted a score. The player remains movable between eligible starting positions and must remain associated with the game for later Lock-In evaluation.
+
+A locked player has an accepted score. Their player, game, score, and starter slot are fixed for the remainder of the fantasy week.
+
+An active starter must not be treated as locked, but a lineup update must not silently omit or bench them. Any recommendation to move an active starter to the bench must account explicitly for the unresolved eligibility consequence above.
+
+### Advisor and replay requirements
+
+- Capture Lock-In eligibility from the lineup that existed when each game began.
+- Preserve every active starter in subsequent target lineups unless an explicit, supported bench transition is being evaluated.
+- Allow an active starter to move between eligible starting positions and retain the original player-game eligibility record.
+- Keep accepted Lock-In slots immovable.
+- Treat a target lineup as complete state: applying a partial target must not implicitly bench omitted active starters.
+- Validate generated moves against these states before recommending or replaying them.
 
 ### Adding a free agent or waiver player
 
