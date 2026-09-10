@@ -24,6 +24,8 @@ be overwritten.
 `ExperimentInputIndex` and its nested models live in
 `backtesting.experiments.input_index_models`. Unknown fields, invalid hashes,
 nonpositive week/roster IDs and duplicate sample dimensions are rejected.
+Schema `experiment-input-index-v2` adds an optional projection-surface reference to an
+assembled selection. Version 1 indexes remain readable but cannot claim this binding.
 
 | Field | Meaning |
 | --- | --- |
@@ -55,6 +57,10 @@ exactly one of:
   reference. `stage` defaults to `before_assembly`; use `artifact_validation`
   when a produced artifact fails validation, retaining its references in the
   failure evidence. This records the failure without admitting the invalid bundle.
+
+An assembled selection may also provide `projection_surface`. Its file hash, team-week
+fingerprint, logical key, projection configuration, and scoring policy are validated.
+This binding does not change bundle assembly status or historical denominator accounting.
 
 Optional `outputs` retain hashed result references without treating them as a
 validated replay result. The helper `file_reference(Path(...))` captures absolute

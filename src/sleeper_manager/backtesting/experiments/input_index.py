@@ -28,6 +28,12 @@ from sleeper_manager.backtesting.experiments.input_index_models import (
 )
 from sleeper_manager.backtesting.replay.inputs.artifact import load_historical_team_week_artifact
 from sleeper_manager.backtesting.replay.inputs.models import ReplayInputManifest
+from sleeper_manager.backtesting.replay.projection_surface_artifact import (
+    load_historical_projection_surface_artifact,
+)
+from sleeper_manager.backtesting.replay.projection_surface_models import (
+    HistoricalProjectionSurfaceError,
+)
 
 
 class ExperimentInputIndexError(ValueError):
@@ -204,7 +210,7 @@ def _bundle_inventory(
         status = "incomplete"
     elif not team_week.player_games:
         status = "empty"
-    return {
+    result = {
         "status": status,
         "manifest_id": manifest_id,
         "strict_complete": team_week.complete,
@@ -213,6 +219,20 @@ def _bundle_inventory(
         "exclusions": [asdict(e) for e in team_week.exclusions],
         "player_games": len(team_week.player_games),
     }
+    if selection.projection_surface is not None:
+        surface_path = _verified_path(selection.projection_surface, base)
+        try:
+            surface = load_historical_projection_surface_artifact(
+                surface_path,
+                team_week=team_week,
+                projection_config_version=index.projection_config_version,
+            )
+        except HistoricalProjectionSurfaceError as error:
+            raise ExperimentInputIndexError(str(error)) from error
+        if surface.scoring_policy_version != manifest.scoring_policy_version:
+            raise ExperimentInputIndexError("Projection surface scoring policy mismatch")
+        result["projection_surface_fingerprint"] = surface.fingerprint
+    return result
 
 
 def write_input_inventory(index_path: Path, output_root: Path) -> Path:

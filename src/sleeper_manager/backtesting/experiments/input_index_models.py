@@ -81,6 +81,7 @@ class InputSelection(IndexRecord):
     key: TeamWeekKey
     bundle: BundleReference | None = None
     failure: FailedAttempt | None = None
+    projection_surface: FileReference | None = None
     outputs: tuple[FileReference, ...] = ()
 
     @model_validator(mode="after")
@@ -88,11 +89,15 @@ class InputSelection(IndexRecord):
         """A failed assembled bundle keeps its own exclusions, not a competing failure record."""
         if (self.bundle is None) == (self.failure is None):
             raise ValueError("Select exactly one bundle or pre-assembly failure")
+        if self.failure is not None and self.projection_surface is not None:
+            raise ValueError("A projection surface requires an assembled bundle")
         return self
 
 
 class ExperimentInputIndex(IndexRecord):
-    schema_version: Literal["experiment-input-index-v1"] = "experiment-input-index-v1"
+    schema_version: Literal["experiment-input-index-v1", "experiment-input-index-v2"] = (
+        "experiment-input-index-v2"
+    )
     protocol: FileReference
     executor_commit: Annotated[str, StringConstraints(strict=True, pattern=r"^[0-9a-f]{40}$")]
     variant: Text
@@ -111,4 +116,8 @@ class ExperimentInputIndex(IndexRecord):
         keys = tuple((league.league_id, league.season) for league in self.leagues)
         if len(set(keys)) != len(keys):
             raise ValueError("League-season samples must be unique")
+        if self.schema_version == "experiment-input-index-v1" and any(
+            selection.projection_surface is not None for selection in self.selections
+        ):
+            raise ValueError("Projection surfaces require experiment-input-index-v2")
         return self

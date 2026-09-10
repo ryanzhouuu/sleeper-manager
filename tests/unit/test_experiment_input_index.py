@@ -1,6 +1,7 @@
 """Prevent missing or conflicting team-weeks from inflating input coverage."""
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -21,6 +22,18 @@ from sleeper_manager.backtesting.experiments.input_index_models import (
     InputSelection,
     SourceBinding,
     WeekBinding,
+)
+from sleeper_manager.backtesting.replay.inputs.artifact import (
+    load_historical_team_week_artifact,
+)
+from sleeper_manager.backtesting.replay.projection_surface import (
+    HistoricalProjectionSurface,
+    ProjectionSurfaceEntry,
+    full_advisor_planning_cutoffs,
+    team_week_fingerprint,
+)
+from sleeper_manager.backtesting.replay.projection_surface_artifact import (
+    write_historical_projection_surface_artifact,
 )
 
 
@@ -256,6 +269,60 @@ def test_projection_versions_are_checked_against_manifest(tmp_path: Path) -> Non
     )
     with pytest.raises(ExperimentInputIndexError, match="Projection disagrees"):
         build_input_inventory(index, base=tmp_path)
+
+
+def test_v2_index_binds_projection_surface_to_selected_team_week(tmp_path: Path) -> None:
+    """Validate and report an explicit per-selection cutoff projection sidecar."""
+
+    index = sample_index(tmp_path)
+    selection = index.selections[0]
+    assert selection.bundle is not None
+    team_week = load_historical_team_week_artifact(Path(selection.bundle.team_week.path))
+    entries = tuple(
+        ProjectionSurfaceEntry(
+            cutoff,
+            player_game.sleeper_id,
+            player_game.game_id,
+            projection=replace(player_game.projection, available_as_of=cutoff),
+        )
+        for cutoff in full_advisor_planning_cutoffs(team_week)
+        for player_game in team_week.player_games
+        if next(game for game in team_week.games if game.game_id == player_game.game_id).start_time
+        > cutoff
+        if player_game.projection is not None
+    )
+    surface = HistoricalProjectionSurface(
+        team_week_manifest_id=team_week.manifest_id,
+        league_id=team_week.league_id,
+        season=team_week.season,
+        week=team_week.week,
+        roster_id=team_week.roster_id,
+        team_week_fingerprint=team_week_fingerprint(team_week),
+        projection_config_version=index.projection_config_version,
+        scoring_policy_version=entries[0].projection.scoring_policy_version,
+        source_fingerprints=(),
+        entries=entries,
+    )
+    path = tmp_path / "surface.json"
+    write_historical_projection_surface_artifact(path, surface)
+    selection = selection.model_copy(update={"projection_surface": file_reference(path)})
+
+    report = build_input_inventory(
+        index.model_copy(update={"selections": (selection,)}), base=tmp_path
+    )
+
+    assert report["team_weeks"][0]["projection_surface_fingerprint"] == surface.fingerprint
+
+
+def test_v1_index_remains_readable_but_cannot_claim_projection_surface(tmp_path: Path) -> None:
+    """Keep old inventory schemas intact while reserving sidecars for v2."""
+
+    index = sample_index(tmp_path)
+    payload = index.model_dump(mode="json")
+    payload["schema_version"] = "experiment-input-index-v1"
+    assert (
+        ExperimentInputIndex.model_validate(payload).schema_version == "experiment-input-index-v1"
+    )
 
 
 def test_rejected_artifact_remains_counted_as_a_validation_failure(tmp_path: Path) -> None:
