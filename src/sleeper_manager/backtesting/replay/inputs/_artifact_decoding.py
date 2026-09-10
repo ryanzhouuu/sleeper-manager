@@ -148,7 +148,7 @@ def _player_game(payload: object) -> ReplayPlayerGame:
     projection_raw = mapping.get("projection")
     if "projection" not in mapping:
         raise HistoricalTeamWeekArtifactError("player_game.projection is required")
-    projection = None if projection_raw is None else _projection(projection_raw)
+    projection = None if projection_raw is None else decode_projection_snapshot(projection_raw)
     membership = mapping.get("membership_segment")
     if "membership_segment" not in mapping:
         raise HistoricalTeamWeekArtifactError("player_game.membership_segment is required")
@@ -170,7 +170,7 @@ def _player_game(payload: object) -> ReplayPlayerGame:
     )
 
 
-def _projection(payload: object) -> ProjectionSnapshot:
+def decode_projection_snapshot(payload: object) -> ProjectionSnapshot:
     """Decode one point-in-time projection snapshot."""
 
     mapping = _as_mapping(payload, "projection")
