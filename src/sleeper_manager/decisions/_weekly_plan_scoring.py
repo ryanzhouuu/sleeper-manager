@@ -17,6 +17,7 @@ from sleeper_manager.decisions._weekly_plan_evaluations import (
     tie_key,
 )
 from sleeper_manager.decisions._weekly_plan_inputs import (
+    active_assignment_candidates,
     fixed_assignments,
     future_opportunities,
     next_actionable_batch,
@@ -66,6 +67,9 @@ def score_weekly_options(
     open_slots: tuple[StarterSlot, ...] = tuple(
         slot for slot in state.starter_slots if slot.index in state.open_slot_indices
     )
+    active_candidates = active_assignment_candidates(state, open_slots)
+    active_candidate_ids = frozenset(candidate.candidate_id for candidate in active_candidates)
+    required_active_players = frozenset(candidate.player_id for candidate in active_candidates)
     scenario_inputs = tuple(scenario_input(opportunity) for opportunity in (*batch, *future))
     seed = stable_scenario_seed(
         policy_config.seed,
@@ -98,8 +102,13 @@ def score_weekly_options(
         open_slots=open_slots,
         scenarios=scenarios,
     )
-    candidates = option_candidates(batch, open_slots)
-    assignments = enumerate_current_assignments(candidates, open_slots)
+    batch_candidates = option_candidates(batch, open_slots)
+    candidates = batch_candidates + active_candidates
+    assignments = enumerate_current_assignments(
+        candidates,
+        open_slots,
+        required_player_ids=required_active_players,
+    )
     assignment_tie_key = tie_key(state)
     evaluated = tuple(
         EvaluatedAssignment(
@@ -111,6 +120,7 @@ def score_weekly_options(
                 future_inputs=future_inputs,
                 open_slots=open_slots,
                 scenarios=scenarios,
+                ignored_candidate_ids=active_candidate_ids,
             ),
         )
         for assignment in assignments
@@ -139,7 +149,7 @@ def score_weekly_options(
     evaluations = placement_evaluations(
         batch,
         open_slots,
-        candidates,
+        batch_candidates,
         evaluated,
         baseline,
         tie_key=assignment_tie_key,
@@ -154,6 +164,7 @@ def score_weekly_options(
             future_inputs=future_inputs,
             open_slots=open_slots,
             scenarios=scenarios,
+            ignored_candidate_ids=active_candidate_ids,
         )
         if observed_result is not None
         else baseline

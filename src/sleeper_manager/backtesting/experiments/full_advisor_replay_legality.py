@@ -10,6 +10,44 @@ from sleeper_manager.backtesting.experiments.full_advisor_replay_models import (
 from sleeper_manager.backtesting.replay.inputs.models import HistoricalTeamWeekInput
 from sleeper_manager.backtesting.replay.state import ReplayState
 from sleeper_manager.decisions.lineup import AssignmentCandidate, maximum_weight_assignment
+from sleeper_manager.domain.eligibility import eligible_for_slot
+from sleeper_manager.domain.planning import TeamWeekState
+
+
+def active_target_slots(
+    *,
+    desired: Mapping[int, str],
+    active: Mapping[str, int],
+    planning_state: TeamWeekState,
+    event_id: str,
+) -> dict[str, int]:
+    """Validate active preservation and return each player's new starter slot."""
+
+    target_by_player = {player_id: slot_index for slot_index, player_id in desired.items()}
+    starters = {starter.player_id: starter for starter in planning_state.observed_starters}
+    slots = {slot.index: slot for slot in planning_state.starter_slots}
+    targets: dict[str, int] = {}
+    for player_id, source_slot in sorted(active.items()):
+        target_slot = target_by_player.get(player_id)
+        if target_slot is None:
+            raise FullAdvisorReplayError(
+                f"active_player_omitted:{player_id}:slot={source_slot}:event={event_id}"
+            )
+        starter = starters.get(player_id)
+        slot = slots.get(target_slot)
+        if (
+            starter is None
+            or slot is None
+            or not eligible_for_slot(
+                starter.eligible_positions,
+                slot.position,
+            )
+        ):
+            raise FullAdvisorReplayError(
+                f"active_player_ineligible:{player_id}:slot={target_slot}:event={event_id}"
+            )
+        targets[player_id] = target_slot
+    return targets
 
 
 def realign_for_lock(
@@ -117,4 +155,4 @@ def _positions_by_player(
     }
 
 
-__all__ = ("automatic_final_scores", "realign_for_lock")
+__all__ = ("active_target_slots", "automatic_final_scores", "realign_for_lock")

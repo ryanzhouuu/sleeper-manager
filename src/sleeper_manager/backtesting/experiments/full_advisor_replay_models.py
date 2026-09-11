@@ -18,7 +18,7 @@ from sleeper_manager.decisions.weekly_plan import WeeklyPlanPolicyConfig
 from sleeper_manager.domain.lock_in import LockInEvaluation
 from sleeper_manager.domain.planning import WeeklyPlan
 
-FULL_ADVISOR_EXECUTOR_VERSION = "full-advisor-replay-v2"
+FULL_ADVISOR_EXECUTOR_VERSION = "full-advisor-replay-v3"
 
 
 class FullAdvisorReplayError(ValueError):

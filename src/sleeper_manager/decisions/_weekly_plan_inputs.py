@@ -45,6 +45,43 @@ def option_candidates(
     return tuple(candidates)
 
 
+def active_assignment_candidates(
+    state: TeamWeekState,
+    open_slots: tuple[StarterSlot, ...],
+) -> tuple[AssignmentCandidate, ...]:
+    """Represent observed in-progress starters as required zero-value placements."""
+
+    active_by_player: dict[str, list[GameOpportunity]] = {}
+    for opportunity in state.active_opportunities:
+        active_by_player.setdefault(opportunity.sleeper_player_id, []).append(opportunity)
+    candidates: list[AssignmentCandidate] = []
+    for starter in sorted(state.observed_starters, key=lambda item: item.player_id):
+        active = active_by_player.get(starter.player_id, [])
+        if not active:
+            continue
+        if len(active) > 1:
+            raise WeeklyPlanError(
+                f"Multiple active opportunities for observed starter {starter.player_id}"
+            )
+        opportunity = active[0]
+        eligible_indices = tuple(
+            slot.index for slot in open_slots if slot.index in opportunity.eligible_slot_indices
+        )
+        if not eligible_indices:
+            raise WeeklyPlanError(f"Active starter has no eligible open slot: {starter.player_id}")
+        candidates.append(
+            AssignmentCandidate(
+                candidate_id=f"active:{opportunity_id(opportunity)}",
+                player_id=starter.player_id,
+                score=0.0,
+                eligible_positions=starter.eligible_positions,
+                game_id=opportunity.game_id,
+                eligible_slot_indices=eligible_indices,
+            )
+        )
+    return tuple(candidates)
+
+
 def next_actionable_batch(state: TeamWeekState) -> tuple[GameOpportunity, ...] | None:
     """Return the earliest unpassed scheduled opportunities sharing a tipoff."""
     passed = {(item.player_id, item.game_id) for item in state.passed_opportunities}

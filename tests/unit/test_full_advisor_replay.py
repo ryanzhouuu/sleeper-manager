@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import timedelta
 
 import pytest
@@ -71,3 +72,30 @@ def test_full_replay_rejects_recorded_surface_failure() -> None:
 
     with pytest.raises(FullAdvisorReplayError, match="projection_surface_failure"):
         run_full_advisor_replay(request)
+
+
+def test_full_replay_preserves_a_starter_during_an_overlapping_game() -> None:
+    """Keep the first game's starter eligible while planning the second tipoff."""
+
+    team_week = _team_week(include_second_p1_game=False)
+    overlapping_second = replace(
+        team_week.games[1],
+        start_time=BASE + timedelta(hours=1),
+        final_time=BASE + timedelta(hours=3),
+    )
+    team_week = replace(team_week, games=(team_week.games[0], overlapping_second))
+    request = FullAdvisorReplayRequest(
+        team_week=team_week,
+        projection_surface=_projection_surface(team_week),
+        weekly_policy_config=WeeklyPlanPolicyConfig(scenario_count=32, seed=0),
+        lock_in_policy_config=LockInPolicyConfig(scenario_count=32, seed=0),
+        minimum_confidence=0,
+    )
+
+    execution = run_full_advisor_replay(request)
+
+    assert execution.status == "success"
+    assert any(
+        {player for _, player in trace.assignments} == {"p1", "p2"}
+        for trace in execution.lineup_traces
+    )

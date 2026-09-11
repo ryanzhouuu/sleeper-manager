@@ -41,8 +41,10 @@ class EvaluatedAssignment:
 def enumerate_current_assignments(
     candidates: tuple[AssignmentCandidate, ...],
     open_slots: tuple[StarterSlot, ...],
+    *,
+    required_player_ids: frozenset[str] = frozenset(),
 ) -> tuple[AssignmentResult, ...]:
-    """Enumerate valid current-batch assignments, including empty slots."""
+    """Enumerate current assignments while retaining every required player."""
 
     candidates_by_slot = tuple(
         tuple(
@@ -67,7 +69,8 @@ def enumerate_current_assignments(
         """Explore every eligible placement for the slot at ``offset``."""
 
         if offset == len(open_slots):
-            results.append(AssignmentResult(round(score, 6), assignments))
+            if required_player_ids <= used_players:
+                results.append(AssignmentResult(round(score, 6), assignments))
             return
         slot = open_slots[offset]
         visit(
@@ -160,6 +163,8 @@ def placement_evaluations(
                 for assignment in evaluation.result.assignments
             )
         )
+        if not containing:
+            continue
         best = rank_evaluations(
             containing,
             tie_key=tie_key,
@@ -231,8 +236,9 @@ def assignment_terminal_value(
     future_inputs: tuple[ScenarioInput, ...],
     open_slots: tuple[StarterSlot, ...],
     scenarios: tuple[Scenario, ...],
+    ignored_candidate_ids: frozenset[str] = frozenset(),
 ) -> float:
-    """Average one current assignment's terminal score across scenarios."""
+    """Average terminal score without treating active placeholders as outcomes."""
 
     candidates_by_id = {candidate.candidate_id: candidate for candidate in candidates}
     fixed_score = sum(candidate.score for candidate in fixed_assignments)
@@ -241,7 +247,7 @@ def assignment_terminal_value(
         current_assignments: list[AssignmentCandidate] = []
         current_slots: set[int] = set()
         for item in assignment.assignments:
-            if item.candidate_id is None:
+            if item.candidate_id is None or item.candidate_id in ignored_candidate_ids:
                 continue
             candidate = candidates_by_id[item.candidate_id]
             current_assignments.append(

@@ -139,16 +139,20 @@ uses the newest surface snapshot available no later than the event and the targe
 Generation uses the existing direct baseline with `available_as_of` set to the planning
 cutoff, so only outcomes finalized by then enter its input fingerprint.
 
-The executor then runs the current weekly planner and live Lock-In evaluator. It starts with an empty
-simulated lineup, plans before each tipoff batch, records which simulated starters make
-each player-game Lock-In eligible, preserves active and fixed slots, assigns legal
+The executor then runs the current weekly planner and live Lock-In evaluator. It starts
+with an empty simulated lineup, plans before each tipoff batch, records which simulated
+starters make each player-game Lock-In eligible, preserves active starters while allowing
+eligible starter-to-starter realignment, preserves fixed slots exactly, assigns legal
 automatic-final scores, and compares the realized result with the constrained hindsight
-oracle. Historical `observed_starter_ids` are not policy inputs on this path.
+oracle. An active starter cannot disappear from a target lineup because moving them to
+the bench would forfeit that player-game performance. Historical
+`observed_starter_ids` are not policy inputs on this path.
 
-The default reference configuration is `full-advisor-replay-v2`: weekly planner and
+The default reference configuration is `full-advisor-replay-v3` with
+`weekly-planner-v2`: weekly planner and
 Lock-In policy each use 2,000 scenarios, seed 0, and tie tolerance 0.01; lineup moves use
 a ten-minute lead and the live balanced confidence threshold is 0.70. A run fails closed
-on blocked point-in-time projections, active-player moves, infeasible Lock placement,
-automatic-final cardinality gaps, and oracle deadline violations. Callers running a
-sample must retain those failures and bind outputs to immutable input hashes; a raised
-error is not permission to drop the team-week.
+on blocked point-in-time projections, omitted or position-ineligible active starters,
+infeasible Lock placement, automatic-final cardinality gaps, and oracle deadline
+violations. Callers running a sample must retain those failures and bind outputs to
+immutable input hashes; a raised error is not permission to drop the team-week.

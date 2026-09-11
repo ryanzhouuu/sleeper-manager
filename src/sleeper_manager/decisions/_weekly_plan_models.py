@@ -12,7 +12,7 @@ from math import isfinite
 
 from sleeper_manager.decisions.lineup import SlotAssignment
 
-WEEKLY_PLANNER_VERSION = "weekly-planner-v1"
+WEEKLY_PLANNER_VERSION = "weekly-planner-v2"
 DEFAULT_MOVE_LEAD_TIME = timedelta(minutes=10)
 
 

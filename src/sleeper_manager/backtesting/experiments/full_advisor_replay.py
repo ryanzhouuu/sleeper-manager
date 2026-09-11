@@ -6,6 +6,7 @@ from dataclasses import replace
 from datetime import datetime
 
 from sleeper_manager.backtesting.experiments.full_advisor_replay_legality import (
+    active_target_slots,
     automatic_final_scores,
     realign_for_lock,
 )
@@ -127,11 +128,12 @@ class _FullAdvisorExecutor:
             for assignment in plan.desired_assignments
             if assignment.player_id is not None
         }
-        for player_id, slot_index in self.active.items():
-            if desired.get(slot_index) != player_id:
-                raise FullAdvisorReplayError(
-                    f"active_player_move:{player_id}:slot={slot_index}:event={event.event_id}"
-                )
+        self.active = active_target_slots(
+            desired=desired,
+            active=self.active,
+            planning_state=state,
+            event_id=event.event_id,
+        )
         self.lineup = desired
         self._trace_lineup(event)
 
