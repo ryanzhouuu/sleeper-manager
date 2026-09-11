@@ -1,5 +1,6 @@
 """Regression coverage for active starters in chronological weekly planning."""
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -17,6 +18,7 @@ from sleeper_manager.decisions.weekly_plan import (
     score_weekly_options,
 )
 from sleeper_manager.domain.planning import (
+    FixedSlot,
     GameOpportunity,
     ObservedStarter,
     PlanningGameStatus,
@@ -165,6 +167,53 @@ def test_active_starter_wins_when_capacity_is_insufficient() -> None:
     )
 
     assert tuple(item.player_id for item in decision.selected.assignments) == ("active",)
+
+
+def test_locked_player_is_not_reintroduced_as_an_active_candidate() -> None:
+    """Keep a later in-progress game from duplicating an already fixed player."""
+
+    state = _state(
+        slots=(StarterSlot(0, "G"), StarterSlot(1, "UTIL")),
+        active_slot=0,
+        active_indices=(0, 1),
+        scheduled_indices=(0, 1),
+    )
+    completed = _opportunity(
+        "active",
+        "locked-game",
+        start=NOW - timedelta(hours=4),
+        status=PlanningGameStatus.FINAL,
+        eligible_slot_indices=(0, 1),
+        expected=25,
+    )
+    completed = replace(
+        completed,
+        completed_fantasy_score=25,
+        finalized_at=NOW - timedelta(hours=2),
+    )
+    state = replace(
+        state,
+        opportunities=state.opportunities + (completed,),
+        fixed_slots=(
+            FixedSlot(
+                0,
+                "G",
+                "active",
+                "locked-game",
+                25,
+                NOW - timedelta(hours=1),
+                "lock-1",
+                "fixture",
+            ),
+        ),
+    )
+
+    plan = build_weekly_plan(state, policy=WeeklyPlanPolicyConfig(scenario_count=5))
+
+    assert tuple(item.player_id for item in plan.desired_assignments) == (
+        "active",
+        "scheduled",
+    )
 
 
 def test_active_slot_variants_reuse_the_same_terminal_evaluation(

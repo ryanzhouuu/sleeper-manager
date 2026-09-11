@@ -141,7 +141,10 @@ class _FullAdvisorExecutor:
         """Freeze simulated starter evidence for every player in the tipoff batch."""
 
         game_ids = set(event.game_ids)
+        locked_players = {slot.player_id for slot in self.state.locked_slots}
         for slot_index, player_id in sorted(self.lineup.items()):
+            if player_id in locked_players:
+                continue
             for player_game in self.state.player_games:
                 if player_game.sleeper_id != player_id or player_game.game_id not in game_ids:
                     continue
