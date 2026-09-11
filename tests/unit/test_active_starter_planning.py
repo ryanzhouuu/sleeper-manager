@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+import sleeper_manager.decisions._weekly_plan_scoring as scoring_module
 from sleeper_manager.backtesting.experiments.full_advisor_replay_legality import (
     active_target_slots,
 )
@@ -164,6 +165,34 @@ def test_active_starter_wins_when_capacity_is_insufficient() -> None:
     )
 
     assert tuple(item.player_id for item in decision.selected.assignments) == ("active",)
+
+
+def test_active_slot_variants_reuse_the_same_terminal_evaluation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Avoid repeating scenario rollouts for equivalent active-only placements."""
+
+    state = _state(
+        slots=(StarterSlot(0, "G"), StarterSlot(1, "UTIL")),
+        active_slot=0,
+        active_indices=(0, 1),
+        scheduled_indices=(0, 1),
+    )
+    original = scoring_module.assignment_terminal_value
+    calls = 0
+
+    def counted(*args: object, **kwargs: object) -> float:
+        """Count expensive terminal evaluations while preserving their behavior."""
+
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(scoring_module, "assignment_terminal_value", counted)
+
+    score_weekly_options(state, config=WeeklyPlanPolicyConfig(scenario_count=5))
+
+    assert calls == 3
 
 
 def test_replay_tracks_an_active_starter_in_its_new_slot() -> None:

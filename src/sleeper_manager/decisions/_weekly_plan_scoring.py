@@ -110,10 +110,18 @@ def score_weekly_options(
         required_player_ids=required_active_players,
     )
     assignment_tie_key = tie_key(state)
-    evaluated = tuple(
-        EvaluatedAssignment(
-            assignment,
-            assignment_terminal_value(
+    terminal_values: dict[tuple[tuple[int, str], ...], float] = {}
+
+    def current_terminal_value(assignment: AssignmentResult) -> float:
+        """Reuse scoring for lineups that differ only by active placement."""
+
+        key = tuple(
+            (item.slot_index, item.candidate_id)
+            for item in assignment.assignments
+            if item.candidate_id is not None and item.candidate_id not in active_candidate_ids
+        )
+        if key not in terminal_values:
+            terminal_values[key] = assignment_terminal_value(
                 assignment,
                 candidates=candidates,
                 fixed_assignments=fixed_assignment_candidates,
@@ -121,7 +129,13 @@ def score_weekly_options(
                 open_slots=open_slots,
                 scenarios=scenarios,
                 ignored_candidate_ids=active_candidate_ids,
-            ),
+            )
+        return terminal_values[key]
+
+    evaluated = tuple(
+        EvaluatedAssignment(
+            assignment,
+            current_terminal_value(assignment),
         )
         for assignment in assignments
     )
@@ -157,17 +171,7 @@ def score_weekly_options(
     )
     observed_result = observed_assignment_result(state, open_slots, candidates)
     observed_value = (
-        assignment_terminal_value(
-            observed_result,
-            candidates=candidates,
-            fixed_assignments=fixed_assignment_candidates,
-            future_inputs=future_inputs,
-            open_slots=open_slots,
-            scenarios=scenarios,
-            ignored_candidate_ids=active_candidate_ids,
-        )
-        if observed_result is not None
-        else baseline
+        current_terminal_value(observed_result) if observed_result is not None else baseline
     )
     return WeeklyPlanDecision(
         decision_time=state.decision_time,
