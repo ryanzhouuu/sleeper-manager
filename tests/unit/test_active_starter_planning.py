@@ -216,16 +216,29 @@ def test_locked_player_is_not_reintroduced_as_an_active_candidate() -> None:
     )
 
 
-def test_active_slot_variants_reuse_the_same_terminal_evaluation(
+def test_equivalent_slot_variants_reuse_the_same_terminal_evaluation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Avoid repeating scenario rollouts for equivalent active-only placements."""
+    """Avoid repeating rollouts when only current player placement differs."""
 
     state = _state(
-        slots=(StarterSlot(0, "G"), StarterSlot(1, "UTIL")),
+        slots=(StarterSlot(0, "G"), StarterSlot(1, "UTIL"), StarterSlot(2, "UTIL")),
         active_slot=0,
-        active_indices=(0, 1),
-        scheduled_indices=(0, 1),
+        active_indices=(0, 1, 2),
+        scheduled_indices=(0, 1, 2),
+    )
+    second_scheduled = _opportunity(
+        "second-scheduled",
+        "second-scheduled-game",
+        start=NOW + timedelta(hours=1),
+        status=PlanningGameStatus.SCHEDULED,
+        eligible_slot_indices=(0, 1, 2),
+        expected=90,
+    )
+    state = replace(
+        state,
+        roster_player_ids=state.roster_player_ids + ("second-scheduled",),
+        opportunities=state.opportunities + (second_scheduled,),
     )
     original = scoring_module.assignment_terminal_value
     calls = 0
@@ -241,7 +254,7 @@ def test_active_slot_variants_reuse_the_same_terminal_evaluation(
 
     score_weekly_options(state, config=WeeklyPlanPolicyConfig(scenario_count=5))
 
-    assert calls == 3
+    assert calls == 10
 
 
 def test_replay_tracks_an_active_starter_in_its_new_slot() -> None:

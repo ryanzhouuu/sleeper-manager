@@ -110,15 +110,28 @@ def score_weekly_options(
         required_player_ids=required_active_players,
     )
     assignment_tie_key = tie_key(state)
-    terminal_values: dict[tuple[tuple[int, str], ...], float] = {}
+    terminal_values: dict[tuple[tuple[str, ...], tuple[int, ...]], float] = {}
 
     def current_terminal_value(assignment: AssignmentResult) -> float:
-        """Reuse scoring for lineups that differ only by active placement."""
+        """Reuse scoring when selected opportunities and occupied slots match."""
 
-        key = tuple(
-            (item.slot_index, item.candidate_id)
-            for item in assignment.assignments
-            if item.candidate_id is not None and item.candidate_id not in active_candidate_ids
+        key = (
+            tuple(
+                sorted(
+                    item.candidate_id.rsplit("@slot-", 1)[0]
+                    for item in assignment.assignments
+                    if item.candidate_id is not None
+                    and item.candidate_id not in active_candidate_ids
+                )
+            ),
+            tuple(
+                sorted(
+                    item.slot_index
+                    for item in assignment.assignments
+                    if item.candidate_id is not None
+                    and item.candidate_id not in active_candidate_ids
+                )
+            ),
         )
         if key not in terminal_values:
             terminal_values[key] = assignment_terminal_value(
