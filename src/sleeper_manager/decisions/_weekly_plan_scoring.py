@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from sleeper_manager.decisions._weekly_plan_evaluations import (
     EvaluatedAssignment,
-    assignment_terminal_value,
     enumerate_current_assignments,
     observed_assignment_result,
     option,
@@ -30,13 +29,12 @@ from sleeper_manager.decisions._weekly_plan_models import (
     WeeklyPlanError,
     WeeklyPlanPolicyConfig,
 )
+from sleeper_manager.decisions._weekly_plan_terminal_values import assignment_terminal_values
 from sleeper_manager.decisions.lineup import AssignmentCandidate, AssignmentResult
 from sleeper_manager.decisions.simulation import (
     Scenario,
     ScenarioInput,
     generate_projection_scenarios,
-    rollout_scenario_assignments,
-    rollout_scenario_terminal_score,
     stable_scenario_seed,
 )
 from sleeper_manager.domain.planning import StarterSlot, TeamWeekState
@@ -85,17 +83,6 @@ def score_weekly_options(
         seed=seed,
     )
     future_inputs = tuple(scenario_input(opportunity) for opportunity in future)
-    continuation_assignments = rollout_scenario_assignments(
-        fixed_assignments=fixed_assignment_candidates,
-        remaining_inputs=future_inputs,
-        open_slots=tuple(slot.position for slot in open_slots),
-        scenarios=scenarios,
-        slot_indices=tuple(slot.index for slot in open_slots),
-    )
-    baseline = _mean_terminal_value(
-        fixed_assignments=fixed_assignment_candidates,
-        continuation_assignments=continuation_assignments,
-    )
     perfect_information_bound = _terminal_value(
         fixed_assignments=fixed_assignment_candidates,
         remaining_inputs=tuple(scenario_input(opportunity) for opportunity in (*batch, *future)),
@@ -110,40 +97,28 @@ def score_weekly_options(
         required_player_ids=required_active_players,
     )
     assignment_tie_key = tie_key(state)
-    terminal_values: dict[tuple[tuple[str, ...], tuple[int, ...]], float] = {}
+    observed_result = observed_assignment_result(state, open_slots, candidates)
+    empty_assignment = AssignmentResult(0.0, ())
+    assignments_to_evaluate = (
+        assignments
+        + ((observed_result,) if observed_result is not None else ())
+        + (empty_assignment,)
+    )
+    terminal_values = assignment_terminal_values(
+        assignments_to_evaluate,
+        candidates=candidates,
+        fixed_assignments=fixed_assignment_candidates,
+        future_inputs=future_inputs,
+        open_slots=open_slots,
+        scenarios=scenarios,
+        ignored_candidate_ids=active_candidate_ids,
+    )
+    baseline = terminal_values[empty_assignment]
 
     def current_terminal_value(assignment: AssignmentResult) -> float:
-        """Reuse scoring when selected opportunities and occupied slots match."""
+        """Return the precomputed exact value for one concrete assignment."""
 
-        key = (
-            tuple(
-                sorted(
-                    item.candidate_id.rsplit("@slot-", 1)[0]
-                    for item in assignment.assignments
-                    if item.candidate_id is not None
-                    and item.candidate_id not in active_candidate_ids
-                )
-            ),
-            tuple(
-                sorted(
-                    item.slot_index
-                    for item in assignment.assignments
-                    if item.candidate_id is not None
-                    and item.candidate_id not in active_candidate_ids
-                )
-            ),
-        )
-        if key not in terminal_values:
-            terminal_values[key] = assignment_terminal_value(
-                assignment,
-                candidates=candidates,
-                fixed_assignments=fixed_assignment_candidates,
-                future_inputs=future_inputs,
-                open_slots=open_slots,
-                scenarios=scenarios,
-                ignored_candidate_ids=active_candidate_ids,
-            )
-        return terminal_values[key]
+        return terminal_values[assignment]
 
     evaluated = tuple(
         EvaluatedAssignment(
@@ -182,7 +157,6 @@ def score_weekly_options(
         baseline,
         tie_tolerance=policy_config.tie_tolerance,
     )
-    observed_result = observed_assignment_result(state, open_slots, candidates)
     observed_value = (
         current_terminal_value(observed_result) if observed_result is not None else baseline
     )
@@ -202,22 +176,6 @@ def score_weekly_options(
     )
 
 
-def _mean_terminal_value(
-    *,
-    fixed_assignments: tuple[AssignmentCandidate, ...],
-    continuation_assignments: tuple[AssignmentResult, ...],
-) -> float:
-    """Average continuation scores and include already fixed starter value."""
-
-    fixed_score = sum(candidate.score for candidate in fixed_assignments)
-    return round(
-        fixed_score
-        + sum(assignment.score for assignment in continuation_assignments)
-        / len(continuation_assignments),
-        6,
-    )
-
-
 def _terminal_value(
     *,
     fixed_assignments: tuple[AssignmentCandidate, ...],
@@ -227,10 +185,12 @@ def _terminal_value(
 ) -> float:
     """Compute the perfect-information terminal-score bound for open slots."""
 
-    return rollout_scenario_terminal_score(
+    empty_assignment = AssignmentResult(0.0, ())
+    return assignment_terminal_values(
+        (empty_assignment,),
+        candidates=(),
         fixed_assignments=fixed_assignments,
-        remaining_inputs=remaining_inputs,
-        open_slots=tuple(slot.position for slot in open_slots),
-        slot_indices=tuple(slot.index for slot in open_slots),
+        future_inputs=remaining_inputs,
+        open_slots=open_slots,
         scenarios=scenarios,
-    )
+    )[empty_assignment]

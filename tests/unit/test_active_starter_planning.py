@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+import sleeper_manager.decisions._weekly_plan_continuations as continuations_module
 import sleeper_manager.decisions._weekly_plan_evaluations as evaluations_module
 import sleeper_manager.decisions._weekly_plan_scoring as scoring_module
 from sleeper_manager.backtesting.experiments.full_advisor_replay_legality import (
@@ -219,10 +220,10 @@ def test_locked_player_is_not_reintroduced_as_an_active_candidate() -> None:
     )
 
 
-def test_equivalent_slot_variants_reuse_terminal_and_tie_evaluations(
+def test_equivalent_slot_variants_reuse_continuation_and_tie_evaluations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Avoid repeating rollout values or deterministic tie keys."""
+    """Use one current and perfect-information table per scenario."""
 
     state = _state(
         slots=(StarterSlot(0, "G"), StarterSlot(1, "UTIL"), StarterSlot(2, "UTIL")),
@@ -243,15 +244,15 @@ def test_equivalent_slot_variants_reuse_terminal_and_tie_evaluations(
         roster_player_ids=state.roster_player_ids + ("second-scheduled",),
         opportunities=state.opportunities + (second_scheduled,),
     )
-    original = scoring_module.assignment_terminal_value
+    original = continuations_module.PreparedContinuationTopology.best_scores_by_excluded_players
     original_tie_key = scoring_module.tie_key
     original_comparison = evaluations_module._better_evaluation
     calls = 0
     tie_calls = 0
     comparison_calls = 0
 
-    def counted(*args: object, **kwargs: object) -> float:
-        """Count expensive terminal evaluations while preserving their behavior."""
+    def counted(*args: object, **kwargs: object) -> dict[frozenset[str], tuple[float, ...]]:
+        """Count shared continuation tables while preserving their values."""
 
         nonlocal calls
         calls += 1
@@ -280,7 +281,11 @@ def test_equivalent_slot_variants_reuse_terminal_and_tie_evaluations(
         comparison_calls += 1
         return original_comparison(*args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(scoring_module, "assignment_terminal_value", counted)
+    monkeypatch.setattr(
+        continuations_module.PreparedContinuationTopology,
+        "best_scores_by_excluded_players",
+        counted,
+    )
     monkeypatch.setattr(scoring_module, "tie_key", counted_tie_key)
     monkeypatch.setattr(evaluations_module, "_better_evaluation", counted_comparison)
 
