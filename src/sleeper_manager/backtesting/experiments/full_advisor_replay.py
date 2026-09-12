@@ -89,6 +89,11 @@ class _FullAdvisorExecutor:
         self.planning_cutoffs = frozenset(
             full_advisor_planning_cutoffs(self.team_week, request.planning_lead_time)
         )
+        self.input_version = (
+            f"{self.team_week.manifest_id}:"
+            f"{self.request.projection_surface.fingerprint}:"
+            f"{FULL_ADVISOR_EXECUTOR_VERSION}"
+        )
         self.week_end = next(
             event.at for event in self.events if event.kind is ReplayEventKind.WEEK_END
         )
@@ -335,11 +340,7 @@ class _FullAdvisorExecutor:
             ),
             roster_player_ids=self.team_week.roster_player_ids,
             manager_policy_version=self.request.policy_name,
-            input_version=(
-                f"{self.team_week.manifest_id}:"
-                f"{self.request.projection_surface.fingerprint}:"
-                f"{FULL_ADVISOR_EXECUTOR_VERSION}"
-            ),
+            input_version=self.input_version,
         )
 
     def _deadline(self, player_game: ReplayPlayerGame) -> datetime:

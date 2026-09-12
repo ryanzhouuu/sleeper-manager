@@ -54,6 +54,28 @@ def test_full_replay_ignores_bundle_projection_timestamps() -> None:
     assert run_full_advisor_replay(request).status == "success"
 
 
+def test_full_replay_hashes_projection_surface_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reuse immutable surface identity across every replay planning cutoff."""
+
+    request = _request()
+    surface_type = type(request.projection_surface)
+    fingerprint_property = surface_type.fingerprint
+    assert fingerprint_property.fget is not None
+    calls = 0
+
+    def counted(surface: object) -> str:
+        """Count full-payload hashes while preserving the stable identity."""
+
+        nonlocal calls
+        calls += 1
+        return fingerprint_property.fget(surface)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(surface_type, "fingerprint", property(counted))
+
+    assert run_full_advisor_replay(request).status == "success"
+    assert calls == 1
+
+
 def test_full_replay_rejects_recorded_surface_failure() -> None:
     """Fail closed when the exact first-cutoff projection could not be generated."""
 
