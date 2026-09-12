@@ -1,10 +1,12 @@
 """Regression coverage for active starters in chronological weekly planning."""
 
+from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
+import sleeper_manager.decisions._weekly_plan_evaluations as evaluations_module
 import sleeper_manager.decisions._weekly_plan_scoring as scoring_module
 from sleeper_manager.backtesting.experiments.full_advisor_replay_legality import (
     active_target_slots,
@@ -12,6 +14,7 @@ from sleeper_manager.backtesting.experiments.full_advisor_replay_legality import
 from sleeper_manager.backtesting.experiments.full_advisor_replay_models import (
     FullAdvisorReplayError,
 )
+from sleeper_manager.decisions.lineup import SlotAssignment
 from sleeper_manager.decisions.weekly_plan import (
     WeeklyPlanPolicyConfig,
     build_weekly_plan,
@@ -216,10 +219,10 @@ def test_locked_player_is_not_reintroduced_as_an_active_candidate() -> None:
     )
 
 
-def test_equivalent_slot_variants_reuse_the_same_terminal_evaluation(
+def test_equivalent_slot_variants_reuse_terminal_and_tie_evaluations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Avoid repeating rollouts when only current player placement differs."""
+    """Avoid repeating rollout values or deterministic tie keys."""
 
     state = _state(
         slots=(StarterSlot(0, "G"), StarterSlot(1, "UTIL"), StarterSlot(2, "UTIL")),
@@ -241,7 +244,11 @@ def test_equivalent_slot_variants_reuse_the_same_terminal_evaluation(
         opportunities=state.opportunities + (second_scheduled,),
     )
     original = scoring_module.assignment_terminal_value
+    original_tie_key = scoring_module.tie_key
+    original_comparison = evaluations_module._better_evaluation
     calls = 0
+    tie_calls = 0
+    comparison_calls = 0
 
     def counted(*args: object, **kwargs: object) -> float:
         """Count expensive terminal evaluations while preserving their behavior."""
@@ -250,11 +257,38 @@ def test_equivalent_slot_variants_reuse_the_same_terminal_evaluation(
         calls += 1
         return original(*args, **kwargs)  # type: ignore[arg-type]
 
+    def counted_tie_key(
+        state: TeamWeekState,
+    ) -> Callable[[tuple[SlotAssignment, ...]], tuple[object, ...]]:
+        """Count tie-key evaluations while preserving their ordering."""
+
+        key = original_tie_key(state)
+
+        def counted_key(assignments: tuple[SlotAssignment, ...]) -> tuple[object, ...]:
+            """Record one concrete assignment tie key."""
+
+            nonlocal tie_calls
+            tie_calls += 1
+            return key(assignments)
+
+        return counted_key
+
+    def counted_comparison(*args: object, **kwargs: object) -> bool:
+        """Count ranking comparisons while preserving their result."""
+
+        nonlocal comparison_calls
+        comparison_calls += 1
+        return original_comparison(*args, **kwargs)  # type: ignore[arg-type]
+
     monkeypatch.setattr(scoring_module, "assignment_terminal_value", counted)
+    monkeypatch.setattr(scoring_module, "tie_key", counted_tie_key)
+    monkeypatch.setattr(evaluations_module, "_better_evaluation", counted_comparison)
 
     score_weekly_options(state, config=WeeklyPlanPolicyConfig(scenario_count=5))
 
     assert calls == 10
+    assert tie_calls == 21
+    assert comparison_calls == 57
 
 
 def test_replay_tracks_an_active_starter_in_its_new_slot() -> None:

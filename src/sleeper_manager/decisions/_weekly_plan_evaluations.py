@@ -32,10 +32,11 @@ AssignmentTieKey = Callable[[tuple[SlotAssignment, ...]], tuple[object, ...]]
 
 @dataclass(frozen=True, slots=True)
 class EvaluatedAssignment:
-    """Pair one current assignment with its simulated terminal value."""
+    """Pair an assignment value with its precomputed deterministic tie key."""
 
     result: AssignmentResult
     expected_terminal_value: float
+    assignment_tie_key: tuple[object, ...]
 
 
 def enumerate_current_assignments(
@@ -103,30 +104,34 @@ def enumerate_current_assignments(
     return tuple(results)
 
 
-def rank_evaluations(
+def select_top_evaluations(
     evaluations: tuple[EvaluatedAssignment, ...],
     *,
-    tie_key: AssignmentTieKey,
     tie_tolerance: float,
+    selection_limit: int,
 ) -> tuple[EvaluatedAssignment, ...]:
-    """Order evaluations by terminal value and deterministic policy ties."""
+    """Select the requested leading evaluations without sorting the remainder."""
 
+    if selection_limit <= 0:
+        raise ValueError("Evaluation selection limit must be positive")
     remaining = list(evaluations)
     ordered: list[EvaluatedAssignment] = []
-    while remaining:
-        best = remaining[0]
-        for candidate in remaining[1:]:
-            if _better_evaluation(candidate, best, tie_key, tie_tolerance):
-                best = candidate
-        remaining.remove(best)
-        ordered.append(best)
+    while remaining and len(ordered) < selection_limit:
+        best_index = 0
+        for index in range(1, len(remaining)):
+            if _better_evaluation(
+                remaining[index],
+                remaining[best_index],
+                tie_tolerance,
+            ):
+                best_index = index
+        ordered.append(remaining.pop(best_index))
     return tuple(ordered)
 
 
 def _better_evaluation(
     candidate: EvaluatedAssignment,
     incumbent: EvaluatedAssignment,
-    tie_key: AssignmentTieKey,
     tie_tolerance: float,
 ) -> bool:
     """Return whether a candidate beats the incumbent under policy rules."""
@@ -135,7 +140,7 @@ def _better_evaluation(
         return True
     if abs(candidate.expected_terminal_value - incumbent.expected_terminal_value) > tie_tolerance:
         return False
-    return tie_key(candidate.result.assignments) < tie_key(incumbent.result.assignments)
+    return candidate.assignment_tie_key < incumbent.assignment_tie_key
 
 
 def placement_evaluations(
@@ -145,7 +150,6 @@ def placement_evaluations(
     evaluated: tuple[EvaluatedAssignment, ...],
     baseline: float,
     *,
-    tie_key: AssignmentTieKey,
     tie_tolerance: float,
 ) -> tuple[PlacementEvaluation, ...]:
     """Summarize each eligible player-slot placement against the baseline."""
@@ -165,10 +169,10 @@ def placement_evaluations(
         )
         if not containing:
             continue
-        best = rank_evaluations(
+        best = select_top_evaluations(
             containing,
-            tie_key=tie_key,
             tie_tolerance=tie_tolerance,
+            selection_limit=1,
         )[0]
         source_opportunity_id = candidate.candidate_id.rsplit("@slot-", 1)[0]
         opportunity = opportunities[source_opportunity_id]

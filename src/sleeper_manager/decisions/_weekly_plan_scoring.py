@@ -13,7 +13,7 @@ from sleeper_manager.decisions._weekly_plan_evaluations import (
     observed_assignment_result,
     option,
     placement_evaluations,
-    rank_evaluations,
+    select_top_evaluations,
     tie_key,
 )
 from sleeper_manager.decisions._weekly_plan_inputs import (
@@ -149,13 +149,14 @@ def score_weekly_options(
         EvaluatedAssignment(
             assignment,
             current_terminal_value(assignment),
+            assignment_tie_key(assignment.assignments),
         )
         for assignment in assignments
     )
-    ordered = rank_evaluations(
+    ordered = select_top_evaluations(
         evaluated,
-        tie_key=assignment_tie_key,
         tie_tolerance=policy_config.tie_tolerance,
+        selection_limit=2,
     )
     selected_evaluation = ordered[0]
     selected = option(
@@ -179,7 +180,6 @@ def score_weekly_options(
         batch_candidates,
         evaluated,
         baseline,
-        tie_key=assignment_tie_key,
         tie_tolerance=policy_config.tie_tolerance,
     )
     observed_result = observed_assignment_result(state, open_slots, candidates)
