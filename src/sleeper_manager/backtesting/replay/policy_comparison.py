@@ -156,6 +156,15 @@ def _validate_pair(
     values = (candidate.score, candidate.oracle_score, baseline.score, baseline.oracle_score)
     if not all(isfinite(value) for value in values):
         raise ReplayValidationError(f"Non-finite paired score: {candidate.team_week_key}")
+    if not candidate.invariant_results or not baseline.invariant_results:
+        raise ReplayValidationError(f"Missing paired invariants: {candidate.team_week_key}")
+    if (
+        candidate.score > candidate.oracle_score + oracle_tolerance
+        or baseline.score > baseline.oracle_score + oracle_tolerance
+    ):
+        raise ReplayValidationError(
+            f"Policy score exceeds paired oracle: {candidate.team_week_key}"
+        )
     if candidate.compatibility_fingerprint != baseline.compatibility_fingerprint:
         raise ReplayValidationError(f"Incompatible paired inputs: {candidate.team_week_key}")
     if abs(candidate.oracle_score - baseline.oracle_score) > oracle_tolerance:

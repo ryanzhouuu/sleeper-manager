@@ -77,6 +77,8 @@ def test_capture_change_omits_shared_nonpositive_oracles() -> None:
             score("a", 80),
             "Failed paired invariant",
         ),
+        (score("a", 102), score("a", 80), "Policy score exceeds paired oracle"),
+        (score("a", 90, invariants=()), score("a", 80), "Missing paired invariants"),
     ],
 )
 def test_pair_admission_rejects_incompatible_evidence(
