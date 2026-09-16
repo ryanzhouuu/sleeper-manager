@@ -32,8 +32,7 @@ from sleeper_manager.workflows.postgame_lock_in import (
     LOCK_IN_WARNING_TYPE,
     run_postgame_lock_in,
 )
-from tests.sleeper_manager.workflows.test_notification_loop import RecordingSender
-from tests.sleeper_manager.workflows.test_planning_inputs import (
+from tests.sleeper_manager.workflows.planning_inputs_support import (
     NOW,
     _freshness_policy,
     _game,
@@ -42,6 +41,7 @@ from tests.sleeper_manager.workflows.test_planning_inputs import (
     _schedule_result,
     _snapshot,
 )
+from tests.sleeper_manager.workflows.test_notification_loop import RecordingSender
 
 GAME_START = NOW + timedelta(hours=2)
 POSTGAME = GAME_START + timedelta(hours=2)

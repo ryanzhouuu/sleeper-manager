@@ -10,7 +10,7 @@ from sleeper_manager.persistence.async_sqlite import AsyncSQLiteStateRepository
 from sleeper_manager.persistence.base import DueWorkKind
 from sleeper_manager.persistence.lock_in_opportunities import LockInOpportunityKey
 from sleeper_manager.workflows.lock_in_planning import sync_live_lock_in_opportunities
-from tests.sleeper_manager.workflows.test_planning_inputs import (
+from tests.sleeper_manager.workflows.planning_inputs_support import (
     NOW,
     _game,
     _inputs,
