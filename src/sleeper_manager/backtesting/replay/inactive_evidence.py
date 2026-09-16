@@ -16,6 +16,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from sleeper_manager.backtesting.experiments.data import HistoricalExperimentInputs
 from sleeper_manager.backtesting.replay.inputs import SourceFingerprint, source_fingerprint
+from sleeper_manager.backtesting.replay.inputs.models import PlayerTeamObservation
 from sleeper_manager.backtesting.replay.roster_timeline import EASTERN_TIME
 from sleeper_manager.backtesting.replay.team_week_sources import HistoricalTeamWeekBundleError
 from sleeper_manager.domain.nba import GameStatus, PlayerBoxScore, SourceMetadata
@@ -51,9 +52,10 @@ class _InactiveLedger(BaseModel):
 
 @dataclass(frozen=True, slots=True)
 class InactiveEvidence:
-    """Supplemental outcomes and the immutable inputs backing their review."""
+    """Supplemental zero outcomes and exact game-time team associations."""
 
     box_scores: tuple[PlayerBoxScore, ...] = ()
+    team_observations: tuple[PlayerTeamObservation, ...] = ()
     source_fingerprints: tuple[SourceFingerprint, ...] = ()
 
 
@@ -78,6 +80,7 @@ def load_inactive_evidence(path: Path, nba_inputs: HistoricalExperimentInputs) -
         )
     }
     boxes: list[PlayerBoxScore] = []
+    observations: list[PlayerTeamObservation] = []
     seen: set[tuple[str, str]] = set()
     verified_pdfs: set[tuple[Path, str]] = set()
     pdf_games: dict[str, str] = {}
@@ -150,9 +153,26 @@ def load_inactive_evidence(path: Path, nba_inputs: HistoricalExperimentInputs) -
                 )
             box = replace(previous, additional_sources=(*previous.additional_sources, source))
         boxes.append(box)
+        observations.append(
+            PlayerTeamObservation(
+                provider_player_id=record.player_id,
+                team_id=record.team_id,
+                observed_at=game.start_time,
+                source=source.provider_id,
+            )
+        )
         name = f"nba-final-pdf:{record.pdf_sha256}"
         fingerprints[name] = SourceFingerprint(name, record.pdf_sha256, "pdf-v1")
     return InactiveEvidence(
         tuple(sorted(boxes, key=lambda box: (box.game_id, box.player_id))),
+        tuple(
+            sorted(
+                observations,
+                key=lambda observation: (
+                    observation.observed_at,
+                    observation.provider_player_id,
+                ),
+            )
+        ),
         tuple(fingerprints[name] for name in sorted(fingerprints)),
     )

@@ -23,6 +23,15 @@ def test_verified_final_inactive_recovers_only_explicit_outcome(tmp_path: Path) 
     assert len(evidence.source_fingerprints) == 2
     assert box.source.content_hash
     assert box.source.source_updated_at is None
+    assert len(evidence.team_observations) == 1
+    observation = evidence.team_observations[0]
+    assert (
+        observation.provider_player_id,
+        observation.team_id,
+        observation.observed_at,
+        observation.approximate,
+    ) == ("provider-1", "CHI", box.played_at, False)
+    assert observation.source == box.source.provider_id
     assert len(inputs.player_box_scores) == 4
 
 
@@ -102,7 +111,9 @@ def test_existing_zero_outcome_retains_both_sources(tmp_path: Path) -> None:
 def test_empty_review_does_not_invent_inactive_outcomes(tmp_path: Path) -> None:
     inputs, path = inactive_fixture(tmp_path)
     path.write_text(json.dumps({"schema_version": "reviewed-final-inactive-v1", "records": []}))
-    assert load_inactive_evidence(path, inputs).box_scores == ()
+    evidence = load_inactive_evidence(path, inputs)
+    assert evidence.box_scores == ()
+    assert evidence.team_observations == ()
 
 
 def test_duplicate_existing_outcomes_cannot_hide_a_played_result(tmp_path: Path) -> None:

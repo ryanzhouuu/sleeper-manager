@@ -7,6 +7,7 @@ import pytest
 from test_replay_inputs import _historical_join_inputs, _projection
 
 from sleeper_manager.backtesting.replay.inputs import (
+    GameRosterCensus,
     HistoricalReplayBuildInput,
     ReplayInputManifest,
     assemble_historical_team_week_inputs,
@@ -94,6 +95,67 @@ def test_uncertain_team_history_is_flagged_without_guessing(history_case: str) -
     assert PlanningReasonCode.MISSING_NBA_TEAM_HISTORY in {e.reason for e in result.exclusions}
     assert not result.complete
     assert not result.player_games
+
+
+def test_complete_game_rosters_resolve_membership_without_continuous_team_history() -> None:
+    inputs = _with_gap(outcome=True)
+    censuses = tuple(
+        GameRosterCensus(
+            game_id=game.provider_id,
+            home_team_id=game.home_team_id,
+            away_team_id=game.away_team_id,
+            reviewed_player_ids=("provider-p1",),
+            player_teams=(("provider-p1", "home"),),
+            source=f"official-final:{game.provider_id}",
+        )
+        for game in inputs.games
+    )
+    result = assemble_historical_team_week_inputs(
+        replace(inputs, team_observations=(), game_roster_censuses=censuses)
+    )[0]
+
+    assert result.coverage.expected_player_games == 3
+    assert result.coverage.joined_player_games == 3
+    assert result.coverage.inferred_team_membership == 0
+    assert PlanningReasonCode.MISSING_NBA_TEAM_HISTORY not in {
+        issue.reason for issue in result.exclusions
+    }
+
+
+def test_complete_game_roster_absence_excludes_an_unrelated_game() -> None:
+    inputs = _with_gap(outcome=True)
+    unrelated = replace(
+        inputs.games[-1],
+        provider_id="unrelated",
+        home_team_id="third",
+        away_team_id="fourth",
+    )
+    censuses = tuple(
+        GameRosterCensus(
+            game_id=game.provider_id,
+            home_team_id=game.home_team_id,
+            away_team_id=game.away_team_id,
+            reviewed_player_ids=("provider-p1",),
+            player_teams=(
+                () if game.provider_id == "unrelated" else (("provider-p1", game.home_team_id),)
+            ),
+            source=f"official-final:{game.provider_id}",
+        )
+        for game in (*inputs.games, unrelated)
+    )
+    result = assemble_historical_team_week_inputs(
+        replace(
+            inputs,
+            games=(*inputs.games, unrelated),
+            team_observations=(),
+            game_roster_censuses=censuses,
+        )
+    )[0]
+
+    assert result.coverage.expected_player_games == 3
+    assert PlanningReasonCode.MISSING_NBA_TEAM_HISTORY not in {
+        issue.reason for issue in result.exclusions
+    }
 
 
 def test_expected_games_follow_fantasy_membership_at_tipoff() -> None:

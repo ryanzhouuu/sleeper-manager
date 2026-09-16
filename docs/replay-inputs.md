@@ -19,7 +19,7 @@ Eligibility is exact only when selected snapshots are available by the cutoff, e
 
 The assembler retains coverage and exclusions for incomplete team-weeks. The selected-bundle builder persists these immutable artifacts before rejecting bundles with no executable player-games. It raises `HistoricalTeamWeekAssemblyError`, a `HistoricalTeamWeekBundleError` subclass whose `output` contains the manifest, team-week and retained paths. The CLI still fails for these inputs. Earlier source failures can occur before a bundle exists; consumers must retain those failed attempts separately. Successful CLI output alone is never the sample denominator.
 
-Builder versions `historical-replay-inputs-v2` and `historical-team-week-bundle-v2` fingerprint team observations in the manifest. Eligibility policies use `eligibility-v2`. Bundle version `historical-team-week-bundle-v6` and policy `roster-timeline-current-catalog-best-known-v3` preserve `rostered_at_tipoff` as fantasy-roster membership for counterfactual lineup execution; the restricted historical-starter diagnostic applies its narrower starter filter after loading the artifact. Existing bundles are not rewritten. Older artifacts without `inferred_team_membership` remain readable with a default of zero; this compatibility default does not certify that their old opportunity accounting was independently verified. Rebuild them before using the new coverage checks.
+Builder versions `historical-replay-inputs-v2` and `historical-team-week-bundle-v2` fingerprint team observations in the manifest. Eligibility policies use `eligibility-v2`. Bundle version `historical-team-week-bundle-v8` and policy `roster-timeline-current-catalog-best-known-v3` preserve `rostered_at_tipoff` as fantasy-roster membership for counterfactual lineup execution and support reviewed final game-roster censuses; the restricted historical-starter diagnostic applies its narrower starter filter after loading the artifact. Existing bundles are not rewritten. Older artifacts without `inferred_team_membership` remain readable with a default of zero; this compatibility default does not certify that their old opportunity accounting was independently verified. Rebuild them before using the new coverage checks.
 
 ## Reviewed final inactive outcomes
 
@@ -48,16 +48,33 @@ original source plus the final report attribution.
 
 The bundle fingerprints the complete ledger and supporting PDF hashes. Only
 selected roster/week outcomes are merged for scoring; each new outcome has zero
-statistics and `did_play=False`. Supplements do not enter team-history observations
-or projection training history. They can request the existing pregame projection
-for a recovered target using the original historical inputs. Thus membership
-uncertainty and approximate finalization/eligibility labels remain unchanged, and
-unresolved team-weeks can still fail assembly after scoring recovery.
+statistics and `did_play=False`. Each reviewed final inactive record also supplies
+an exact team observation at that game's tipoff. It does not enter projection
+training history. The recovered target can request the existing pregame projection
+from the original historical inputs.
 
-`historical-team-week-bundle-v3` identifies this integration. Prior immutable
+`historical-team-week-bundle-v8` identifies the current integration. Prior immutable
 bundles remain intact. A supplied ledger is validated in full against the loaded
 NBA inputs, so callers should select a ledger for those seasons. This mechanism
 supports bounded reviewed recovery; it does not certify broad historical coverage.
+
+## Reviewed final game rosters
+
+The optional `--final-roster-evidence /path/to/reviewed-rosters.json` flag (API
+`final_roster_evidence_path`) accepts `reviewed-final-game-rosters-v1`. Each report
+binds a final game and both scheduled teams to a retained official scorer-report
+PDF, its hash, URL, page and review statement. `reviewed_player_ids` declares the
+exact cohort checked against that report. `player_teams` records the reviewed
+players found on either game roster.
+
+For the declared cohort, a player absent from both complete game rosters has no
+opportunity in that game. A positive association supplies the expected NBA team.
+Players outside the declared cohort continue through the ordinary team-history
+rules. This scoped negative evidence avoids extrapolating membership across trades
+or season endpoints. The importer verifies player identities, schedule teams,
+game finality, report date and retained PDF hashes. The ledger and every supporting
+PDF are fingerprinted, and `game-roster-censuses` is fingerprinted separately from
+box-score outcomes.
 
 ## Supplemental provider identities
 

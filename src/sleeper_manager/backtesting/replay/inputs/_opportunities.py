@@ -45,6 +45,7 @@ def expected_inventory(
         if boundary.utc_start <= game.start_time < boundary.utc_end
         and game.status not in {GameStatus.POSTPONED, GameStatus.CANCELED}
     )
+    censuses = {census.game_id: census for census in inputs.game_roster_censuses}
     for player in players:
         scope = f"week={boundary.week}:roster={roster_id}:sleeper-player={player}"
         providers = tuple(key for key, mapping in mappings.items() if mapping.sleeper_id == player)
@@ -73,9 +74,6 @@ def expected_inventory(
                 if observation.approximate:
                     approximate_times.add(observation.observed_at)
         times = sorted(history)
-        if not times:
-            issues.append(_unknown_team(scope))
-            continue
         for game in games:
             membership = inputs.roster_timeline.membership_intervals_at(
                 roster_id, player, game.start_time
@@ -91,12 +89,28 @@ def expected_inventory(
                     )
                 )
                 continue
-            team, inferred = _team_at(history, times, game.start_time)
-            if team is None:
+            census = censuses.get(game.provider_id)
+            if census is not None and providers[0] in census.reviewed_player_ids:
+                associations = {
+                    team_id
+                    for provider_player_id, team_id in census.player_teams
+                    if provider_player_id == providers[0]
+                }
+                if len(associations) == 1:
+                    census_team = next(iter(associations))
+                    teams[(player, game.provider_id)] = census_team
+                elif len(associations) > 1:
+                    issues.append(_unknown_team(scope))
+                continue
+            if not times:
                 issues.append(_unknown_team(scope))
                 continue
-            if team in (game.home_team_id, game.away_team_id):
-                teams[(player, game.provider_id)] = team
+            historical_team, inferred = _team_at(history, times, game.start_time)
+            if historical_team is None:
+                issues.append(_unknown_team(scope))
+                continue
+            if historical_team in (game.home_team_id, game.away_team_id):
+                teams[(player, game.provider_id)] = historical_team
                 inferred_count += int(inferred or game.start_time in approximate_times)
     return ExpectedInventory(teams, inferred_count, tuple(dict.fromkeys(issues)))
 

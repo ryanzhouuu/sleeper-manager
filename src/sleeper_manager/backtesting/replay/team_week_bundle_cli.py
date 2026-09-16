@@ -35,6 +35,11 @@ def _parser() -> argparse.ArgumentParser:
         help="Reviewed final-inactive JSON ledger with retained PDFs",
     )
     parser.add_argument(
+        "--final-roster-evidence",
+        type=Path,
+        help="Reviewed final game-roster census ledger with retained PDFs",
+    )
+    parser.add_argument(
         "--identity-evidence", type=Path, help="Hashed ESPN roster identity sources"
     )
     parser.add_argument(
@@ -59,6 +64,7 @@ def main(argv: list[str] | None = None) -> int:
                 args.monday,
             ),
             inactive_evidence_path=args.inactive_evidence,
+            final_roster_evidence_path=args.final_roster_evidence,
             identity_evidence_path=args.identity_evidence,
             injury_team_evidence_path=args.injury_team_evidence,
         )

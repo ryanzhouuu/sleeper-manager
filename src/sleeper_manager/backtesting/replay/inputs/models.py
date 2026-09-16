@@ -46,6 +46,44 @@ class PlayerTeamObservation:
 
 
 @dataclass(frozen=True, slots=True)
+class GameRosterCensus:
+    """A complete official game-roster review for an explicit player cohort."""
+
+    game_id: str
+    home_team_id: str
+    away_team_id: str
+    reviewed_player_ids: tuple[str, ...]
+    player_teams: tuple[tuple[str, str], ...]
+    source: str
+
+    def __post_init__(self) -> None:
+        """Reject ambiguous associations and undeclared players or teams."""
+
+        if not all(
+            value.strip()
+            for value in (self.game_id, self.home_team_id, self.away_team_id, self.source)
+        ):
+            raise ReplayInputError("Game roster censuses require game, teams and source")
+        if self.home_team_id == self.away_team_id:
+            raise ReplayInputError("Game roster census teams must differ")
+        if len(set(self.reviewed_player_ids)) != len(self.reviewed_player_ids):
+            raise ReplayInputError("Game roster reviewed players must be unique")
+        if any(not player_id.strip() for player_id in self.reviewed_player_ids):
+            raise ReplayInputError("Game roster reviewed player IDs must be non-empty")
+        player_ids = tuple(player_id for player_id, _ in self.player_teams)
+        if len(set(player_ids)) != len(player_ids):
+            raise ReplayInputError("Game roster player associations must be unique")
+        if not set(player_ids) <= set(self.reviewed_player_ids):
+            raise ReplayInputError("Game roster associations require reviewed players")
+        teams = {self.home_team_id, self.away_team_id}
+        if any(
+            not player_id.strip() or team_id not in teams
+            for player_id, team_id in self.player_teams
+        ):
+            raise ReplayInputError("Game roster associations must use participating teams")
+
+
+@dataclass(frozen=True, slots=True)
 class SourceFingerprint:
     name: str
     content_hash: str
@@ -76,6 +114,7 @@ class HistoricalReplayBuildInput:
     projection_config_version: str = "projection-unconfigured"
     builder_version: str = "historical-replay-inputs-v3"
     team_observations: tuple[PlayerTeamObservation, ...] = ()
+    game_roster_censuses: tuple[GameRosterCensus, ...] = ()
 
     def __post_init__(self) -> None:
         if self.archive.scoring_policy.fingerprint != self.scoring_policy.fingerprint:
@@ -110,6 +149,17 @@ class HistoricalReplayBuildInput:
                 raise ReplayInputError(
                     "Projection snapshot model does not match replay projection configuration"
                 )
+        census_games = tuple(census.game_id for census in self.game_roster_censuses)
+        if len(set(census_games)) != len(census_games):
+            raise ReplayInputError("Game roster censuses cannot duplicate a game")
+        games = {game.provider_id: game for game in self.games}
+        for census in self.game_roster_censuses:
+            game = games.get(census.game_id)
+            if game is None or (
+                census.home_team_id,
+                census.away_team_id,
+            ) != (game.home_team_id, game.away_team_id):
+                raise ReplayInputError("Game roster census conflicts with the schedule")
         _unique_source_names(self.source_fingerprints)
 
 
@@ -231,6 +281,7 @@ def _unique_source_names(fingerprints: tuple[SourceFingerprint, ...]) -> None:
 
 
 __all__ = (
+    "GameRosterCensus",
     "HistoricalReplayBuildInput",
     "HistoricalTeamWeekInput",
     "PlayerTeamObservation",

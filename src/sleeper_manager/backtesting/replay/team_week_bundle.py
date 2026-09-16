@@ -15,6 +15,10 @@ from sleeper_manager.backtesting.experiments.data import (
     HistoricalExperimentInputs,
     load_historical_experiment_inputs,
 )
+from sleeper_manager.backtesting.replay.final_roster_evidence import (
+    FinalRosterEvidence,
+    load_final_roster_evidence,
+)
 from sleeper_manager.backtesting.replay.identity_evidence import (
     IdentityEvidence,
     load_identity_evidence,
@@ -130,6 +134,7 @@ def bootstrap_historical_team_week_bundle(
     *,
     nba_inputs: HistoricalExperimentInputs | None = None,
     inactive_evidence_path: Path | None = None,
+    final_roster_evidence_path: Path | None = None,
     identity_evidence_path: Path | None = None,
     injury_team_evidence_path: Path | None = None,
     now: datetime | None = None,
@@ -166,6 +171,7 @@ def bootstrap_historical_team_week_bundle(
         resolved_inputs,
         acquired,
         inactive_evidence_path,
+        final_roster_evidence_path,
         identity_evidence_path,
         injury_team_evidence_path,
     )
@@ -178,6 +184,7 @@ def _write_team_week_bundle(
     nba_inputs: HistoricalExperimentInputs,
     archive_acquired: bool,
     inactive_evidence_path: Path | None,
+    final_roster_evidence_path: Path | None,
     identity_evidence_path: Path | None,
     injury_team_evidence_path: Path | None,
 ) -> HistoricalTeamWeekBundleOutput:
@@ -224,6 +231,16 @@ def _write_team_week_bundle(
         if inactive_evidence_path is not None
         else InactiveEvidence()
     )
+    final_rosters = (
+        load_final_roster_evidence(
+            final_roster_evidence_path,
+            replace(
+                nba_inputs, provider_players=(*nba_inputs.provider_players, *identities.players)
+            ),
+        )
+        if final_roster_evidence_path is not None
+        else FinalRosterEvidence()
+    )
     injury_teams = (
         load_injury_team_evidence(
             injury_team_evidence_path,
@@ -238,6 +255,7 @@ def _write_team_week_bundle(
     games, box_scores = selected_games_and_box_scores(nba_inputs, mappings, boundary)
     selected_providers = {mapping.espn_id for mapping in mappings}
     selected_games = {game.provider_id for game in games}
+    selected_game_starts = {game.start_time for game in games}
     supplements = tuple(
         box
         for box in inactive.box_scores
@@ -260,8 +278,17 @@ def _write_team_week_bundle(
         team_observations=team_observations(nba_inputs, mappings)
         + tuple(
             observation
+            for observation in inactive.team_observations
+            if observation.provider_player_id in selected_providers
+            and observation.observed_at in selected_game_starts
+        )
+        + tuple(
+            observation
             for observation in injury_teams.observations
             if observation.provider_player_id in selected_providers
+        ),
+        game_roster_censuses=tuple(
+            census for census in final_rosters.censuses if census.game_id in selected_games
         ),
         player_mappings=mappings,
         scoring_policy=anchored_archive.scoring_policy,
@@ -275,11 +302,12 @@ def _write_team_week_bundle(
             finalization_policy_version=APPROXIMATE_FINALIZATION_POLICY_VERSION,
         )
         + inactive.source_fingerprints
+        + final_rosters.source_fingerprints
         + identities.source_fingerprints
         + injury_teams.source_fingerprints,
         eligibility_policy_version=_ELIGIBILITY_POLICY_VERSION,
         projection_config_version=baseline.config.model_version,
-        builder_version="historical-team-week-bundle-v6",
+        builder_version="historical-team-week-bundle-v8",
     )
     manifest = build_replay_input_manifest(inputs)
     team_weeks = assemble_historical_team_week_inputs(
