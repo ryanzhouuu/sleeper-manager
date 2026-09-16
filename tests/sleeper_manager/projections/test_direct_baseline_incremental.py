@@ -1,23 +1,17 @@
-"""Regression coverage for incremental direct-baseline backtest history."""
+"""Incremental history index, fingerprints, and same-tipoff exclusion."""
 
 from __future__ import annotations
 
-from bisect import bisect_left
-from collections.abc import Sequence
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 
 import pytest
 
 from sleeper_manager.backtesting import BacktestConfig, BacktestModel, run_backtest
 from sleeper_manager.backtesting.controls import CalibratedProjectionModel
-from sleeper_manager.domain.nba import AvailabilityStatus, SourceMetadata
-from sleeper_manager.domain.projection import ProjectionSnapshot
 from sleeper_manager.domain.scoring import BoxScoreLine, ScoringPolicy
 from sleeper_manager.integrations.nba.historical_feature_models import (
-    AvailabilityObservation,
     DatasetSourceVersion,
-    HistoricalFeatureDataset,
     HistoricalFeatureRow,
 )
 from sleeper_manager.projections.direct_baseline import (
@@ -26,160 +20,14 @@ from sleeper_manager.projections.direct_baseline import (
     PregameProjectionRequest,
     ProjectionBaselineError,
 )
-from sleeper_manager.projections.direct_baseline_history import (
-    _DirectBaselineHistoryIndex,
-    _row_fingerprint,
+from tests.sleeper_manager.projections.direct_baseline_incremental_support import (
+    BASE,
+    POLICY,
+    explicit_snapshot,
+    feature_dataset,
+    growing_dataset,
+    row,
 )
-
-BASE = datetime(2025, 1, 1, 18, tzinfo=UTC)
-POLICY = ScoringPolicy(points=1)
-
-
-def row(
-    game_id: str,
-    player_id: str,
-    start: datetime,
-    points: int,
-    *,
-    finalized_at: datetime | None = None,
-    omit_finalization: bool = False,
-    source_hash: str = "source-v1",
-) -> HistoricalFeatureRow:
-    """Build one finalized historical feature row with deterministic provenance."""
-    source = SourceMetadata(
-        "fixture",
-        game_id,
-        start + timedelta(hours=3),
-        content_hash=source_hash,
-    )
-    outcome_finalized_at = None if omit_finalization else finalized_at or start + timedelta(hours=2)
-    return HistoricalFeatureRow(
-        dataset_version="incremental-fixture",
-        available_as_of=start - timedelta(minutes=30),
-        player_id=player_id,
-        sleeper_id=player_id,
-        game_id=game_id,
-        game_start=start,
-        outcome_finalized_at=outcome_finalized_at,
-        team_id="CHI",
-        opponent_team_id="WAS",
-        opponent_abbreviation="was",
-        is_home=True,
-        days_rest=1,
-        is_back_to_back=False,
-        availability_status=AvailabilityStatus.AVAILABLE,
-        availability_observation=AvailabilityObservation.MISSING_REPORT,
-        availability_detail=None,
-        availability_observed_at=None,
-        prior_games=0,
-        prior_minutes_mean=None,
-        prior_minutes_last=None,
-        prior_start_rate=None,
-        target_minutes=30,
-        target_started=True,
-        target_did_play=True,
-        target_box_score=BoxScoreLine(points=points),
-        target_line_points=points,
-        target_line_rebounds=0,
-        target_line_assists=0,
-        target_line_steals=0,
-        target_line_blocks=0,
-        target_line_turnovers=0,
-        source_lineage=(source,),
-    )
-
-
-def feature_dataset(
-    rows: Sequence[HistoricalFeatureRow],
-    *,
-    version: str = "incremental-fixture",
-) -> HistoricalFeatureDataset:
-    """Wrap fixture rows in the immutable historical dataset contract."""
-    return HistoricalFeatureDataset(version, "5", BASE, (), rows)
-
-
-def sanitized(target: HistoricalFeatureRow) -> HistoricalFeatureRow:
-    """Remove realized target fields exactly as the backtest runner does."""
-    return replace(
-        target,
-        target_minutes=None,
-        target_started=False,
-        target_did_play=False,
-        target_box_score=BoxScoreLine(),
-        target_line_points=0,
-        target_line_rebounds=0,
-        target_line_assists=0,
-        target_line_steals=0,
-        target_line_blocks=0,
-        target_line_turnovers=0,
-    )
-
-
-class GrowingRows(Sequence[HistoricalFeatureRow]):
-    """Expose a chronological prior prefix followed by one sanitized target."""
-
-    def __init__(
-        self,
-        rows: tuple[HistoricalFeatureRow, ...],
-        prior_count: int,
-        target: HistoricalFeatureRow,
-    ) -> None:
-        self._rows = rows
-        self.prior_count = prior_count
-        self._target = sanitized(target)
-
-    def __len__(self) -> int:
-        """Include the uncommitted target after the legitimate prior prefix."""
-        return self.prior_count + 1
-
-    def __getitem__(self, index: int) -> HistoricalFeatureRow:
-        """Return a prior row or the appended target without copying the prefix."""
-        normalized = index if index >= 0 else len(self) + index
-        if normalized < 0 or normalized >= len(self):
-            raise IndexError(index)
-        if normalized == self.prior_count:
-            return self._target
-        return self._rows[normalized]
-
-
-def growing_dataset(
-    rows: tuple[HistoricalFeatureRow, ...],
-    target: HistoricalFeatureRow,
-    *,
-    version: str = "incremental-fixture",
-) -> HistoricalFeatureDataset:
-    """Build the backtest runner's growing point-in-time dataset shape."""
-    starts = tuple(candidate.game_start for candidate in rows)
-    prior_count = bisect_left(starts, target.game_start)
-    return feature_dataset(GrowingRows(rows, prior_count, target), version=version)
-
-
-def explicit_snapshot(
-    rows: tuple[HistoricalFeatureRow, ...],
-    target: HistoricalFeatureRow,
-    *,
-    scoring_policy: ScoringPolicy = POLICY,
-) -> ProjectionSnapshot:
-    """Project one target through the production-neutral explicit-history path."""
-    history = tuple(
-        DirectBaselineObservation.from_historical_row(candidate)
-        for candidate in rows
-        if candidate.game_start < target.game_start
-    )
-    request = PregameProjectionRequest(
-        dataset_version="incremental-fixture",
-        feature_schema_version="5",
-        player_id=target.player_id,
-        game_id=target.game_id,
-        game_start=target.game_start,
-        available_as_of=target.available_as_of,
-        history=history,
-        history_player_id=target.player_id,
-    )
-    return DirectFantasyPointBaseline().project_pregame(
-        request,
-        scoring_policy=scoring_policy,
-    )
 
 
 def test_incremental_path_matches_explicit_history_and_compacts_each_row_once(
@@ -475,172 +323,3 @@ def test_input_v5_tracks_prior_provenance_target_metadata_and_scoring() -> None:
         source_versions=(DatasetSourceVersion("fixture", "v2", ("game-1", "game-2")),),
     )
     assert version(changed_source_ids) != version(changed_sources)
-
-
-class ExplicitHistoryProjector:
-    """Test adapter that reconstructs compact history for every backtest target."""
-
-    def __init__(self) -> None:
-        self.baseline = DirectFantasyPointBaseline()
-
-    @property
-    def model_version(self) -> str:
-        """Match the wrapped-name behavior used by calibrated direct projections."""
-        return "DirectFantasyPointBaseline"
-
-    def project(
-        self,
-        dataset: HistoricalFeatureDataset,
-        *,
-        player_id: str,
-        game_id: str,
-        scoring_policy: ScoringPolicy,
-        exceed_score: float | None = None,
-    ) -> ProjectionSnapshot:
-        """Delegate through an explicit request instead of the incremental row contract."""
-        target = dataset.rows[-1]
-        history = tuple(
-            DirectBaselineObservation.from_historical_row(candidate)
-            for candidate in dataset.rows
-            if candidate.game_start < target.game_start
-        )
-        request = PregameProjectionRequest(
-            dataset_version=dataset.dataset_version,
-            feature_schema_version=dataset.feature_schema_version,
-            player_id=player_id,
-            game_id=game_id,
-            game_start=target.game_start,
-            available_as_of=target.available_as_of,
-            history=history,
-            history_player_id=player_id,
-            source_versions=dataset.source_versions,
-        )
-        return self.baseline.project_pregame(
-            request,
-            scoring_policy=scoring_policy,
-            exceed_score=exceed_score,
-        )
-
-
-def test_backtest_reports_match_explicit_reference_for_raw_and_calibrated_direct_models() -> None:
-    """Preserve observations, skips, cohorts, metrics, and comparisons end to end."""
-    rows = tuple(
-        row(f"{player}-g{day}", player, BASE + timedelta(days=day), 10 + day * 2 + offset)
-        for day in range(5)
-        for player, offset in (("p1", 0), ("p2", 5))
-    )
-    dataset = feature_dataset(rows)
-    config = BacktestConfig(min_prior_games=2)
-    incremental = run_backtest(
-        dataset,
-        scoring_policy=POLICY,
-        models=(
-            BacktestModel("direct", DirectFantasyPointBaseline()),
-            BacktestModel(
-                "calibrated",
-                CalibratedProjectionModel(
-                    DirectFantasyPointBaseline(), min_samples=1, refresh_interval=1
-                ),
-            ),
-        ),
-        config=config,
-    )
-    explicit = run_backtest(
-        dataset,
-        scoring_policy=POLICY,
-        models=(
-            BacktestModel("direct", ExplicitHistoryProjector()),
-            BacktestModel(
-                "calibrated",
-                CalibratedProjectionModel(
-                    ExplicitHistoryProjector(), min_samples=1, refresh_interval=1
-                ),
-            ),
-        ),
-        config=config,
-    )
-
-    assert incremental.dataset_version == explicit.dataset_version
-    assert incremental.scoring_policy_version == explicit.scoring_policy_version
-    assert incremental.config_version == explicit.config_version
-    assert incremental.target_count == explicit.target_count
-    assert incremental.target_skips == explicit.target_skips
-    assert incremental.reference_model == explicit.reference_model
-    assert incremental.comparisons == explicit.comparisons
-    for incremental_result, explicit_result in zip(
-        incremental.model_results,
-        explicit.model_results,
-        strict=True,
-    ):
-        assert incremental_result.model.name == explicit_result.model.name
-        assert incremental_result.observations == explicit_result.observations
-        assert incremental_result.skips == explicit_result.skips
-        assert incremental_result.metrics == explicit_result.metrics
-        assert incremental_result.cohort_diagnostics == explicit_result.cohort_diagnostics
-
-
-def history_index(rows: Sequence[HistoricalFeatureRow]) -> _DirectBaselineHistoryIndex:
-    """Commit fixture rows to a direct history index in chronological order."""
-    index = _DirectBaselineHistoryIndex(scoring_policy=POLICY, half_life_days=14.0)
-    observations = tuple(DirectBaselineObservation.from_historical_row(item) for item in rows)
-    index.extend(observations, len(observations))
-    return index
-
-
-def reference_all_finalized(
-    index: _DirectBaselineHistoryIndex, count: int, available_as_of: datetime
-) -> bool:
-    """Recompute prefix availability with the explicit scan the index replaces."""
-    return all(
-        item.outcome_finalized_at is None or item.outcome_finalized_at <= available_as_of
-        for item in index.rows[:count]
-    )
-
-
-def test_finalized_prefix_check_matches_explicit_scan() -> None:
-    """Keep the O(1) finalization gate exact across finalization shapes."""
-    starts = [BASE + timedelta(hours=6 * position) for position in range(6)]
-    rows = (
-        row("g0", "p1", starts[0], 10),
-        row("g1", "p1", starts[1], 12, omit_finalization=True),
-        row("g2", "p1", starts[2], 14, finalized_at=starts[2] + timedelta(hours=1)),
-        row("g3", "p1", starts[3], 16, finalized_at=starts[2] + timedelta(hours=1)),
-        row("g4", "p1", starts[4], 18, finalized_at=starts[4] + timedelta(hours=5)),
-        row("g5", "p1", starts[5], 20),
-    )
-    index = history_index(rows)
-    cutoffs = (
-        starts[0] - timedelta(hours=1),
-        starts[2] + timedelta(hours=1),
-        starts[4] + timedelta(hours=5),
-        starts[5] + timedelta(hours=3),
-    )
-    for count in range(len(rows) + 1):
-        for cutoff in cutoffs:
-            assert index._all_finalized_by(count, cutoff) == reference_all_finalized(
-                index, count, cutoff
-            )
-
-
-def test_historical_row_compaction_reuses_cached_observations() -> None:
-    """Avoid recompacting identical boundary rows on every incremental sync."""
-    first = row("g0", "p1", BASE, 10)
-    equal = row("g0", "p1", BASE, 10)
-    changed = row("g0", "p1", BASE, 12)
-
-    assert hash(first) == hash(equal)
-    assert DirectBaselineObservation.from_historical_row(first) is (
-        DirectBaselineObservation.from_historical_row(equal)
-    )
-    assert DirectBaselineObservation.from_historical_row(first) != (
-        DirectBaselineObservation.from_historical_row(changed)
-    )
-
-
-def test_row_fingerprint_reuses_cached_digests() -> None:
-    """Keep provenance digests stable without re-serializing identical rows."""
-    observation = DirectBaselineObservation.from_historical_row(row("g0", "p1", BASE, 10))
-    _row_fingerprint.cache_clear()
-
-    assert _row_fingerprint(observation) == _row_fingerprint(observation)
-    assert _row_fingerprint.cache_info().hits == 1
