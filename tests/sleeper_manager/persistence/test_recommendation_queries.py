@@ -14,7 +14,7 @@ from sleeper_manager.persistence.base import (
 )
 from sleeper_manager.persistence.sqlite import SQLiteStateRepository
 from sleeper_manager.workflows.plan_rendering import WEEKLY_LINEUP_DECISION_TYPE
-from tests.sleeper_manager.persistence.test_acknowledgement_queries import _Backend
+from tests.sleeper_manager.persistence.acknowledgement_query_support import _Backend
 
 NOW = datetime(2026, 1, 7, 18, tzinfo=UTC)
 
