@@ -32,6 +32,7 @@ from sleeper_manager.workflows.plan_rendering import WEEKLY_LINEUP_DECISION_TYPE
 from sleeper_manager.workflows.planning_collection import CollectedLiveEvidence
 from sleeper_manager.workflows.planning_inputs import LiveProjectionResult, ScheduleResourceResult
 from tests.sleeper_manager.persistence.test_d1 import FakeD1
+from tests.sleeper_manager.workflows.postgame_lock_in_support import _box, _summary_result
 from tests.sleeper_manager.workflows.test_daily_plan import (
     GAME_START,
     NOW,
@@ -44,7 +45,6 @@ from tests.sleeper_manager.workflows.test_daily_plan import (
     _workflow,
 )
 from tests.sleeper_manager.workflows.test_notification_loop import RecordingSender
-from tests.sleeper_manager.workflows.test_postgame_lock_in import _box, _summary_result
 
 SEVEN_AM_CENTRAL = datetime(2026, 1, 7, 13, tzinfo=UTC)
 SIX_AM_CENTRAL = datetime(2026, 1, 7, 12, tzinfo=UTC)

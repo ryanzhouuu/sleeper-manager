@@ -14,7 +14,7 @@ from sleeper_manager.persistence.tokens import hash_action_token
 from sleeper_manager.workflows.lock_in_planning import refresh_terminal_lock_in_scores
 from sleeper_manager.workflows.planning_inputs import build_live_team_week_state
 from sleeper_manager.workflows.postgame_lock_in import run_postgame_lock_in
-from tests.sleeper_manager.workflows.test_postgame_lock_in import (
+from tests.sleeper_manager.workflows.postgame_lock_in_support import (
     LATER_START,
     POLICY,
     POSTGAME,
