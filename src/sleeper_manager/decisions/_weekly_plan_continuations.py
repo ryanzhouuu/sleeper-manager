@@ -249,17 +249,19 @@ class PreparedContinuationTopology:
         initial_scores: list[float] | None = None,
         initial_codes: list[int] | None = None,
     ) -> tuple[list[float], list[int]]:
-        """Apply stable player transitions to exact occupied-slot states."""
+        """Apply each player once; descending masks prevent same-player reuse."""
 
-        scores = [float("-inf")] * self._state_count if initial_scores is None else initial_scores
-        lexicographic_codes = [0] * self._state_count if initial_codes is None else initial_codes
+        scores = (
+            [float("-inf")] * self._state_count if initial_scores is None else initial_scores.copy()
+        )
+        lexicographic_codes = (
+            [0] * self._state_count if initial_codes is None else initial_codes.copy()
+        )
         if initial_scores is None:
             scores[0] = 0.0
         reachable_masks = self._submasks[active_slot_mask]
         for _, active_edges in players:
-            next_scores = scores.copy()
-            next_lexicographic_codes = lexicographic_codes.copy()
-            for mask in reachable_masks:
+            for mask in reversed(reachable_masks):
                 base_score = scores[mask]
                 if base_score == float("-inf"):
                     continue
@@ -271,15 +273,13 @@ class PreparedContinuationTopology:
                     candidate_lexicographic_code = (
                         lexicographic_codes[mask] + edge.lexicographic_code
                     )
-                    incumbent_score = next_scores[candidate_mask]
+                    incumbent_score = scores[candidate_mask]
                     if candidate_score > incumbent_score + _TIE_TOLERANCE or (
-                        abs(candidate_score - incumbent_score) <= _TIE_TOLERANCE
-                        and candidate_lexicographic_code < next_lexicographic_codes[candidate_mask]
+                        candidate_lexicographic_code < lexicographic_codes[candidate_mask]
+                        and abs(candidate_score - incumbent_score) <= _TIE_TOLERANCE
                     ):
-                        next_scores[candidate_mask] = candidate_score
-                        next_lexicographic_codes[candidate_mask] = candidate_lexicographic_code
-            scores = next_scores
-            lexicographic_codes = next_lexicographic_codes
+                        scores[candidate_mask] = candidate_score
+                        lexicographic_codes[candidate_mask] = candidate_lexicographic_code
         return scores, lexicographic_codes
 
     def _select_allowed_scores(

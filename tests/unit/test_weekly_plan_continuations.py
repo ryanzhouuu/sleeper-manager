@@ -101,6 +101,35 @@ def test_continuation_table_matches_reference_for_every_allowed_mask() -> None:
             assert table[allowed_mask] == expected
 
 
+def test_exclusion_tables_do_not_depend_on_group_order() -> None:
+    """Branch evaluation must leave cached parent slot states reusable."""
+
+    slots = (StarterSlot(0, "G"), StarterSlot(1, "F"), StarterSlot(2, "UTIL"))
+    inputs = (
+        _input("a", "p1", ("PG", "SF")),
+        _input("b", "p2", ("PG",)),
+        _input("c", "p3", ("SF",)),
+    )
+    values = {"a": 12.0, "b": 11.0, "c": 10.0}
+    topology = PreparedContinuationTopology(inputs, slots)
+    groups = (
+        frozenset({"p1", "p2"}),
+        frozenset({"p1"}),
+        frozenset({"p2"}),
+        frozenset(),
+    )
+    masks = frozenset(range(1 << len(slots)))
+
+    forward = topology.best_scores_by_excluded_players(values, {group: masks for group in groups})
+    reverse = topology.best_scores_by_excluded_players(
+        values, {group: masks for group in reversed(groups)}
+    )
+
+    assert forward == reverse
+    assert forward[frozenset()][topology.full_slot_mask] == 33.0
+    assert forward[frozenset({"p1", "p2"})][topology.full_slot_mask] == 10.0
+
+
 def test_shared_terminal_values_match_reference_assignment_rollouts() -> None:
     """Preserve scenario order, future-player exclusion, and active placeholders."""
 
