@@ -1,0 +1,81 @@
+[
+  {
+    "status": null,
+    "date": null,
+    "stats": {
+      "ast": 4.2,
+      "blk": 0.2,
+      "pts": 15.77,
+      "reb": 3.37,
+      "sp": 1680.0,
+      "stl": 1.14,
+      "to": 1.23,
+      "tpm": 0.63
+    },
+    "category": "proj",
+    "last_modified": 1789732240622,
+    "week": null,
+    "sport": "nba",
+    "season": "2026",
+    "season_type": "regular",
+    "player": {
+      "first_name": "Sample",
+      "injury_status": "Out",
+      "last_name": "Forward"
+    },
+    "team": "GSW",
+    "player_id": "1000",
+    "opponent": null,
+    "updated_at": 1789732240622,
+    "game_id": "season",
+    "week_shard": "_3",
+    "company": "rotowire"
+  },
+  {
+    "status": null,
+    "date": null,
+    "stats": {
+      "ast": 2.1,
+      "blk": 1.2,
+      "pts": 12.5,
+      "pts_std": 99.0,
+      "reb": 8.4,
+      "stl": 0.8,
+      "to": 1.5
+    },
+    "category": "proj",
+    "sport": "nba",
+    "season": "2026",
+    "season_type": "regular",
+    "player": {
+      "first_name": "Sample",
+      "last_name": "Center"
+    },
+    "team": "CLE",
+    "player_id": "2000",
+    "updated_at": 1789732241622,
+    "game_id": "season",
+    "company": "rotowire"
+  },
+  {
+    "status": null,
+    "date": null,
+    "stats": {
+      "adp_dynasty": 338.0,
+      "adp_std": 999.0
+    },
+    "category": "proj",
+    "sport": "nba",
+    "season": "2026",
+    "season_type": "regular",
+    "player": {
+      "first_name": "Sample",
+      "last_name": "Prospect"
+    },
+    "team": null,
+    "player_id": "3000",
+    "updated_at": null,
+    "game_id": "season",
+    "company": "rotowire"
+  }
+]
