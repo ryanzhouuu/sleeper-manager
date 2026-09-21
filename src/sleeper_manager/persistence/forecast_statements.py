@@ -137,6 +137,18 @@ ON forecast_fetch_receipts (
 )
 WHERE outcome IN ('changed', 'unchanged');
 
+CREATE INDEX IF NOT EXISTS forecast_fetch_receipts_source_time_idx
+ON forecast_fetch_receipts (
+    provider,
+    endpoint,
+    season,
+    season_type,
+    horizon,
+    adapter_version,
+    persisted_at DESC,
+    receipt_id DESC
+);
+
 CREATE INDEX IF NOT EXISTS forecast_fetch_receipts_gap_idx
 ON forecast_fetch_receipts (provider, season, scheduled_for DESC, outcome);
 """
@@ -191,4 +203,46 @@ SELECT
     semantic_hash, revision_id, error_code
 FROM forecast_fetch_receipts
 WHERE receipt_id = ?
+"""
+
+LOAD_LATEST_FORECAST_RECEIPT_SQL = """
+SELECT
+    receipt_id, provider, endpoint, season, season_type, horizon,
+    adapter_version, scheduled_for, started_at, response_received_at,
+    persisted_at, outcome, timing, http_status, payload_hash,
+    semantic_hash, revision_id, error_code
+FROM forecast_fetch_receipts
+WHERE provider = ? AND endpoint = ? AND season = ? AND season_type = ?
+  AND horizon = ? AND adapter_version = ? AND persisted_at <= ?
+ORDER BY persisted_at DESC, receipt_id DESC
+LIMIT 1
+"""
+
+LOAD_LATEST_USABLE_FORECAST_RECEIPT_SQL = """
+SELECT
+    receipt_id, provider, endpoint, season, season_type, horizon,
+    adapter_version, scheduled_for, started_at, response_received_at,
+    persisted_at, outcome, timing, http_status, payload_hash,
+    semantic_hash, revision_id, error_code
+FROM forecast_fetch_receipts
+WHERE provider = ? AND endpoint = ? AND season = ? AND season_type = ?
+  AND horizon = ? AND adapter_version = ? AND persisted_at <= ?
+  AND outcome IN ('changed', 'unchanged')
+ORDER BY persisted_at DESC, receipt_id DESC
+LIMIT 1
+"""
+
+MEASURE_FORECAST_STORAGE_SQL = """
+SELECT
+    (SELECT COUNT(*) FROM forecast_raw_artifacts) AS artifact_count,
+    (SELECT COUNT(*) FROM forecast_revisions) AS revision_count,
+    (SELECT COUNT(*) FROM forecast_fetch_receipts) AS receipt_count,
+    COALESCE((SELECT SUM(length(encoded_payload)) FROM forecast_raw_artifacts), 0)
+        AS raw_encoded_bytes,
+    COALESCE((SELECT SUM(uncompressed_size) FROM forecast_raw_artifacts), 0)
+        AS raw_uncompressed_bytes,
+    COALESCE((SELECT SUM(length(encoded_records)) FROM forecast_revisions), 0)
+        AS revision_encoded_bytes,
+    COALESCE((SELECT SUM(records_uncompressed_size) FROM forecast_revisions), 0)
+        AS revision_uncompressed_bytes
 """

@@ -134,5 +134,17 @@ ON forecast_fetch_receipts (
 )
 WHERE outcome IN ('changed', 'unchanged');
 
+CREATE INDEX IF NOT EXISTS forecast_fetch_receipts_source_time_idx
+ON forecast_fetch_receipts (
+    provider,
+    endpoint,
+    season,
+    season_type,
+    horizon,
+    adapter_version,
+    persisted_at DESC,
+    receipt_id DESC
+);
+
 CREATE INDEX IF NOT EXISTS forecast_fetch_receipts_gap_idx
 ON forecast_fetch_receipts (provider, season, scheduled_for DESC, outcome);

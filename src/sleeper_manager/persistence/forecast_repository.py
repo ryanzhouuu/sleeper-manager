@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gzip
 from dataclasses import dataclass
+from datetime import datetime
 from hashlib import sha256
 from typing import Protocol
 
@@ -12,6 +13,7 @@ from sleeper_manager.domain.forecast_capture import (
     ForecastCaptureError,
     ForecastCaptureOutcome,
     ForecastFetchReceipt,
+    ForecastSource,
     NormalizedForecastRevision,
     RawForecastArtifact,
 )
@@ -62,12 +64,93 @@ class ForecastArchiveWriteResult:
     receipt_created: bool
 
 
+@dataclass(frozen=True, slots=True)
+class ForecastArchiveSelection:
+    """Pairs one cutoff-legal receipt with its verified semantic revision."""
+
+    receipt: ForecastFetchReceipt
+    revision: NormalizedForecastRevision
+
+    def __post_init__(self) -> None:
+        """Reject a joined receipt and revision that disagree on identity."""
+
+        if self.receipt.outcome not in (
+            ForecastCaptureOutcome.CHANGED,
+            ForecastCaptureOutcome.UNCHANGED,
+        ):
+            raise ForecastArchiveIntegrityError("Forecast selection receipt is not usable")
+        if (
+            self.receipt.source != self.revision.source
+            or self.receipt.revision_id != self.revision.revision_id
+            or self.receipt.semantic_hash != self.revision.semantic_hash
+        ):
+            raise ForecastArchiveIntegrityError(
+                "Forecast selection receipt and revision identities disagree"
+            )
+        if self.revision.first_persisted_at > self.receipt.persisted_at:
+            raise ForecastArchiveIntegrityError(
+                "Forecast selection predates its revision persistence"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class ForecastArchiveStorage:
+    """Measures logical archive rows and encoded versus decoded payload bytes."""
+
+    artifact_count: int
+    revision_count: int
+    receipt_count: int
+    raw_encoded_bytes: int
+    raw_uncompressed_bytes: int
+    revision_encoded_bytes: int
+    revision_uncompressed_bytes: int
+
+    def __post_init__(self) -> None:
+        """Reject impossible storage metrics returned by a backend."""
+
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in (
+                self.artifact_count,
+                self.revision_count,
+                self.receipt_count,
+                self.raw_encoded_bytes,
+                self.raw_uncompressed_bytes,
+                self.revision_encoded_bytes,
+                self.revision_uncompressed_bytes,
+            )
+        ):
+            raise ForecastArchiveIntegrityError("Forecast archive storage metrics are invalid")
+
+
 class ForecastArchiveRepository(Protocol):
     """Synchronous local archive boundary implemented by SQLite."""
 
     def initialize(self) -> None: ...
 
     def save_capture(self, capture: ForecastCaptureWrite) -> ForecastArchiveWriteResult: ...
+
+    def load_artifact(self, payload_hash: str) -> RawForecastArtifact | None: ...
+
+    def load_revision(self, revision_id: str) -> NormalizedForecastRevision | None: ...
+
+    def load_receipt(self, receipt_id: str) -> ForecastFetchReceipt | None: ...
+
+    def load_latest_receipt(
+        self,
+        source: ForecastSource,
+        *,
+        cutoff: datetime,
+    ) -> ForecastFetchReceipt | None: ...
+
+    def load_revision_at_cutoff(
+        self,
+        source: ForecastSource,
+        *,
+        cutoff: datetime,
+    ) -> ForecastArchiveSelection | None: ...
+
+    def measure_storage(self) -> ForecastArchiveStorage: ...
 
 
 def _validate_artifact(receipt: ForecastFetchReceipt, artifact: RawForecastArtifact) -> None:
@@ -135,6 +218,8 @@ __all__ = (
     "ForecastArchiveError",
     "ForecastArchiveIntegrityError",
     "ForecastArchiveRepository",
+    "ForecastArchiveSelection",
+    "ForecastArchiveStorage",
     "ForecastArchiveWriteResult",
     "ForecastCaptureWrite",
     "validate_capture_outcome",

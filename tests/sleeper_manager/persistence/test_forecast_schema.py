@@ -99,6 +99,7 @@ def test_schema_creates_archive_tables_and_query_indexes() -> None:
         ("forecast_raw_artifacts_stored_idx", "index"),
         ("forecast_revisions_source_time_idx", "index"),
         ("forecast_fetch_receipts_cutoff_idx", "index"),
+        ("forecast_fetch_receipts_source_time_idx", "index"),
         ("forecast_fetch_receipts_gap_idx", "index"),
     }.issubset(objects)
 

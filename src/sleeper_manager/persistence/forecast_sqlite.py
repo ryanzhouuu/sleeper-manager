@@ -5,14 +5,22 @@ from __future__ import annotations
 import gzip
 import sqlite3
 from collections.abc import Mapping
+from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from sleeper_manager.domain.forecast_capture import RawForecastArtifact
+from sleeper_manager.domain.forecast_capture import (
+    ForecastFetchReceipt,
+    ForecastSource,
+    NormalizedForecastRevision,
+    RawForecastArtifact,
+)
 from sleeper_manager.persistence.forecast_repository import (
     ForecastArchiveConflictError,
     ForecastArchiveIntegrityError,
+    ForecastArchiveSelection,
+    ForecastArchiveStorage,
     ForecastArchiveWriteResult,
     ForecastCaptureWrite,
     validate_capture_outcome,
@@ -24,6 +32,8 @@ from sleeper_manager.persistence.forecast_rows import (
     receipt_insert_params,
     revision_from_mapping,
     revision_insert_params,
+    source_query_params,
+    timestamp_query_param,
 )
 from sleeper_manager.persistence.forecast_statements import (
     FORECAST_ARCHIVE_SCHEMA,
@@ -33,6 +43,9 @@ from sleeper_manager.persistence.forecast_statements import (
     LOAD_FORECAST_ARTIFACT_SQL,
     LOAD_FORECAST_RECEIPT_SQL,
     LOAD_FORECAST_REVISION_SQL,
+    LOAD_LATEST_FORECAST_RECEIPT_SQL,
+    LOAD_LATEST_USABLE_FORECAST_RECEIPT_SQL,
+    MEASURE_FORECAST_STORAGE_SQL,
 )
 
 
@@ -72,6 +85,100 @@ class SQLiteForecastArchiveRepository:
             )
             validate_capture_outcome(capture, result)
             return result
+
+    def load_artifact(self, payload_hash: str) -> RawForecastArtifact | None:
+        """Load and verify one exact provider response by content hash."""
+
+        with self._connect() as connection:
+            row = _mapping(
+                connection.execute(LOAD_FORECAST_ARTIFACT_SQL, (payload_hash,)).fetchone()
+            )
+        if row is None:
+            return None
+        artifact = artifact_from_mapping(row)
+        _raw_payload(artifact)
+        return artifact
+
+    def load_revision(self, revision_id: str) -> NormalizedForecastRevision | None:
+        """Load and verify one normalized semantic snapshot by identity."""
+
+        with self._connect() as connection:
+            row = _mapping(
+                connection.execute(LOAD_FORECAST_REVISION_SQL, (revision_id,)).fetchone()
+            )
+        return revision_from_mapping(row) if row is not None else None
+
+    def load_receipt(self, receipt_id: str) -> ForecastFetchReceipt | None:
+        """Load one capture attempt by its immutable identity."""
+
+        with self._connect() as connection:
+            row = _mapping(connection.execute(LOAD_FORECAST_RECEIPT_SQL, (receipt_id,)).fetchone())
+        return receipt_from_mapping(row) if row is not None else None
+
+    def load_latest_receipt(
+        self,
+        source: ForecastSource,
+        *,
+        cutoff: datetime,
+    ) -> ForecastFetchReceipt | None:
+        """Return the newest attempt visible by a decision cutoff, including gaps."""
+
+        _require_aware_cutoff(cutoff)
+        params = (*source_query_params(source), timestamp_query_param(cutoff))
+        with self._connect() as connection:
+            row = _mapping(connection.execute(LOAD_LATEST_FORECAST_RECEIPT_SQL, params).fetchone())
+        return receipt_from_mapping(row) if row is not None else None
+
+    def load_revision_at_cutoff(
+        self,
+        source: ForecastSource,
+        *,
+        cutoff: datetime,
+    ) -> ForecastArchiveSelection | None:
+        """Select the newest usable revision that was persisted by the cutoff."""
+
+        _require_aware_cutoff(cutoff)
+        params = (*source_query_params(source), timestamp_query_param(cutoff))
+        with self._connect() as connection:
+            receipt_row = _mapping(
+                connection.execute(
+                    LOAD_LATEST_USABLE_FORECAST_RECEIPT_SQL,
+                    params,
+                ).fetchone()
+            )
+            if receipt_row is None:
+                return None
+            receipt = receipt_from_mapping(receipt_row)
+            if receipt.revision_id is None:
+                raise ForecastArchiveIntegrityError(
+                    "Stored usable forecast receipt has no revision identity"
+                )
+            revision_row = _mapping(
+                connection.execute(
+                    LOAD_FORECAST_REVISION_SQL,
+                    (receipt.revision_id,),
+                ).fetchone()
+            )
+        if revision_row is None:
+            raise ForecastArchiveIntegrityError("Stored forecast receipt revision is missing")
+        return ForecastArchiveSelection(receipt, revision_from_mapping(revision_row))
+
+    def measure_storage(self) -> ForecastArchiveStorage:
+        """Measure logical rows and encoded versus decoded payload volume."""
+
+        with self._connect() as connection:
+            row = _mapping(connection.execute(MEASURE_FORECAST_STORAGE_SQL).fetchone())
+        if row is None:
+            raise ForecastArchiveIntegrityError("Forecast storage measurement returned no row")
+        return ForecastArchiveStorage(
+            artifact_count=int(row["artifact_count"]),
+            revision_count=int(row["revision_count"]),
+            receipt_count=int(row["receipt_count"]),
+            raw_encoded_bytes=int(row["raw_encoded_bytes"]),
+            raw_uncompressed_bytes=int(row["raw_uncompressed_bytes"]),
+            revision_encoded_bytes=int(row["revision_encoded_bytes"]),
+            revision_uncompressed_bytes=int(row["revision_uncompressed_bytes"]),
+        )
 
     def _save_artifact(
         self,
@@ -156,17 +263,29 @@ def _same_raw_payload(stored: RawForecastArtifact, candidate: RawForecastArtifac
 
     if stored.encoding != candidate.encoding:
         return False
+    return _raw_payload(stored) == _raw_payload(candidate)
+
+
+def _raw_payload(artifact: RawForecastArtifact) -> bytes:
+    """Decode and verify one stored raw artifact's content identity."""
+
     try:
-        stored_payload = gzip.decompress(stored.encoded_payload)
-        candidate_payload = gzip.decompress(candidate.encoded_payload)
+        payload = gzip.decompress(artifact.encoded_payload)
     except (EOFError, OSError) as error:
         raise ForecastArchiveIntegrityError("Stored forecast artifact is corrupt") from error
     if (
-        len(stored_payload) != stored.uncompressed_size
-        or sha256(stored_payload).hexdigest() != stored.payload_hash
+        len(payload) != artifact.uncompressed_size
+        or sha256(payload).hexdigest() != artifact.payload_hash
     ):
         raise ForecastArchiveIntegrityError("Stored forecast artifact identity is corrupt")
-    return stored_payload == candidate_payload
+    return payload
+
+
+def _require_aware_cutoff(cutoff: datetime) -> None:
+    """Reject a cutoff that cannot be compared chronologically."""
+
+    if cutoff.tzinfo is None or cutoff.utcoffset() is None:
+        raise ValueError("Forecast cutoff must be timezone-aware")
 
 
 __all__ = ("SQLiteForecastArchiveRepository",)
