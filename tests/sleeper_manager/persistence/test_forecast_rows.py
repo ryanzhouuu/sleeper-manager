@@ -94,3 +94,40 @@ def test_revision_decoder_rejects_mismatched_semantic_identity() -> None:
         assert "semantic hash" in str(error)
     else:
         raise AssertionError("Expected corrupt forecast revision row to be rejected")
+
+
+def test_row_decoders_accept_d1_blob_arrays() -> None:
+    """Convert D1's returned byte arrays at the shared row boundary."""
+
+    capture = successful_capture()
+    assert capture.artifact is not None
+    assert capture.revision is not None
+    artifact_row = dict(
+        zip(ARTIFACT_COLUMNS, artifact_insert_params(capture.artifact), strict=True)
+    )
+    revision_row = dict(
+        zip(REVISION_COLUMNS, revision_insert_params(capture.revision), strict=True)
+    )
+    artifact_row["encoded_payload"] = list(capture.artifact.encoded_payload)
+    revision_row["encoded_records"] = list(revision_row["encoded_records"])
+
+    assert artifact_from_mapping(artifact_row) == capture.artifact
+    assert revision_from_mapping(revision_row) == capture.revision
+
+
+def test_row_decoders_reject_invalid_d1_blob_arrays() -> None:
+    """Reject non-byte values instead of silently coercing malformed D1 rows."""
+
+    capture = successful_capture()
+    assert capture.artifact is not None
+    artifact_row = dict(
+        zip(ARTIFACT_COLUMNS, artifact_insert_params(capture.artifact), strict=True)
+    )
+    artifact_row["encoded_payload"] = [31, True, 300]
+
+    try:
+        artifact_from_mapping(artifact_row)
+    except ForecastArchiveIntegrityError as error:
+        assert "payload must be bytes" in str(error)
+    else:
+        raise AssertionError("Expected malformed D1 byte array to be rejected")

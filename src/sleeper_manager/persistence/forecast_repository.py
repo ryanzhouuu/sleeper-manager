@@ -153,6 +153,36 @@ class ForecastArchiveRepository(Protocol):
     def measure_storage(self) -> ForecastArchiveStorage: ...
 
 
+class AsyncForecastArchiveRepository(Protocol):
+    """Asynchronous forecast archive boundary implemented by Cloudflare D1."""
+
+    async def initialize(self) -> None: ...
+
+    async def save_capture(self, capture: ForecastCaptureWrite) -> ForecastArchiveWriteResult: ...
+
+    async def load_artifact(self, payload_hash: str) -> RawForecastArtifact | None: ...
+
+    async def load_revision(self, revision_id: str) -> NormalizedForecastRevision | None: ...
+
+    async def load_receipt(self, receipt_id: str) -> ForecastFetchReceipt | None: ...
+
+    async def load_latest_receipt(
+        self,
+        source: ForecastSource,
+        *,
+        cutoff: datetime,
+    ) -> ForecastFetchReceipt | None: ...
+
+    async def load_revision_at_cutoff(
+        self,
+        source: ForecastSource,
+        *,
+        cutoff: datetime,
+    ) -> ForecastArchiveSelection | None: ...
+
+    async def measure_storage(self) -> ForecastArchiveStorage: ...
+
+
 def _validate_artifact(receipt: ForecastFetchReceipt, artifact: RawForecastArtifact) -> None:
     """Verify the raw hash, byte count, and receipt link before persistence."""
 
@@ -247,6 +277,7 @@ def require_aware_forecast_cutoff(cutoff: datetime) -> None:
 
 
 __all__ = (
+    "AsyncForecastArchiveRepository",
     "ForecastArchiveConflictError",
     "ForecastArchiveError",
     "ForecastArchiveIntegrityError",

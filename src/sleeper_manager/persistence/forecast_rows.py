@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -233,6 +233,12 @@ def _blob(value: object) -> bytes:
         return value
     if isinstance(value, bytearray | memoryview):
         return bytes(value)
+    if isinstance(value, Sequence) and not isinstance(value, str):
+        if all(
+            not isinstance(item, bool) and isinstance(item, int) and 0 <= item <= 255
+            for item in value
+        ):
+            return bytes(value)
     raise ForecastArchiveIntegrityError("Stored forecast payload must be bytes")
 
 
