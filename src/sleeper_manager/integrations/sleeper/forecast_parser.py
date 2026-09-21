@@ -25,6 +25,7 @@ from sleeper_manager.domain.forecast_capture import (
     NormalizedPlayerForecast,
     RawForecastArtifact,
 )
+from sleeper_manager.domain.forecast_revision_identity import forecast_semantic_hash
 
 CORE_FORECAST_STATS = frozenset(("pts", "reb", "ast", "stl", "blk", "to", "tpm"))
 _REQUIRED_ROW_FIELDS = frozenset(
@@ -68,7 +69,7 @@ def parse_sleeper_season_forecasts(
 
     ordered = tuple(sorted(records, key=lambda record: record.player_id))
     payload_hash = sha256(payload).hexdigest()
-    semantic_hash = sha256(_semantic_payload(source, ordered)).hexdigest()
+    semantic_hash = forecast_semantic_hash(source, ordered)
     updates = tuple(
         record.provider_updated_at for record in ordered if record.provider_updated_at is not None
     )
@@ -244,40 +245,6 @@ def _numeric_stats(value: object, index: int) -> tuple[tuple[str, float], ...]:
             )
         normalized.append((name, float(raw_value)))
     return tuple(normalized)
-
-
-def _semantic_payload(
-    source: ForecastSource,
-    records: tuple[NormalizedPlayerForecast, ...],
-) -> bytes:
-    """Serialize only fields whose changes create a forecast revision."""
-
-    value = {
-        "source": {
-            "provider": source.provider,
-            "endpoint": source.endpoint,
-            "season": source.season,
-            "season_type": source.season_type,
-            "horizon": source.horizon,
-            "adapter_version": source.adapter_version,
-        },
-        "records": [
-            {
-                "player_id": record.player_id,
-                "company": record.company,
-                "team_id": record.team_id,
-                "stats": record.stats,
-            }
-            for record in records
-        ],
-    }
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
 
 
 __all__ = (
