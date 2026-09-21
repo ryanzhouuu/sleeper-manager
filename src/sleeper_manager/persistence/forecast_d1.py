@@ -8,11 +8,13 @@ the complete artifact, revision, and receipt graph.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from importlib import import_module
 from typing import Any
 
 from sleeper_manager.domain.forecast_capture import (
     ForecastFetchReceipt,
+    ForecastSource,
     NormalizedForecastRevision,
     RawForecastArtifact,
 )
@@ -26,8 +28,12 @@ from sleeper_manager.persistence.forecast_d1_statements import (
 from sleeper_manager.persistence.forecast_repository import (
     ForecastArchiveConflictError,
     ForecastArchiveError,
+    ForecastArchiveIntegrityError,
+    ForecastArchiveSelection,
+    ForecastArchiveStorage,
     ForecastArchiveWriteResult,
     ForecastCaptureWrite,
+    require_aware_forecast_cutoff,
     same_raw_artifact_content,
     validate_capture_outcome,
     verified_raw_payload,
@@ -40,6 +46,7 @@ from sleeper_manager.persistence.forecast_rows import (
     revision_from_mapping,
     revision_insert_params,
     source_query_params,
+    timestamp_query_param,
 )
 from sleeper_manager.persistence.forecast_statements import (
     INSERT_FORECAST_ARTIFACT_SQL,
@@ -48,6 +55,9 @@ from sleeper_manager.persistence.forecast_statements import (
     LOAD_FORECAST_ARTIFACT_SQL,
     LOAD_FORECAST_RECEIPT_SQL,
     LOAD_FORECAST_REVISION_SQL,
+    LOAD_LATEST_FORECAST_RECEIPT_SQL,
+    LOAD_LATEST_USABLE_FORECAST_RECEIPT_SQL,
+    MEASURE_FORECAST_STORAGE_SQL,
 )
 
 _MISSING = object()
@@ -145,6 +155,69 @@ class D1ForecastArchiveRepository:
 
         row = await self._first(LOAD_FORECAST_RECEIPT_SQL, receipt_id)
         return receipt_from_mapping(row) if row is not None else None
+
+    async def load_latest_receipt(
+        self,
+        source: ForecastSource,
+        *,
+        cutoff: datetime,
+    ) -> ForecastFetchReceipt | None:
+        """Return the newest attempt visible by a decision cutoff, including gaps."""
+
+        require_aware_forecast_cutoff(cutoff)
+        row = await self._first(
+            LOAD_LATEST_FORECAST_RECEIPT_SQL,
+            *source_query_params(source),
+            timestamp_query_param(cutoff),
+        )
+        return receipt_from_mapping(row) if row is not None else None
+
+    async def load_revision_at_cutoff(
+        self,
+        source: ForecastSource,
+        *,
+        cutoff: datetime,
+    ) -> ForecastArchiveSelection | None:
+        """Select the newest usable revision that was persisted by the cutoff."""
+
+        require_aware_forecast_cutoff(cutoff)
+        receipt_row = await self._first(
+            LOAD_LATEST_USABLE_FORECAST_RECEIPT_SQL,
+            *source_query_params(source),
+            timestamp_query_param(cutoff),
+        )
+        if receipt_row is None:
+            return None
+        receipt = receipt_from_mapping(receipt_row)
+        if receipt.revision_id is None:
+            raise ForecastArchiveIntegrityError(
+                "Stored usable forecast receipt has no revision identity"
+            )
+        revision = await self.load_revision(receipt.revision_id)
+        if revision is None:
+            raise ForecastArchiveIntegrityError("Stored forecast receipt revision is missing")
+        return ForecastArchiveSelection(receipt, revision)
+
+    async def measure_storage(self) -> ForecastArchiveStorage:
+        """Measure logical rows and encoded versus decoded payload volume."""
+
+        row = await self._first(MEASURE_FORECAST_STORAGE_SQL)
+        if row is None:
+            raise ForecastArchiveIntegrityError("Forecast storage measurement returned no row")
+        try:
+            return ForecastArchiveStorage(
+                artifact_count=int(row["artifact_count"]),
+                revision_count=int(row["revision_count"]),
+                receipt_count=int(row["receipt_count"]),
+                raw_encoded_bytes=int(row["raw_encoded_bytes"]),
+                raw_uncompressed_bytes=int(row["raw_uncompressed_bytes"]),
+                revision_encoded_bytes=int(row["revision_encoded_bytes"]),
+                revision_uncompressed_bytes=int(row["revision_uncompressed_bytes"]),
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            raise ForecastArchiveIntegrityError(
+                "Forecast storage measurement row is invalid"
+            ) from error
 
     async def _load_revision_by_semantic(
         self,
