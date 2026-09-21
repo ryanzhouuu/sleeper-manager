@@ -213,6 +213,39 @@ def validate_capture_outcome(
         )
 
 
+def same_raw_artifact_content(
+    stored: RawForecastArtifact,
+    candidate: RawForecastArtifact,
+) -> bool:
+    """Compare verified source bytes while allowing different storage timestamps."""
+
+    if stored.encoding != candidate.encoding:
+        return False
+    return verified_raw_payload(stored) == verified_raw_payload(candidate)
+
+
+def verified_raw_payload(artifact: RawForecastArtifact) -> bytes:
+    """Decode and verify one stored raw artifact's content identity."""
+
+    try:
+        payload = gzip.decompress(artifact.encoded_payload)
+    except (EOFError, OSError) as error:
+        raise ForecastArchiveIntegrityError("Stored forecast artifact is corrupt") from error
+    if (
+        len(payload) != artifact.uncompressed_size
+        or sha256(payload).hexdigest() != artifact.payload_hash
+    ):
+        raise ForecastArchiveIntegrityError("Stored forecast artifact identity is corrupt")
+    return payload
+
+
+def require_aware_forecast_cutoff(cutoff: datetime) -> None:
+    """Reject a cutoff that cannot be compared chronologically."""
+
+    if cutoff.tzinfo is None or cutoff.utcoffset() is None:
+        raise ValueError("Forecast cutoff must be timezone-aware")
+
+
 __all__ = (
     "ForecastArchiveConflictError",
     "ForecastArchiveError",
@@ -222,5 +255,8 @@ __all__ = (
     "ForecastArchiveStorage",
     "ForecastArchiveWriteResult",
     "ForecastCaptureWrite",
+    "require_aware_forecast_cutoff",
+    "same_raw_artifact_content",
     "validate_capture_outcome",
+    "verified_raw_payload",
 )

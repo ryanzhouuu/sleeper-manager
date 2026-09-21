@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import gzip
 import sqlite3
 from collections.abc import Mapping
 from datetime import datetime
-from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +21,10 @@ from sleeper_manager.persistence.forecast_repository import (
     ForecastArchiveStorage,
     ForecastArchiveWriteResult,
     ForecastCaptureWrite,
+    require_aware_forecast_cutoff,
+    same_raw_artifact_content,
     validate_capture_outcome,
+    verified_raw_payload,
 )
 from sleeper_manager.persistence.forecast_rows import (
     artifact_from_mapping,
@@ -96,7 +97,7 @@ class SQLiteForecastArchiveRepository:
         if row is None:
             return None
         artifact = artifact_from_mapping(row)
-        _raw_payload(artifact)
+        verified_raw_payload(artifact)
         return artifact
 
     def load_revision(self, revision_id: str) -> NormalizedForecastRevision | None:
@@ -123,7 +124,7 @@ class SQLiteForecastArchiveRepository:
     ) -> ForecastFetchReceipt | None:
         """Return the newest attempt visible by a decision cutoff, including gaps."""
 
-        _require_aware_cutoff(cutoff)
+        require_aware_forecast_cutoff(cutoff)
         params = (*source_query_params(source), timestamp_query_param(cutoff))
         with self._connect() as connection:
             row = _mapping(connection.execute(LOAD_LATEST_FORECAST_RECEIPT_SQL, params).fetchone())
@@ -137,7 +138,7 @@ class SQLiteForecastArchiveRepository:
     ) -> ForecastArchiveSelection | None:
         """Select the newest usable revision that was persisted by the cutoff."""
 
-        _require_aware_cutoff(cutoff)
+        require_aware_forecast_cutoff(cutoff)
         params = (*source_query_params(source), timestamp_query_param(cutoff))
         with self._connect() as connection:
             receipt_row = _mapping(
@@ -196,7 +197,7 @@ class SQLiteForecastArchiveRepository:
         row = _mapping(
             connection.execute(LOAD_FORECAST_ARTIFACT_SQL, (artifact.payload_hash,)).fetchone()
         )
-        if row is None or not _same_raw_payload(artifact_from_mapping(row), artifact):
+        if row is None or not same_raw_artifact_content(artifact_from_mapping(row), artifact):
             raise ForecastArchiveConflictError(
                 "Forecast raw artifact hash already names different content"
             )
@@ -256,36 +257,6 @@ def _mapping(row: sqlite3.Row | None) -> Mapping[str, Any] | None:
     if row is None:
         return None
     return {str(key): row[key] for key in row.keys()}
-
-
-def _same_raw_payload(stored: RawForecastArtifact, candidate: RawForecastArtifact) -> bool:
-    """Compare decoded source bytes while allowing different storage timestamps."""
-
-    if stored.encoding != candidate.encoding:
-        return False
-    return _raw_payload(stored) == _raw_payload(candidate)
-
-
-def _raw_payload(artifact: RawForecastArtifact) -> bytes:
-    """Decode and verify one stored raw artifact's content identity."""
-
-    try:
-        payload = gzip.decompress(artifact.encoded_payload)
-    except (EOFError, OSError) as error:
-        raise ForecastArchiveIntegrityError("Stored forecast artifact is corrupt") from error
-    if (
-        len(payload) != artifact.uncompressed_size
-        or sha256(payload).hexdigest() != artifact.payload_hash
-    ):
-        raise ForecastArchiveIntegrityError("Stored forecast artifact identity is corrupt")
-    return payload
-
-
-def _require_aware_cutoff(cutoff: datetime) -> None:
-    """Reject a cutoff that cannot be compared chronologically."""
-
-    if cutoff.tzinfo is None or cutoff.utcoffset() is None:
-        raise ValueError("Forecast cutoff must be timezone-aware")
 
 
 __all__ = ("SQLiteForecastArchiveRepository",)
