@@ -140,3 +140,55 @@ WHERE outcome IN ('changed', 'unchanged');
 CREATE INDEX IF NOT EXISTS forecast_fetch_receipts_gap_idx
 ON forecast_fetch_receipts (provider, season, scheduled_for DESC, outcome);
 """
+
+INSERT_FORECAST_ARTIFACT_SQL = """
+INSERT OR IGNORE INTO forecast_raw_artifacts (
+    payload_hash, encoding, encoded_payload, uncompressed_size, stored_at
+) VALUES (?, ?, ?, ?, ?)
+"""
+
+LOAD_FORECAST_ARTIFACT_SQL = """
+SELECT payload_hash, encoding, encoded_payload, uncompressed_size, stored_at
+FROM forecast_raw_artifacts
+WHERE payload_hash = ?
+"""
+
+INSERT_FORECAST_REVISION_SQL = """
+INSERT OR IGNORE INTO forecast_revisions (
+    revision_id, provider, endpoint, season, season_type, horizon,
+    adapter_version, semantic_hash, source_payload_hash, first_persisted_at,
+    provider_updated_from, provider_updated_to, total_rows,
+    numeric_forecast_rows, core_complete_rows, records_encoding,
+    encoded_records, records_uncompressed_size
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+LOAD_FORECAST_REVISION_SQL = """
+SELECT
+    revision_id, provider, endpoint, season, season_type, horizon,
+    adapter_version, semantic_hash, source_payload_hash, first_persisted_at,
+    provider_updated_from, provider_updated_to, total_rows,
+    numeric_forecast_rows, core_complete_rows, records_encoding,
+    encoded_records, records_uncompressed_size
+FROM forecast_revisions
+WHERE revision_id = ?
+"""
+
+INSERT_FORECAST_RECEIPT_SQL = """
+INSERT OR IGNORE INTO forecast_fetch_receipts (
+    receipt_id, provider, endpoint, season, season_type, horizon,
+    adapter_version, scheduled_for, started_at, response_received_at,
+    persisted_at, outcome, timing, http_status, payload_hash,
+    semantic_hash, revision_id, error_code
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+LOAD_FORECAST_RECEIPT_SQL = """
+SELECT
+    receipt_id, provider, endpoint, season, season_type, horizon,
+    adapter_version, scheduled_for, started_at, response_received_at,
+    persisted_at, outcome, timing, http_status, payload_hash,
+    semantic_hash, revision_id, error_code
+FROM forecast_fetch_receipts
+WHERE receipt_id = ?
+"""
