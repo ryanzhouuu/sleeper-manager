@@ -12,6 +12,7 @@ import json
 import os
 import sys
 from collections import Counter
+from collections.abc import Awaitable, Callable
 from dataclasses import fields
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -31,7 +32,7 @@ from sleeper_manager.backtesting.experiments.projection_evaluation_cli import (
 )
 from sleeper_manager.cloudflare.dispatcher import dispatch_due_work
 from sleeper_manager.cloudflare.planning import collect_cloudflare_planning_inputs
-from sleeper_manager.cloudflare.providers import CloudflareESPNProvider
+from sleeper_manager.cloudflare.providers import CloudflareESPNProvider, CloudflareSleeperClient
 from sleeper_manager.cloudflare.runtime_sync import (
     RemoteD1,
     compact_history_from_workspace,
@@ -42,6 +43,8 @@ from sleeper_manager.cloudflare.runtime_sync import (
 )
 from sleeper_manager.config import Settings
 from sleeper_manager.domain.league import LeagueProfile
+from sleeper_manager.domain.runtime_policy import RuntimePolicy
+from sleeper_manager.integrations.nba.cached_provider import AsyncCachedNBAProvider
 from sleeper_manager.integrations.nba.espn import ESPNAPIError, ESPNClient
 from sleeper_manager.integrations.sleeper.client import SleeperAPIError, SleeperClient
 from sleeper_manager.integrations.sleeper.sync import (
@@ -51,8 +54,10 @@ from sleeper_manager.integrations.sleeper.sync import (
 from sleeper_manager.notifications.factory import build_notification_dispatcher
 from sleeper_manager.persistence.async_sqlite import AsyncSQLiteStateRepository
 from sleeper_manager.persistence.d1 import D1StateRepository
+from sleeper_manager.persistence.forecast_sqlite import AsyncSQLiteForecastArchiveRepository
 from sleeper_manager.persistence.nba_cache import SQLiteNBADataCache
 from sleeper_manager.persistence.sqlite import SQLiteStateRepository
+from sleeper_manager.workflows.forecast_collection import capture_scheduled_forecast
 from sleeper_manager.workflows.nba_diagnostics import collect_nba_diagnostics
 from sleeper_manager.workflows.notification_loop import (
     NotificationLoop,
@@ -464,6 +469,22 @@ async def _run_scheduled(settings: Settings) -> int:
                 open_sleeper_url="https://sleeper.com",
                 fetch_game_summary=CloudflareESPNProvider(fetch, clock=lambda: now).game_summary,
             )
+
+            async def fetch_raw(url: str) -> httpx.Response:
+                return await client.get(url)
+
+            await _capture_local_forecast(
+                settings,
+                repository,
+                CloudflareSleeperClient(fetch),
+                nba=AsyncCachedNBAProvider(
+                    CloudflareESPNProvider(fetch, clock=lambda: now),
+                    repository,
+                    clock=lambda: now,
+                ),
+                fetch=fetch_raw,
+                now=now,
+            )
     except (OSError, RuntimeError, ValueError) as error:
         print(redact_secrets(f"Scheduled run failed: {error}"), file=sys.stderr)
         return 2
@@ -471,6 +492,40 @@ async def _run_scheduled(settings: Settings) -> int:
     if summary.status.value in {"failed", "blocked"}:
         return 2
     return 0 if summary.status.value != "delivery_failed" else 1
+
+
+async def _capture_local_forecast(
+    settings: Settings,
+    repository: AsyncSQLiteStateRepository,
+    sleeper: CloudflareSleeperClient,
+    *,
+    nba: AsyncCachedNBAProvider,
+    fetch: Callable[[str], Awaitable[object]],
+    now: datetime,
+) -> None:
+    """Write the local forecast archive without changing the planning exit status."""
+
+    try:
+        record = await repository.load_runtime_policy()
+        if record is None or not settings.sleeper_league_id or not settings.sleeper_user_id:
+            return
+        archive = AsyncSQLiteForecastArchiveRepository(
+            settings.sqlite_path.with_name("forecasts.db")
+        )
+        await archive.initialize()
+        await capture_scheduled_forecast(
+            archive,
+            repository,
+            sleeper,
+            policy=RuntimePolicy.from_json(record.version, record.payload_json),
+            nba=nba,
+            fetch=fetch,
+            now=now,
+            league_id=settings.sleeper_league_id,
+            user_id=settings.sleeper_user_id,
+        )
+    except Exception:
+        print("Forecast capture failed", file=sys.stderr)
 
 
 async def _sync_cloudflare_runtime_data(

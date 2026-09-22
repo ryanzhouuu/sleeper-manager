@@ -4,6 +4,7 @@
 notification destinations are missing instead of raising.
 """
 
+import sys
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -17,16 +18,19 @@ from sleeper_manager.cloudflare.planning import (
     CloudflarePlanningAssembly,
     collect_cloudflare_planning_inputs,
 )
-from sleeper_manager.cloudflare.providers import CloudflareESPNProvider
+from sleeper_manager.cloudflare.providers import CloudflareESPNProvider, CloudflareSleeperClient
 from sleeper_manager.cloudflare.scheduler_types import (
     FailureCategory,
     ScheduledRunStatus,
     ScheduledRunSummary,
 )
 from sleeper_manager.domain.runtime_policy import RuntimePolicy
+from sleeper_manager.integrations.nba.cached_provider import AsyncCachedNBAProvider
 from sleeper_manager.notifications.dispatcher import NotificationDispatcher
 from sleeper_manager.persistence.base import AsyncRuntimeStateRepository
 from sleeper_manager.persistence.d1 import D1StateRepository
+from sleeper_manager.persistence.forecast_d1 import D1ForecastArchiveRepository
+from sleeper_manager.workflows.forecast_collection import capture_scheduled_forecast
 from sleeper_manager.workflows.notification_loop import NotificationLoop
 from sleeper_manager.workflows.postgame_lock_in import LOCK_IN_ACKNOWLEDGEMENT_KINDS
 
@@ -129,4 +133,50 @@ async def run_scheduled(
         open_sleeper_url=_value(env, "OPEN_SLEEPER_URL", "https://sleeper.com"),
         fetch_game_summary=CloudflareESPNProvider(fetcher, clock=lambda: now).game_summary,
     )
+    await _capture_forecast(env, fetcher, repository, now)
     return summary.as_dict()
+
+
+async def _capture_forecast(
+    env: Any,
+    fetcher: Any,
+    repository: AsyncRuntimeStateRepository,
+    now: datetime,
+) -> None:
+    """Store a due forecast when the archive binding exists.
+
+    Any capture failure stays in the archive or is discarded here. The planning
+    summary already produced for this wake is left unchanged.
+    """
+
+    binding = getattr(env, "forecast_archive", None)
+    if binding is None:
+        return
+    try:
+        record = await repository.load_runtime_policy()
+        if record is None:
+            return
+        league_id = _value(env, "SLEEPER_LEAGUE_ID")
+        user_id = _value(env, "SLEEPER_USER_ID")
+        if not league_id or not user_id:
+            return
+        archive = D1ForecastArchiveRepository(binding)
+        await archive.initialize()
+        await capture_scheduled_forecast(
+            archive,
+            repository,
+            CloudflareSleeperClient(fetcher),
+            policy=RuntimePolicy.from_json(record.version, record.payload_json),
+            nba=AsyncCachedNBAProvider(
+                CloudflareESPNProvider(fetcher, clock=lambda: now),
+                repository,
+                clock=lambda: now,
+            ),
+            fetch=fetcher,
+            now=now,
+            league_id=league_id,
+            user_id=user_id,
+        )
+    except Exception:
+        print("Forecast capture failed", file=sys.stderr)
+        return

@@ -390,6 +390,60 @@ def test_scheduled_runtime_never_sends_placeholder() -> None:
     asyncio.run(exercise())
 
 
+def test_forecast_capture_does_not_change_the_planning_summary() -> None:
+    """A missing or failing forecast archive leaves the due-work summary intact."""
+
+    async def exercise() -> None:
+        database = FakeD1()
+        await database.exec(D1_SCHEMA)
+        await D1StateRepository(database).save_runtime_policy(
+            RuntimePolicyRecord(POLICY.version, POLICY.to_json(), SIX_AM_CENTRAL)
+        )
+
+        async def unused(url: str) -> object:
+            raise AssertionError(url)
+
+        without_archive = SimpleNamespace(
+            ACKNOWLEDGEMENT_BASE_URL="https://example.test/ack",
+            NTFY_TOPIC="topic",
+            NTFY_BASE_URL="https://ntfy.test",
+            NTFY_ACCESS_TOKEN="",
+            DISCORD_WEBHOOK_URL="",
+            SLEEPER_LEAGUE_ID="league-1",
+            SLEEPER_USER_ID="user-1",
+            OPEN_SLEEPER_URL="https://sleeper.com",
+            sleeper_manager_state=database,
+        )
+        baseline = await run_scheduled(
+            without_archive,
+            unused,
+            scheduled_at=SIX_AM_CENTRAL,
+            correlation_id="cron-1",
+        )
+        calls: list[str] = []
+
+        async def failing_fetch(url: str) -> object:
+            calls.append(url)
+            raise RuntimeError("forecast feed unavailable")
+
+        with_archive = SimpleNamespace(
+            **without_archive.__dict__,
+            forecast_archive=FakeD1(),
+        )
+        captured = await run_scheduled(
+            with_archive,
+            failing_fetch,
+            scheduled_at=SIX_AM_CENTRAL,
+            correlation_id="cron-1",
+        )
+
+        assert captured == baseline
+        assert captured["status"] == ScheduledRunStatus.NO_ACTION.value
+        assert calls
+
+    asyncio.run(exercise())
+
+
 def test_due_postgame_watch_fetches_espn_summary_directly(tmp_path) -> None:  # type: ignore[no-untyped-def]
     """Claimed postgame work must poll ESPN once and keep the five-minute watch open."""
 
