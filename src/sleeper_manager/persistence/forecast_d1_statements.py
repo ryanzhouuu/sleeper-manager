@@ -15,7 +15,6 @@ WHERE EXISTS (
     WHERE payload_hash = ?1
       AND NOT (
           encoding IS ?2
-          AND encoded_payload IS ?3
           AND uncompressed_size IS ?4
       )
 )

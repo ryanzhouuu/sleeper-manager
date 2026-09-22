@@ -1,6 +1,7 @@
 """Verify atomic immutable writes through the forecast D1 repository."""
 
 import asyncio
+import gzip
 import sqlite3
 from dataclasses import replace
 from datetime import timedelta
@@ -12,6 +13,7 @@ from sleeper_manager.persistence.forecast_d1 import D1ForecastArchiveRepository
 from sleeper_manager.persistence.forecast_repository import (
     ForecastArchiveConflictError,
     ForecastArchiveIntegrityError,
+    ForecastCaptureWrite,
 )
 from sleeper_manager.persistence.forecast_statements import FORECAST_ARCHIVE_SCHEMA
 from tests.sleeper_manager.persistence.forecast_sqlite_support import (
@@ -58,6 +60,34 @@ def test_changed_capture_is_inserted_and_exact_retry_is_idempotent() -> None:
         True,
         True,
     )
+    assert (retried.artifact_created, retried.revision_created, retried.receipt_created) == (
+        False,
+        False,
+        False,
+    )
+    assert counts(database) == (1, 1, 1)
+
+
+def test_exact_retry_accepts_alternate_gzip_encoding() -> None:
+    """Treat verified source bytes, not their gzip representation, as identity."""
+
+    database, archive = repository()
+    payload = b"same-source-payload" * 100
+    capture = successful_capture(payload=payload)
+    asyncio.run(archive.save_capture(capture))
+    assert capture.artifact is not None
+    alternate_artifact = replace(
+        capture.artifact,
+        encoded_payload=gzip.compress(payload, compresslevel=1, mtime=0),
+    )
+    assert alternate_artifact.encoded_payload != capture.artifact.encoded_payload
+
+    retried = asyncio.run(
+        archive.save_capture(
+            ForecastCaptureWrite(capture.receipt, alternate_artifact, capture.revision)
+        )
+    )
+
     assert (retried.artifact_created, retried.revision_created, retried.receipt_created) == (
         False,
         False,
