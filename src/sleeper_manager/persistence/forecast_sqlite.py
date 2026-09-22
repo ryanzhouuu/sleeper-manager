@@ -278,6 +278,78 @@ class SQLiteForecastArchiveRepository:
         return False
 
 
+class AsyncSQLiteForecastArchiveRepository:
+    """Async facade over the local SQLite forecast archive.
+
+    Scheduled capture runs through the same method surface as D1. The underlying
+    writes remain synchronous because this database is a local file.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._repository = SQLiteForecastArchiveRepository(path)
+
+    async def initialize(self) -> None:
+        """Create the local forecast schema idempotently."""
+
+        self._repository.initialize()
+
+    async def save_capture(self, capture: ForecastCaptureWrite) -> ForecastArchiveWriteResult:
+        """Persist one capture through the synchronous archive transaction."""
+
+        return self._repository.save_capture(capture)
+
+    async def load_artifact(self, payload_hash: str) -> RawForecastArtifact | None:
+        """Load and verify one exact provider response by content hash."""
+
+        return self._repository.load_artifact(payload_hash)
+
+    async def load_revision(self, revision_id: str) -> NormalizedForecastRevision | None:
+        """Load and verify one normalized semantic snapshot by identity."""
+
+        return self._repository.load_revision(revision_id)
+
+    async def load_receipt(self, receipt_id: str) -> ForecastFetchReceipt | None:
+        """Load one capture attempt by its immutable identity."""
+
+        return self._repository.load_receipt(receipt_id)
+
+    async def load_latest_receipt(
+        self,
+        source: ForecastSource,
+        *,
+        cutoff: datetime,
+    ) -> ForecastFetchReceipt | None:
+        """Return the newest attempt visible by a decision cutoff, including gaps."""
+
+        return self._repository.load_latest_receipt(source, cutoff=cutoff)
+
+    async def list_receipts(
+        self,
+        source: ForecastSource,
+        *,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[ForecastFetchReceipt, ...]:
+        """Return one source's receipts in the half-open persistence window."""
+
+        return self._repository.list_receipts(source, start=start, end=end)
+
+    async def load_revision_at_cutoff(
+        self,
+        source: ForecastSource,
+        *,
+        cutoff: datetime,
+    ) -> ForecastArchiveSelection | None:
+        """Select the newest usable revision that was persisted by the cutoff."""
+
+        return self._repository.load_revision_at_cutoff(source, cutoff=cutoff)
+
+    async def measure_storage(self) -> ForecastArchiveStorage:
+        """Measure logical rows and encoded versus decoded payload volume."""
+
+        return self._repository.measure_storage()
+
+
 def _mapping(row: sqlite3.Row | None) -> Mapping[str, Any] | None:
     """Expose SQLite rows through the shared forecast decoder boundary."""
 
@@ -286,4 +358,7 @@ def _mapping(row: sqlite3.Row | None) -> Mapping[str, Any] | None:
     return {str(key): row[key] for key in row.keys()}
 
 
-__all__ = ("SQLiteForecastArchiveRepository",)
+__all__ = (
+    "AsyncSQLiteForecastArchiveRepository",
+    "SQLiteForecastArchiveRepository",
+)
