@@ -143,6 +143,14 @@ class ForecastArchiveRepository(Protocol):
         cutoff: datetime,
     ) -> ForecastFetchReceipt | None: ...
 
+    def list_receipts(
+        self,
+        source: ForecastSource,
+        *,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[ForecastFetchReceipt, ...]: ...
+
     def load_revision_at_cutoff(
         self,
         source: ForecastSource,
@@ -172,6 +180,14 @@ class AsyncForecastArchiveRepository(Protocol):
         *,
         cutoff: datetime,
     ) -> ForecastFetchReceipt | None: ...
+
+    async def list_receipts(
+        self,
+        source: ForecastSource,
+        *,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[ForecastFetchReceipt, ...]: ...
 
     async def load_revision_at_cutoff(
         self,
@@ -276,6 +292,15 @@ def require_aware_forecast_cutoff(cutoff: datetime) -> None:
         raise ValueError("Forecast cutoff must be timezone-aware")
 
 
+def require_forecast_receipt_window(start: datetime, end: datetime) -> None:
+    """Reject a half-open receipt window that cannot be compared chronologically."""
+
+    require_aware_forecast_cutoff(start)
+    require_aware_forecast_cutoff(end)
+    if start >= end:
+        raise ValueError("Forecast receipt window end must follow its start")
+
+
 __all__ = (
     "AsyncForecastArchiveRepository",
     "ForecastArchiveConflictError",
@@ -287,6 +312,7 @@ __all__ = (
     "ForecastArchiveWriteResult",
     "ForecastCaptureWrite",
     "require_aware_forecast_cutoff",
+    "require_forecast_receipt_window",
     "same_raw_artifact_content",
     "validate_capture_outcome",
     "verified_raw_payload",

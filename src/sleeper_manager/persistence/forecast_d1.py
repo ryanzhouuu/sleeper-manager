@@ -34,6 +34,7 @@ from sleeper_manager.persistence.forecast_repository import (
     ForecastArchiveWriteResult,
     ForecastCaptureWrite,
     require_aware_forecast_cutoff,
+    require_forecast_receipt_window,
     same_raw_artifact_content,
     validate_capture_outcome,
     verified_raw_payload,
@@ -52,6 +53,7 @@ from sleeper_manager.persistence.forecast_statements import (
     INSERT_FORECAST_ARTIFACT_SQL,
     INSERT_FORECAST_RECEIPT_SQL,
     INSERT_FORECAST_REVISION_SQL,
+    LIST_FORECAST_RECEIPTS_SQL,
     LOAD_FORECAST_ARTIFACT_SQL,
     LOAD_FORECAST_RECEIPT_SQL,
     LOAD_FORECAST_REVISION_SQL,
@@ -172,6 +174,24 @@ class D1ForecastArchiveRepository:
         )
         return receipt_from_mapping(row) if row is not None else None
 
+    async def list_receipts(
+        self,
+        source: ForecastSource,
+        *,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[ForecastFetchReceipt, ...]:
+        """Return one source's receipts in the half-open persistence window."""
+
+        require_forecast_receipt_window(start, end)
+        rows = await self._all(
+            LIST_FORECAST_RECEIPTS_SQL,
+            *source_query_params(source),
+            timestamp_query_param(start),
+            timestamp_query_param(end),
+        )
+        return tuple(receipt_from_mapping(row) for row in rows)
+
     async def load_revision_at_cutoff(
         self,
         source: ForecastSource,
@@ -286,6 +306,23 @@ class D1ForecastArchiveRepository:
         statement = self._database.prepare(query)
         converted = tuple(_d1_bind_value(param) for param in params)
         return statement.bind(*converted) if converted else statement
+
+    async def _all(self, query: str, *params: object) -> tuple[Mapping[str, Any], ...]:
+        """Run one D1 query and normalize every returned row mapping."""
+
+        result = await self._statement(query, params).all()
+        payload = _to_python(result)
+        _require_success(result)
+        rows = _field(payload, "results")
+        if rows is _MISSING or isinstance(rows, str | bytes) or not isinstance(rows, Sequence):
+            raise ForecastArchiveError("Unexpected D1 forecast result envelope")
+        decoded: list[Mapping[str, Any]] = []
+        for row in rows:
+            item = _to_python(row)
+            if not isinstance(item, Mapping):
+                raise ForecastArchiveError("Unexpected D1 forecast row envelope")
+            decoded.append({str(key): _to_python(value) for key, value in item.items()})
+        return tuple(decoded)
 
     async def _first(self, query: str, *params: object) -> Mapping[str, Any] | None:
         """Run one D1 lookup and normalize its optional row mapping."""

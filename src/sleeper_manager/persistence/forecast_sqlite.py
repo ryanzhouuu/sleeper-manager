@@ -22,6 +22,7 @@ from sleeper_manager.persistence.forecast_repository import (
     ForecastArchiveWriteResult,
     ForecastCaptureWrite,
     require_aware_forecast_cutoff,
+    require_forecast_receipt_window,
     same_raw_artifact_content,
     validate_capture_outcome,
     verified_raw_payload,
@@ -41,6 +42,7 @@ from sleeper_manager.persistence.forecast_statements import (
     INSERT_FORECAST_ARTIFACT_SQL,
     INSERT_FORECAST_RECEIPT_SQL,
     INSERT_FORECAST_REVISION_SQL,
+    LIST_FORECAST_RECEIPTS_SQL,
     LOAD_FORECAST_ARTIFACT_SQL,
     LOAD_FORECAST_RECEIPT_SQL,
     LOAD_FORECAST_REVISION_SQL,
@@ -129,6 +131,31 @@ class SQLiteForecastArchiveRepository:
         with self._connect() as connection:
             row = _mapping(connection.execute(LOAD_LATEST_FORECAST_RECEIPT_SQL, params).fetchone())
         return receipt_from_mapping(row) if row is not None else None
+
+    def list_receipts(
+        self,
+        source: ForecastSource,
+        *,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[ForecastFetchReceipt, ...]:
+        """Return one source's receipts in the half-open persistence window."""
+
+        require_forecast_receipt_window(start, end)
+        params = (
+            *source_query_params(source),
+            timestamp_query_param(start),
+            timestamp_query_param(end),
+        )
+        with self._connect() as connection:
+            rows = connection.execute(LIST_FORECAST_RECEIPTS_SQL, params).fetchall()
+        receipts: list[ForecastFetchReceipt] = []
+        for row in rows:
+            mapped = _mapping(row)
+            if mapped is None:
+                continue
+            receipts.append(receipt_from_mapping(mapped))
+        return tuple(receipts)
 
     def load_revision_at_cutoff(
         self,

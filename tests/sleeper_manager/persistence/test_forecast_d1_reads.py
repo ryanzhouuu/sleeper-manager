@@ -165,6 +165,33 @@ def test_storage_measurement_counts_deduplicated_payload_volume() -> None:
     assert storage.revision_uncompressed_bytes == encoded_revision.uncompressed_size
 
 
+def test_list_receipts_returns_one_source_window_in_chronological_order() -> None:
+    """Include the window start, exclude its end, and ignore other sources."""
+
+    _, archive = repository()
+    opening = successful_capture(receipt_id="receipt-z")
+    middle = failed_capture(receipt_id="receipt-a", persisted_at=BASE + timedelta(hours=1))
+    excluded = failed_capture(receipt_id="receipt-end", persisted_at=BASE + timedelta(hours=2))
+    for capture in (middle, opening, excluded):
+        asyncio.run(archive.save_capture(capture))
+
+    listed = asyncio.run(archive.list_receipts(SOURCE, start=BASE, end=BASE + timedelta(hours=2)))
+    other = asyncio.run(
+        archive.list_receipts(
+            replace(SOURCE, season="2027"),
+            start=BASE,
+            end=BASE + timedelta(hours=2),
+        )
+    )
+
+    assert listed == (opening.receipt, middle.receipt)
+    assert other == ()
+    with pytest.raises(ValueError, match="timezone-aware"):
+        asyncio.run(archive.list_receipts(SOURCE, start=datetime(2026, 9, 21, 12), end=BASE))
+    with pytest.raises(ValueError, match="window end"):
+        asyncio.run(archive.list_receipts(SOURCE, start=BASE, end=BASE))
+
+
 def test_revision_read_rejects_corrupt_snapshot_bytes() -> None:
     """Fail closed when normalized records no longer match stored revision evidence."""
 

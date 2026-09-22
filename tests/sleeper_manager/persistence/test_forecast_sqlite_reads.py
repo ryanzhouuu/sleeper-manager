@@ -155,6 +155,35 @@ def test_storage_measurement_counts_deduplicated_payload_volume(tmp_path) -> Non
     assert storage.revision_uncompressed_bytes == encoded_revision.uncompressed_size
 
 
+def test_list_receipts_returns_one_source_window_in_chronological_order(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Include the window start, exclude its end, and ignore other sources."""
+
+    archive = repository(tmp_path)
+    opening = successful_capture(receipt_id="receipt-z")
+    middle = failed_capture(receipt_id="receipt-a", persisted_at=BASE + timedelta(hours=1))
+    excluded = failed_capture(receipt_id="receipt-end", persisted_at=BASE + timedelta(hours=2))
+    for capture in (middle, opening, excluded):
+        archive.save_capture(capture)
+
+    listed = archive.list_receipts(
+        SOURCE,
+        start=BASE,
+        end=BASE + timedelta(hours=2),
+    )
+    other = archive.list_receipts(
+        replace(SOURCE, season="2027"),
+        start=BASE,
+        end=BASE + timedelta(hours=2),
+    )
+
+    assert listed == (opening.receipt, middle.receipt)
+    assert other == ()
+    with pytest.raises(ValueError, match="timezone-aware"):
+        archive.list_receipts(SOURCE, start=datetime(2026, 9, 21, 12), end=BASE)
+    with pytest.raises(ValueError, match="window end"):
+        archive.list_receipts(SOURCE, start=BASE, end=BASE)
+
+
 def test_revision_read_rejects_corrupt_snapshot_bytes(tmp_path) -> None:  # type: ignore[no-untyped-def]
     """Fail closed when normalized records no longer match stored revision evidence."""
 
