@@ -7,6 +7,7 @@ from typing import Any
 
 import pytest
 
+from sleeper_manager.cloudflare.providers import ProviderHTTPError
 from sleeper_manager.cloudflare.runtime import run_scheduled
 from sleeper_manager.cloudflare.scheduler_types import ScheduledRunStatus
 from sleeper_manager.persistence.d1 import D1_SCHEMA
@@ -56,7 +57,7 @@ def test_forecast_capture_runs_without_activating_advice(
     asyncio.run(exercise())
 
 
-def test_capture_failure_logs_only_stage_and_error_type(
+def test_capture_failure_logs_safe_provider_details(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """Expose capture failures without printing provider payloads or identifiers."""
@@ -66,7 +67,11 @@ def test_capture_failure_logs_only_stage_and_error_type(
         await state.exec(D1_SCHEMA)
 
         async def fail_capture(*args: Any, **kwargs: Any) -> None:
-            raise RuntimeError("private provider payload")
+            raise ProviderHTTPError(
+                "ESPN",
+                400,
+                "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/private-team/roster",
+            )
 
         async def unused_fetch(url: str) -> object:
             raise AssertionError(f"Unexpected provider request: {url}")
@@ -85,4 +90,7 @@ def test_capture_failure_logs_only_stage_and_error_type(
         await run_scheduled(env, unused_fetch, scheduled_at=datetime(2026, 9, 23, 13, tzinfo=UTC))
 
     asyncio.run(exercise())
-    assert capsys.readouterr().err == "Forecast capture failed at collection: RuntimeError\n"
+    assert capsys.readouterr().err == (
+        "Forecast capture failed at collection: ProviderHTTPError "
+        "provider=ESPN status=400 resource=roster\n"
+    )

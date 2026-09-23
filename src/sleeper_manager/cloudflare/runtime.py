@@ -7,6 +7,7 @@ notification destinations are missing instead of raising.
 import sys
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from sleeper_manager.cloudflare.dispatcher import dispatch_due_work, scheduled_at_from_controller
@@ -18,7 +19,11 @@ from sleeper_manager.cloudflare.planning import (
     CloudflarePlanningAssembly,
     collect_cloudflare_planning_inputs,
 )
-from sleeper_manager.cloudflare.providers import CloudflareESPNProvider, CloudflareSleeperClient
+from sleeper_manager.cloudflare.providers import (
+    CloudflareESPNProvider,
+    CloudflareSleeperClient,
+    ProviderHTTPError,
+)
 from sleeper_manager.cloudflare.scheduler_types import (
     FailureCategory,
     ScheduledRunStatus,
@@ -187,5 +192,35 @@ async def _capture_forecast(
             user_id=user_id,
         )
     except Exception as error:
-        print(f"Forecast capture failed at {stage}: {type(error).__name__}", file=sys.stderr)
+        detail = _capture_provider_failure(error) if isinstance(error, ProviderHTTPError) else ""
+        print(
+            f"Forecast capture failed at {stage}: {type(error).__name__}{detail}",
+            file=sys.stderr,
+        )
         return
+
+
+def _capture_provider_failure(error: ProviderHTTPError) -> str:
+    """Expose a provider status and route class without logging private URL segments."""
+
+    path = urlparse(error.resource).path
+    if "/teams/" in path:
+        route = path.rsplit("/", maxsplit=1)[-1]
+        resource = route if route in {"roster", "schedule"} else "team"
+    elif path.endswith("/players/nba"):
+        resource = "player_catalog"
+    elif path.endswith("/state/nba"):
+        resource = "league_state"
+    elif "/matchups/" in path:
+        resource = "matchups"
+    elif "/transactions/" in path:
+        resource = "transactions"
+    elif path.endswith("/rosters"):
+        resource = "rosters"
+    elif path.endswith("/users"):
+        resource = "users"
+    elif "/league/" in path:
+        resource = "league"
+    else:
+        resource = "other"
+    return f" provider={error.provider} status={error.status} resource={resource}"
