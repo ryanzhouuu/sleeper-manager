@@ -144,7 +144,7 @@ class CloudflareESPNProvider:
         self,
         fetcher: Any,
         *,
-        base_url: str = "https://site.api.espn.com/apis/site/v2/sports/basketball/nba",
+        base_url: str = "https://site.web.api.espn.com/apis/site/v2/sports/basketball/nba",
         timeout: timedelta = timedelta(seconds=15),
         clock: Callable[[], datetime] | None = None,
     ) -> None:
