@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from sleeper_manager.cli import build_parser, main
@@ -11,6 +13,7 @@ OPERATIONAL_COMMANDS = (
     "check-config",
     "bootstrap",
     "check-nba-data",
+    "check-forecast-capture",
     "test-notification",
     "run-scheduled",
     "sync-cloudflare-runtime-data",
@@ -113,6 +116,60 @@ def test_notification_requires_acknowledgement_url(
     monkeypatch.setenv("NTFY_TOPIC", "alerts")
     assert main(["test-notification"]) == 2
     assert "ACKNOWLEDGEMENT_BASE_URL" in capsys.readouterr().err
+
+
+def test_check_forecast_capture_rejects_non_sqlite_backend(
+    isolated_cli_settings: None, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    class _RemoteBackend:
+        state_backend = "d1"
+        sqlite_path = Path("state.db")
+
+    monkeypatch.setattr("sleeper_manager.cli.Settings", lambda: _RemoteBackend())
+    assert main(["check-forecast-capture"]) == 2
+    assert "STATE_BACKEND=sqlite" in capsys.readouterr().err
+
+
+def test_check_forecast_capture_reports_a_missing_archive(
+    isolated_cli_settings: None,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "state.db"))
+    assert main(["check-forecast-capture"]) == 0
+    output = capsys.readouterr().out
+    assert "Last capture: none" in output
+    assert not (tmp_path / "forecasts.db").exists()
+
+
+def test_check_forecast_capture_alerts_when_the_archive_cannot_be_read(
+    isolated_cli_settings: None,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "forecasts.db").mkdir()
+    monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "state.db"))
+    assert main(["check-forecast-capture"]) == 2
+    assert "Forecast capture health failed" in capsys.readouterr().err
+
+
+def test_check_forecast_capture_alerts_on_the_latest_failure(
+    isolated_cli_settings: None,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from sleeper_manager.persistence.forecast_sqlite import SQLiteForecastArchiveRepository
+    from tests.sleeper_manager.persistence.forecast_sqlite_support import failed_capture
+
+    archive = SQLiteForecastArchiveRepository(tmp_path / "forecasts.db")
+    archive.initialize()
+    archive.save_capture(failed_capture())
+    monkeypatch.setenv("SQLITE_PATH", str(tmp_path / "state.db"))
+    assert main(["check-forecast-capture"]) == 1
+    assert "Alert: last capture is not a clean success" in capsys.readouterr().out
 
 
 def test_run_scheduled_requires_sleeper_ids(

@@ -69,8 +69,25 @@ uv run sleeper-manager --help
 | `check-config` | Report sanitized configuration readiness |
 | `bootstrap` | Validate and summarize the configured league |
 | `check-nba-data` | Report NBA provider health and mapping coverage |
+| `check-forecast-capture` | Report local forecast archive health |
 | `test-notification` | Send one local notification diagnostic |
 | `run-scheduled` | Run one local due-work wake against SQLite |
+
+## Forecast capture
+
+`run-scheduled` writes forecast evidence to `forecasts.db` beside `SQLITE_PATH`
+(`.local/forecasts.db` by default). That write does not change the planning
+exit status or lineup and Lock-In advice.
+
+`check-forecast-capture` reads that file. It reports the newest capture, UTC-day
+request and write counts, gaps from failed, invalid, skipped, or late attempts,
+and encoded payload bytes against a 350 MB alert. A missing file means nothing
+has been recorded yet; the command does not create one. The 350 MB figure is the
+sum of stored payload bytes, not a database file size.
+
+The Worker reads a separate D1 binding named `forecast_archive`. That binding is
+not configured, so scheduled Worker wakes skip forecast capture. Keep this
+archive out of `sleeper_manager_state`.
 
 ## Development
 

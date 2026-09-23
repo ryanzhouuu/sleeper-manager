@@ -58,6 +58,7 @@ from sleeper_manager.persistence.forecast_sqlite import AsyncSQLiteForecastArchi
 from sleeper_manager.persistence.nba_cache import SQLiteNBADataCache
 from sleeper_manager.persistence.sqlite import SQLiteStateRepository
 from sleeper_manager.workflows.forecast_collection import capture_scheduled_forecast
+from sleeper_manager.workflows.forecast_health import run_forecast_capture_health
 from sleeper_manager.workflows.nba_diagnostics import collect_nba_diagnostics
 from sleeper_manager.workflows.notification_loop import (
     NotificationLoop,
@@ -77,6 +78,10 @@ def build_parser() -> argparse.ArgumentParser:
         "check-nba-data", help="Report NBA provider health and current-roster mapping coverage"
     )
     nba_data.add_argument("--date", dest="game_date", help="Scoreboard date in YYYY-MM-DD format")
+    subcommands.add_parser(
+        "check-forecast-capture",
+        help="Report local forecast archive health",
+    )
     subcommands.add_parser(
         "test-notification",
         help="Send one idempotent local notification diagnostic",
@@ -348,6 +353,13 @@ def main(argv: list[str] | None = None) -> int:
             print(str(error), file=sys.stderr)
             return 2
         return asyncio.run(_check_nba_data(settings, game_date))
+    if args.command == "check-forecast-capture":
+        settings = Settings()
+        return run_forecast_capture_health(
+            settings.sqlite_path.with_name("forecasts.db"),
+            state_backend=settings.state_backend,
+            now=datetime.now(UTC),
+        )
     if args.command == "test-notification":
         settings = Settings()
         return asyncio.run(_test_notification(settings))
