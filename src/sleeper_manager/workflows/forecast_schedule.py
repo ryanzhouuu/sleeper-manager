@@ -26,7 +26,7 @@ FORECAST_COALESCE_WINDOW = timedelta(hours=1)
 FORECAST_ON_TIME_GRACE = timedelta(minutes=5)
 FORECAST_CAP_ERROR_CODE = "daily_cap"
 
-_REQUEST_OUTCOMES = frozenset(
+FORECAST_REQUEST_OUTCOMES = frozenset(
     {
         ForecastCaptureOutcome.CHANGED,
         ForecastCaptureOutcome.UNCHANGED,
@@ -191,7 +191,7 @@ def _requests_used(receipts: tuple[ForecastFetchReceipt, ...], now: datetime) ->
     return sum(
         1
         for receipt in receipts
-        if receipt.outcome in _REQUEST_OUTCOMES
+        if receipt.outcome in FORECAST_REQUEST_OUTCOMES
         and utc_start <= receipt.persisted_at.astimezone(UTC) < utc_end
     )
 
@@ -239,6 +239,7 @@ def _require_aware(value: datetime, label: str) -> None:
 __all__ = (
     "FORECAST_CAP_ERROR_CODE",
     "FORECAST_DAILY_CAP",
+    "FORECAST_REQUEST_OUTCOMES",
     "ForecastPlanAction",
     "ForecastPlanStep",
     "ForecastSlotKind",
