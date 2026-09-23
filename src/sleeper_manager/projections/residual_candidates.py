@@ -1,3 +1,5 @@
+"""Residual projection candidates for validation and historical comparisons."""
+
 from __future__ import annotations
 
 import hashlib
@@ -8,8 +10,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from math import exp, isfinite, log
+from typing import TYPE_CHECKING
 
-from sleeper_manager.backtesting.models import ProjectionModel
 from sleeper_manager.domain.projection import (
     ProjectionDistribution,
     ProjectionReason,
@@ -21,6 +23,9 @@ from sleeper_manager.integrations.nba.historical_feature_models import (
     HistoricalFeatureRow,
 )
 from sleeper_manager.projections.direct_baseline import DirectFantasyPointBaseline
+
+if TYPE_CHECKING:
+    from sleeper_manager.backtesting.models import ProjectionModel
 
 
 class ResidualCandidateError(ValueError):

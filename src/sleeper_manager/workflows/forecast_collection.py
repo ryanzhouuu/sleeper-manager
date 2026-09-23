@@ -7,12 +7,12 @@ Failures propagate to the wake hook, which keeps the planning result unchanged.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
 from typing import Any, Protocol
 
 from sleeper_manager.domain.league import LeagueProfile
-from sleeper_manager.domain.runtime_policy import RuntimePolicy
 from sleeper_manager.integrations.sleeper.forecast_fetch import season_forecast_source
 from sleeper_manager.integrations.sleeper.sync import LeagueSynchronizationService, SleeperReader
 from sleeper_manager.persistence.base import AsyncNBADataCache
@@ -35,12 +35,34 @@ class ForecastSleeperClient(SleeperReader, Protocol):
     async def players(self, *, active: bool = True) -> dict[str, dict[str, Any]]: ...
 
 
+class ForecastCapturePolicy(Protocol):
+    """Schedule and mapping settings needed without activating advisor planning."""
+
+    @property
+    def manager_timezone(self) -> str: ...
+
+    @property
+    def daily_plan_time(self) -> time: ...
+
+    @property
+    def mapping_overrides(self) -> Mapping[str, str]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class CaptureOnlyForecastPolicy:
+    """Use the established daily schedule when no advisor policy is active."""
+
+    manager_timezone: str = "America/Chicago"
+    daily_plan_time: time = time(hour=7)
+    mapping_overrides: Mapping[str, str] = field(default_factory=dict)
+
+
 async def capture_scheduled_forecast(
     archive: AsyncForecastArchiveRepository,
     cache: AsyncNBADataCache,
     sleeper: ForecastSleeperClient,
     *,
-    policy: RuntimePolicy,
+    policy: ForecastCapturePolicy,
     nba: TeamScheduleSource,
     fetch: Callable[[str], Awaitable[object]],
     now: datetime,
@@ -72,7 +94,7 @@ async def record_due_forecast(
     cache: AsyncNBADataCache,
     sleeper: ForecastSleeperClient,
     *,
-    policy: RuntimePolicy,
+    policy: ForecastCapturePolicy,
     profile: LeagueProfile,
     nba: TeamScheduleSource,
     fetch: Callable[[str], Awaitable[object]],
@@ -129,6 +151,8 @@ async def record_due_forecast(
 
 
 __all__ = (
+    "CaptureOnlyForecastPolicy",
+    "ForecastCapturePolicy",
     "ForecastSleeperClient",
     "capture_scheduled_forecast",
     "record_due_forecast",

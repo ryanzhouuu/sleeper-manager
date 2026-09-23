@@ -24,13 +24,16 @@ from sleeper_manager.cloudflare.scheduler_types import (
     ScheduledRunStatus,
     ScheduledRunSummary,
 )
-from sleeper_manager.domain.runtime_policy import RuntimePolicy, default_runtime_policy
+from sleeper_manager.domain.runtime_policy import RuntimePolicy
 from sleeper_manager.integrations.nba.cached_provider import AsyncCachedNBAProvider
 from sleeper_manager.notifications.dispatcher import NotificationDispatcher
 from sleeper_manager.persistence.base import AsyncRuntimeStateRepository
 from sleeper_manager.persistence.d1 import D1StateRepository
 from sleeper_manager.persistence.forecast_d1 import D1ForecastArchiveRepository
-from sleeper_manager.workflows.forecast_collection import capture_scheduled_forecast
+from sleeper_manager.workflows.forecast_collection import (
+    CaptureOnlyForecastPolicy,
+    capture_scheduled_forecast,
+)
 from sleeper_manager.workflows.notification_loop import NotificationLoop
 from sleeper_manager.workflows.postgame_lock_in import LOCK_IN_ACKNOWLEDGEMENT_KINDS
 
@@ -157,7 +160,7 @@ async def _capture_forecast(
         policy = (
             RuntimePolicy.from_json(record.version, record.payload_json)
             if record is not None
-            else default_runtime_policy(history_version="forecast-capture-only")
+            else CaptureOnlyForecastPolicy()
         )
         league_id = _value(env, "SLEEPER_LEAGUE_ID")
         user_id = _value(env, "SLEEPER_USER_ID")
