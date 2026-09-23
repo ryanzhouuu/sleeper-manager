@@ -24,7 +24,7 @@ from sleeper_manager.cloudflare.scheduler_types import (
     ScheduledRunStatus,
     ScheduledRunSummary,
 )
-from sleeper_manager.domain.runtime_policy import RuntimePolicy
+from sleeper_manager.domain.runtime_policy import RuntimePolicy, default_runtime_policy
 from sleeper_manager.integrations.nba.cached_provider import AsyncCachedNBAProvider
 from sleeper_manager.notifications.dispatcher import NotificationDispatcher
 from sleeper_manager.persistence.base import AsyncRuntimeStateRepository
@@ -145,8 +145,8 @@ async def _capture_forecast(
 ) -> None:
     """Store a due forecast when the archive binding exists.
 
-    Any capture failure stays in the archive or is discarded here. The planning
-    summary already produced for this wake is left unchanged.
+    Without an active advisor policy, use the established capture schedule defaults.
+    Capture failures leave the planning summary unchanged.
     """
 
     binding = getattr(env, "forecast_archive", None)
@@ -154,8 +154,11 @@ async def _capture_forecast(
         return
     try:
         record = await repository.load_runtime_policy()
-        if record is None:
-            return
+        policy = (
+            RuntimePolicy.from_json(record.version, record.payload_json)
+            if record is not None
+            else default_runtime_policy(history_version="forecast-capture-only")
+        )
         league_id = _value(env, "SLEEPER_LEAGUE_ID")
         user_id = _value(env, "SLEEPER_USER_ID")
         if not league_id or not user_id:
@@ -166,7 +169,7 @@ async def _capture_forecast(
             archive,
             repository,
             CloudflareSleeperClient(fetcher),
-            policy=RuntimePolicy.from_json(record.version, record.payload_json),
+            policy=policy,
             nba=AsyncCachedNBAProvider(
                 CloudflareESPNProvider(fetcher, clock=lambda: now),
                 repository,

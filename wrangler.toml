@@ -17,6 +17,12 @@ database_name = "sleeper-manager-state"
 database_id = "ceabcb2a-68f6-4781-8c50-98f37a0e6044"
 migrations_dir = "infra/cloudflare/migrations"
 
+[[d1_databases]]
+binding = "forecast_archive"
+database_name = "sleeper-manager-forecast-archive"
+database_id = "eb8dc241-3b18-4464-9498-9dd5f2ae758a"
+migrations_dir = "infra/cloudflare/forecast-migrations"
+
 [python_modules]
 exclude = [
     "**/*.pyc",

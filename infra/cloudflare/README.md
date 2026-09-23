@@ -1,6 +1,6 @@
 # Cloudflare deployment
 
-This directory contains the D1 migration for the Python Worker. The
+This directory contains the state and forecast D1 migrations for the Python Worker. The
 canonical Wrangler configuration is `wrangler.toml` at the repository root so
 `pywrangler` can discover it from the project root.
 
@@ -10,6 +10,7 @@ From the repository root:
 
 ```bash
 npx wrangler d1 create sleeper-manager-state
+npx wrangler d1 create sleeper-manager-forecast-archive
 ```
 
 Copy the returned database ID to `wrangler.toml`. Set the Worker URL in
@@ -23,16 +24,24 @@ Store these as Worker secrets rather than committing them:
 - `SLEEPER_LEAGUE_ID`
 - `SLEEPER_USER_ID`
 
-Apply the schema, synchronize compact projection history, and deploy:
+Apply both schemas and deploy capture only:
 
 ```bash
 npx wrangler d1 migrations apply sleeper-manager-state --remote
-uv run --extra historical sleeper-manager sync-cloudflare-runtime-data --apply
+npx wrangler d1 migrations apply sleeper-manager-forecast-archive --remote
 uvx --from workers-py pywrangler deploy
 ```
 
-See `docs/cloudflare-runtime.md` for dry-run behavior, required environment variables, and the
-local `run-scheduled` command.
+With no active runtime policy, advisor planning stays blocked and the forecast
+collector uses the default 7:00 AM America/Chicago daily schedule. Activate advisor
+planning later, after its projection history is ready:
+
+```bash
+uv run --extra historical sleeper-manager sync-cloudflare-runtime-data --apply
+```
+
+See `docs/cloudflare-runtime.md` for dry-run behavior, required environment variables,
+forecast archive checks, and the local `run-scheduled` command.
 
 Python Workers require the `python_workers` compatibility flag and are currently
 in beta. Use `uvx --from workers-py pywrangler dev` for local Worker development.
