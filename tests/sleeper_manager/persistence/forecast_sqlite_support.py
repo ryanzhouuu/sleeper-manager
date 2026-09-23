@@ -90,13 +90,14 @@ def failed_capture(
     *,
     receipt_id: str = "failed-1",
     persisted_at: datetime = BASE,
+    source: ForecastSource = SOURCE,
 ) -> ForecastCaptureWrite:
     """Build a failed capture containing no response artifact."""
 
     return ForecastCaptureWrite(
         ForecastFetchReceipt(
             receipt_id=receipt_id,
-            source=SOURCE,
+            source=source,
             scheduled_for=persisted_at - timedelta(minutes=5),
             started_at=persisted_at - timedelta(minutes=2),
             persisted_at=persisted_at,

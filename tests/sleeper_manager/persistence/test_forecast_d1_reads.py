@@ -165,6 +165,51 @@ def test_storage_measurement_counts_deduplicated_payload_volume() -> None:
     assert storage.revision_uncompressed_bytes == encoded_revision.uncompressed_size
 
 
+def test_newest_receipt_ignores_source_and_breaks_persistence_ties() -> None:
+    """Select the latest persisted attempt across sources, then the greater receipt id."""
+
+    _, archive = repository()
+    assert asyncio.run(archive.load_newest_receipt()) is None
+    earlier = failed_capture(receipt_id="early")
+    later_low_id = failed_capture(receipt_id="a-later", persisted_at=BASE + timedelta(hours=1))
+    later_high_id = failed_capture(
+        receipt_id="b-later",
+        persisted_at=BASE + timedelta(hours=1),
+        source=replace(SOURCE, season="2027"),
+    )
+    for capture in (later_low_id, earlier, later_high_id):
+        asyncio.run(archive.save_capture(capture))
+
+    assert asyncio.run(archive.load_newest_receipt()) == later_high_id.receipt
+
+
+def test_receipt_window_includes_every_source_in_chronological_order() -> None:
+    """Include the window start and every source, and exclude the window end."""
+
+    _, archive = repository()
+    opening = failed_capture(receipt_id="receipt-z")
+    same_time_low_id = failed_capture(
+        receipt_id="receipt-a",
+        persisted_at=BASE + timedelta(hours=1),
+        source=replace(SOURCE, season="2027"),
+    )
+    same_time_high_id = failed_capture(
+        receipt_id="receipt-m",
+        persisted_at=BASE + timedelta(hours=1),
+    )
+    excluded = failed_capture(receipt_id="receipt-end", persisted_at=BASE + timedelta(hours=2))
+    for capture in (same_time_high_id, opening, excluded, same_time_low_id):
+        asyncio.run(archive.save_capture(capture))
+
+    listed = asyncio.run(archive.list_receipts_between(start=BASE, end=BASE + timedelta(hours=2)))
+
+    assert listed == (opening.receipt, same_time_low_id.receipt, same_time_high_id.receipt)
+    with pytest.raises(ValueError, match="timezone-aware"):
+        asyncio.run(archive.list_receipts_between(start=datetime(2026, 9, 21, 12), end=BASE))
+    with pytest.raises(ValueError, match="window end"):
+        asyncio.run(archive.list_receipts_between(start=BASE, end=BASE))
+
+
 def test_list_receipts_returns_one_source_window_in_chronological_order() -> None:
     """Include the window start, exclude its end, and ignore other sources."""
 

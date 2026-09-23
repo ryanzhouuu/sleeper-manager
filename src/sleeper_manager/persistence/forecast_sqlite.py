@@ -42,12 +42,14 @@ from sleeper_manager.persistence.forecast_statements import (
     INSERT_FORECAST_ARTIFACT_SQL,
     INSERT_FORECAST_RECEIPT_SQL,
     INSERT_FORECAST_REVISION_SQL,
+    LIST_FORECAST_RECEIPTS_BETWEEN_SQL,
     LIST_FORECAST_RECEIPTS_SQL,
     LOAD_FORECAST_ARTIFACT_SQL,
     LOAD_FORECAST_RECEIPT_SQL,
     LOAD_FORECAST_REVISION_SQL,
     LOAD_LATEST_FORECAST_RECEIPT_SQL,
     LOAD_LATEST_USABLE_FORECAST_RECEIPT_SQL,
+    LOAD_NEWEST_FORECAST_RECEIPT_SQL,
     MEASURE_FORECAST_STORAGE_SQL,
 )
 
@@ -149,6 +151,33 @@ class SQLiteForecastArchiveRepository:
         )
         with self._connect() as connection:
             rows = connection.execute(LIST_FORECAST_RECEIPTS_SQL, params).fetchall()
+        receipts: list[ForecastFetchReceipt] = []
+        for row in rows:
+            mapped = _mapping(row)
+            if mapped is None:
+                continue
+            receipts.append(receipt_from_mapping(mapped))
+        return tuple(receipts)
+
+    def load_newest_receipt(self) -> ForecastFetchReceipt | None:
+        """Return the newest stored attempt across every source."""
+
+        with self._connect() as connection:
+            row = _mapping(connection.execute(LOAD_NEWEST_FORECAST_RECEIPT_SQL).fetchone())
+        return receipt_from_mapping(row) if row is not None else None
+
+    def list_receipts_between(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[ForecastFetchReceipt, ...]:
+        """Return every source's receipts in the half-open persistence window."""
+
+        require_forecast_receipt_window(start, end)
+        params = (timestamp_query_param(start), timestamp_query_param(end))
+        with self._connect() as connection:
+            rows = connection.execute(LIST_FORECAST_RECEIPTS_BETWEEN_SQL, params).fetchall()
         receipts: list[ForecastFetchReceipt] = []
         for row in rows:
             mapped = _mapping(row)
@@ -333,6 +362,21 @@ class AsyncSQLiteForecastArchiveRepository:
         """Return one source's receipts in the half-open persistence window."""
 
         return self._repository.list_receipts(source, start=start, end=end)
+
+    async def load_newest_receipt(self) -> ForecastFetchReceipt | None:
+        """Return the newest stored attempt across every source."""
+
+        return self._repository.load_newest_receipt()
+
+    async def list_receipts_between(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[ForecastFetchReceipt, ...]:
+        """Return every source's receipts in the half-open persistence window."""
+
+        return self._repository.list_receipts_between(start=start, end=end)
 
     async def load_revision_at_cutoff(
         self,

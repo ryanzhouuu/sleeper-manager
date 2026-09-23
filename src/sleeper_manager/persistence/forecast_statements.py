@@ -217,6 +217,28 @@ WHERE provider = ? AND endpoint = ? AND season = ? AND season_type = ?
 ORDER BY persisted_at ASC, receipt_id ASC
 """
 
+LOAD_NEWEST_FORECAST_RECEIPT_SQL = """
+SELECT
+    receipt_id, provider, endpoint, season, season_type, horizon,
+    adapter_version, scheduled_for, started_at, response_received_at,
+    persisted_at, outcome, timing, http_status, payload_hash,
+    semantic_hash, revision_id, error_code
+FROM forecast_fetch_receipts
+ORDER BY persisted_at DESC, receipt_id DESC
+LIMIT 1
+"""
+
+LIST_FORECAST_RECEIPTS_BETWEEN_SQL = """
+SELECT
+    receipt_id, provider, endpoint, season, season_type, horizon,
+    adapter_version, scheduled_for, started_at, response_received_at,
+    persisted_at, outcome, timing, http_status, payload_hash,
+    semantic_hash, revision_id, error_code
+FROM forecast_fetch_receipts
+WHERE persisted_at >= ? AND persisted_at < ?
+ORDER BY persisted_at ASC, receipt_id ASC
+"""
+
 LOAD_LATEST_FORECAST_RECEIPT_SQL = """
 SELECT
     receipt_id, provider, endpoint, season, season_type, horizon,

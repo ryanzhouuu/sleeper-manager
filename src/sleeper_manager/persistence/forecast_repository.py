@@ -151,6 +151,15 @@ class ForecastArchiveRepository(Protocol):
         end: datetime,
     ) -> tuple[ForecastFetchReceipt, ...]: ...
 
+    def load_newest_receipt(self) -> ForecastFetchReceipt | None: ...
+
+    def list_receipts_between(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[ForecastFetchReceipt, ...]: ...
+
     def load_revision_at_cutoff(
         self,
         source: ForecastSource,
@@ -184,6 +193,15 @@ class AsyncForecastArchiveRepository(Protocol):
     async def list_receipts(
         self,
         source: ForecastSource,
+        *,
+        start: datetime,
+        end: datetime,
+    ) -> tuple[ForecastFetchReceipt, ...]: ...
+
+    async def load_newest_receipt(self) -> ForecastFetchReceipt | None: ...
+
+    async def list_receipts_between(
+        self,
         *,
         start: datetime,
         end: datetime,
