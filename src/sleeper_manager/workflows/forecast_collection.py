@@ -2,11 +2,13 @@
 
 League synchronization discovers the season and whether pre-game captures apply.
 The player catalog is consulted only when the local-day tipoff cache is missing.
-Failures propagate to the wake hook, which keeps the planning result unchanged.
+Tipoff lookup failures remain uncached and allow the daily slot to proceed. Feed
+and archive failures propagate to the wake hook, leaving planning unchanged.
 """
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, time, timedelta
@@ -116,14 +118,18 @@ async def record_due_forecast(
             mapping_overrides=policy.mapping_overrides,
         )
 
-    tipoffs = await tipoffs_for_capture(
-        cache,
-        league_id=profile.league_id,
-        now=now,
-        timezone_name=policy.manager_timezone,
-        in_season=in_season,
-        resolve=resolve,
-    )
+    try:
+        tipoffs = await tipoffs_for_capture(
+            cache,
+            league_id=profile.league_id,
+            now=now,
+            timezone_name=policy.manager_timezone,
+            in_season=in_season,
+            resolve=resolve,
+        )
+    except Exception as error:
+        print(f"Forecast tipoff lookup failed: {type(error).__name__}", file=sys.stderr)
+        tipoffs = ()
     utc_start = datetime.combine(now.astimezone(UTC).date(), time.min, UTC)
     receipts = await archive.list_receipts(
         source,

@@ -5,6 +5,8 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import pytest
+
 from sleeper_manager.domain.nba import (
     DataQualityReport,
     DataQualityState,
@@ -180,6 +182,47 @@ def test_in_season_capture_reads_the_catalog_once_per_local_day(tmp_path) -> Non
     assert nba.roster_calls == 1
     assert fetches == 1
     assert asyncio.run(archive.measure_storage()).receipt_count == 1
+
+
+def test_tipoff_provider_failure_still_captures_daily_forecast(
+    tmp_path: Any, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An NBA lookup gap is reported without preventing the independent daily slot."""
+
+    class FailingNba(CountingNba):
+        async def team_roster(self, team_id: str) -> ProviderResult[tuple[ProviderPlayer, ...]]:
+            del team_id
+            raise RuntimeError("private provider response")
+
+    archive = _archive(tmp_path)
+    sleeper = FixtureSleeper("in_season")
+    cache = MemoryCache()
+    fetches = 0
+
+    async def fetch(url: str) -> RawResponse:
+        nonlocal fetches
+        del url
+        fetches += 1
+        return RawResponse(FIXTURE)
+
+    asyncio.run(
+        capture_scheduled_forecast(
+            archive,
+            cache,
+            sleeper,
+            policy=default_runtime_policy(history_version="history-v1"),
+            nba=FailingNba(),
+            fetch=fetch,
+            now=NOW,
+            league_id="league-current",
+            user_id="user-manager",
+        )
+    )
+
+    assert fetches == 1
+    assert cache.records == {}
+    assert asyncio.run(archive.measure_storage()).receipt_count == 1
+    assert capsys.readouterr().err == "Forecast tipoff lookup failed: RuntimeError\n"
 
 
 def _archive(tmp_path) -> AsyncSQLiteForecastArchiveRepository:  # type: ignore[no-untyped-def]

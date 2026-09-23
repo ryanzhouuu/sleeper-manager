@@ -19,6 +19,11 @@ with the `forecast_archive` binding. The scheduled collector uses the existing f
 Cron wake but requests the feed only for due daily or pre-tipoff slots. Capture does not
 change lineup or Lock-In advice.
 
+If the NBA tipoff lookup fails, the Worker logs the failure and retries on later wakes
+without caching an empty slate. The due daily forecast request still runs. Pre-tipoff
+slots cannot be scheduled until the lookup succeeds; treat that interval as a capture
+coverage gap.
+
 ## Operator commands
 
 From the repository root, deploy capture only after applying both D1 migration sets:
