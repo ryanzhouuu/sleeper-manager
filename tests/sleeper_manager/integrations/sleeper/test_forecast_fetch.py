@@ -65,6 +65,28 @@ def test_fetch_reads_worker_response_bytes() -> None:
     assert fetched.body == PAYLOAD
 
 
+def test_fetch_reads_pyodide_array_buffer_without_reparsing() -> None:
+    """Convert the JavaScript ArrayBuffer proxy to the exact response bytes."""
+
+    class Buffer:
+        def to_bytes(self) -> bytes:
+            return PAYLOAD
+
+    class ArrayBufferResponse:
+        status = 200
+
+        async def arrayBuffer(self) -> Buffer:  # noqa: N802
+            return Buffer()
+
+    async def fetch(url: str) -> ArrayBufferResponse:
+        del url
+        return ArrayBufferResponse()
+
+    fetched = asyncio.run(fetch_season_forecast(fetch, source=SOURCE, clock=lambda: NOW))
+
+    assert fetched.body == PAYLOAD
+
+
 def test_http_and_transport_failures_keep_request_timing() -> None:
     """Expose status and start time so the archive can store a failed receipt."""
 

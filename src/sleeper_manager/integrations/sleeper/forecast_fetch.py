@@ -157,6 +157,11 @@ async def _response_body(response: object) -> bytes:
             return value
         if isinstance(value, bytearray | memoryview):
             return bytes(value)
+        to_bytes = getattr(value, "to_bytes", None)
+        if callable(to_bytes):
+            converted = to_bytes()
+            if isinstance(converted, bytes):
+                return converted
     raise SleeperForecastFetchError("response_body", started_at=datetime.min)
 
 
