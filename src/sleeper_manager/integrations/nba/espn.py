@@ -23,6 +23,7 @@ from sleeper_manager.domain.nba import (
     quality_for_records,
 )
 from sleeper_manager.domain.scoring import BoxScoreLine
+from sleeper_manager.integrations.nba.mapping import espn_team_endpoint_id
 from sleeper_manager.integrations.nba.schemas import (
     ESPNGameSummaryPayload,
     ESPNInjuriesPayload,
@@ -503,11 +504,13 @@ class ESPNClient:
         return parse_injuries(payload, retrieved_at=self._clock())
 
     async def team_roster(self, team_id: str) -> ProviderResult[tuple[ProviderPlayer, ...]]:
-        payload = await self._get(f"/teams/{team_id}/roster")
+        endpoint_id = espn_team_endpoint_id(team_id)
+        payload = await self._get(f"/teams/{endpoint_id}/roster")
         return parse_team_roster(payload, team_id=team_id, retrieved_at=self._clock())
 
     async def team_schedule(
         self, team_id: str, season: int
     ) -> ProviderResult[tuple[ScheduledGame, ...]]:
-        payload = await self._get(f"/teams/{team_id}/schedule", season=season)
+        endpoint_id = espn_team_endpoint_id(team_id)
+        payload = await self._get(f"/teams/{endpoint_id}/schedule", season=season)
         return parse_team_schedule(payload, retrieved_at=self._clock())

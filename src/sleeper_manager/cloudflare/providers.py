@@ -21,6 +21,7 @@ from sleeper_manager.integrations.nba.espn import (
     parse_team_roster,
     parse_team_schedule,
 )
+from sleeper_manager.integrations.nba.mapping import espn_team_endpoint_id
 
 
 class CloudflareProviderError(RuntimeError):
@@ -170,13 +171,17 @@ class CloudflareESPNProvider:
         return parse_injuries(payload, retrieved_at=self._tick())
 
     async def team_roster(self, team_id: str) -> ProviderResult[tuple[ProviderPlayer, ...]]:
-        payload = await self._client.object(self._url(f"/teams/{team_id}/roster"))
+        endpoint_id = espn_team_endpoint_id(team_id)
+        payload = await self._client.object(self._url(f"/teams/{endpoint_id}/roster"))
         return parse_team_roster(payload, team_id=team_id, retrieved_at=self._tick())
 
     async def team_schedule(
         self, team_id: str, season: int
     ) -> ProviderResult[tuple[ScheduledGame, ...]]:
-        payload = await self._client.object(self._url(f"/teams/{team_id}/schedule", season=season))
+        endpoint_id = espn_team_endpoint_id(team_id)
+        payload = await self._client.object(
+            self._url(f"/teams/{endpoint_id}/schedule", season=season)
+        )
         return parse_team_schedule(payload, retrieved_at=self._tick())
 
     def _tick(self) -> datetime:

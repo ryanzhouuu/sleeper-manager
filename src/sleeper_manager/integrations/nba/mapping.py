@@ -74,6 +74,14 @@ _TEAM_ALIASES = {
     "was": "was",
 }
 
+_ESPN_ENDPOINT_TEAM_ALIASES = {"nop": "no", "uta": "utah"}
+
+
+def espn_team_endpoint_id(team_id: str) -> str:
+    """Translate canonical NBA abbreviations that ESPN's team routes reject."""
+
+    return _ESPN_ENDPOINT_TEAM_ALIASES.get(team_id.casefold(), team_id)
+
 
 def normalize_player_name(name: str) -> str:
     decomposed = unicodedata.normalize("NFKD", name)

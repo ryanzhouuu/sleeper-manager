@@ -141,3 +141,21 @@ def test_espn_legitimate_empty_schedule_is_preserved() -> None:
 
     assert result.records == ()
     assert result.quality.record_count == 0
+
+
+def test_espn_team_routes_translate_rejected_abbreviations() -> None:
+    """Forecast lookup reaches ESPN roster and schedule routes for both aliases."""
+
+    roster_fetch = SequenceFetch(Response(200, _fixture("espn/roster.json")))
+    provider = CloudflareESPNProvider(roster_fetch, clock=lambda: NOW)
+    asyncio.run(provider.team_roster("NOP"))
+    assert roster_fetch.urls == [
+        "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/no/roster"
+    ]
+
+    schedule_fetch = SequenceFetch(Response(200, {"events": []}))
+    provider = CloudflareESPNProvider(schedule_fetch, clock=lambda: NOW)
+    asyncio.run(provider.team_schedule("UTA", 2026))
+    assert schedule_fetch.urls == [
+        "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/utah/schedule?season=2026"
+    ]
