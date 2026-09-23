@@ -1,13 +1,12 @@
 # Cloudflare runtime
 
-The Cron Trigger is currently paused because forecast capture exceeded the account's
-10 ms CPU allowance before it could write a receipt. Restore `crons = ["*/5 * * * *"]`
-in `wrangler.toml` and redeploy after the capture runtime has enough CPU for the feed.
-The Worker HTTP endpoint and both D1 bindings remain deployed while Cron is paused.
+The Worker uses one five-minute Cron Trigger. Forecast capture exceeded the Workers
+Free plan's 10 ms CPU allowance before it could write a receipt, so this schedule
+requires the Workers Paid CPU allowance. Verify the first remote receipt after deploying.
 
-When enabled, the Worker uses one five-minute Cron Trigger. Each wake claims due daily,
-pre-tipoff, postgame, or delivery-retry work. Daily and pre-tipoff wakes run the
-weekly lineup planner at most once and refresh live Lock-In opportunity rows.
+Each wake claims due daily, pre-tipoff, postgame, or delivery-retry work. Daily and
+pre-tipoff wakes run the weekly lineup planner at most once and refresh live Lock-In
+opportunity rows.
 Postgame wakes fetch ESPN game summaries directly, stabilize finals, and may send
 Lock, Pass, or unavailable-warning notifications. Lineup notifications include
 Open Sleeper only.
@@ -32,8 +31,7 @@ coverage gap.
 
 ## Operator commands
 
-From the repository root, restore the Cron Trigger and deploy capture only after applying
-both D1 migration sets:
+From the repository root, deploy capture only after applying both D1 migration sets:
 
 ```bash
 npx wrangler d1 migrations apply sleeper-manager-state --remote
