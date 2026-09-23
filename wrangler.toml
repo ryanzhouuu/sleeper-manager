@@ -9,7 +9,7 @@ OPEN_SLEEPER_URL = "https://sleeper.com"
 ACKNOWLEDGEMENT_BASE_URL = "https://sleeper-manager.ryanzhouuu.workers.dev/ack"
 
 [triggers]
-crons = ["*/5 * * * *"]
+crons = []
 
 [[d1_databases]]
 binding = "sleeper_manager_state"
