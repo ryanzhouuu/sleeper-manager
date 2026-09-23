@@ -155,6 +155,7 @@ async def _capture_forecast(
     binding = getattr(env, "forecast_archive", None)
     if binding is None:
         return
+    stage = "policy"
     try:
         record = await repository.load_runtime_policy()
         policy = (
@@ -166,8 +167,10 @@ async def _capture_forecast(
         user_id = _value(env, "SLEEPER_USER_ID")
         if not league_id or not user_id:
             return
+        stage = "archive"
         archive = D1ForecastArchiveRepository(binding)
         await archive.initialize()
+        stage = "collection"
         await capture_scheduled_forecast(
             archive,
             repository,
@@ -183,6 +186,6 @@ async def _capture_forecast(
             league_id=league_id,
             user_id=user_id,
         )
-    except Exception:
-        print("Forecast capture failed", file=sys.stderr)
+    except Exception as error:
+        print(f"Forecast capture failed at {stage}: {type(error).__name__}", file=sys.stderr)
         return

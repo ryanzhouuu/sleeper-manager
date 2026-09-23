@@ -54,3 +54,35 @@ def test_forecast_capture_runs_without_activating_advice(
         assert policies[0].daily_plan_time == time(hour=7)
 
     asyncio.run(exercise())
+
+
+def test_capture_failure_logs_only_stage_and_error_type(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Expose capture failures without printing provider payloads or identifiers."""
+
+    async def exercise() -> None:
+        state = FakeD1()
+        await state.exec(D1_SCHEMA)
+
+        async def fail_capture(*args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("private provider payload")
+
+        async def unused_fetch(url: str) -> object:
+            raise AssertionError(f"Unexpected provider request: {url}")
+
+        monkeypatch.setattr(
+            "sleeper_manager.cloudflare.runtime.capture_scheduled_forecast", fail_capture
+        )
+        env = SimpleNamespace(
+            ACKNOWLEDGEMENT_BASE_URL="https://example.test/ack",
+            NTFY_TOPIC="test-topic",
+            SLEEPER_LEAGUE_ID="league-1",
+            SLEEPER_USER_ID="user-1",
+            sleeper_manager_state=state,
+            forecast_archive=FakeD1(),
+        )
+        await run_scheduled(env, unused_fetch, scheduled_at=datetime(2026, 9, 23, 13, tzinfo=UTC))
+
+    asyncio.run(exercise())
+    assert capsys.readouterr().err == "Forecast capture failed at collection: RuntimeError\n"
