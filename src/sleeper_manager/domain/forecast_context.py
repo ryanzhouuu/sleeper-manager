@@ -178,6 +178,8 @@ class ForecastCaptureContext:
 
 
 def _player_ids(values: tuple[str, ...], label: str) -> tuple[str, ...]:
+    """Strip player ids and reject blanks or repeats while preserving order."""
+
     cleaned: list[str] = []
     for value in values:
         require_text(value, f"Forecast context {label}")
@@ -189,6 +191,8 @@ def _player_ids(values: tuple[str, ...], label: str) -> tuple[str, ...]:
 
 
 def _optional_player_ids(values: tuple[str | None, ...], label: str) -> tuple[str | None, ...]:
+    """Preserve empty starter slots and reject a repeated occupied slot."""
+
     cleaned: list[str | None] = []
     seen: set[str] = set()
     for value in values:
@@ -205,6 +209,8 @@ def _optional_player_ids(values: tuple[str | None, ...], label: str) -> tuple[st
 
 
 def _has_gap(gaps: tuple[ForecastContextGap, ...], code: ForecastContextGapCode) -> bool:
+    """Report whether any gap explains one missing companion source."""
+
     return any(gap.code is code for gap in gaps)
 
 
@@ -214,6 +220,8 @@ def _read_times(
     eligibility: tuple[ForecastContextEligibility, ...],
     games: tuple[ForecastContextGame, ...],
 ) -> tuple[datetime, ...]:
+    """Collect source read times that must not follow persistence."""
+
     times: list[datetime] = []
     if manager is not None:
         times.append(manager.read_at)

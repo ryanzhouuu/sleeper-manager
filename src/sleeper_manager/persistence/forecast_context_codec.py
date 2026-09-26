@@ -41,6 +41,8 @@ class EncodedForecastContext:
     stored_at: datetime
 
     def __post_init__(self) -> None:
+        """Reject an envelope that cannot be verified or joined to its receipt."""
+
         if not self.receipt_id.strip():
             raise ForecastContextCodecError("Forecast context receipt ID must be non-empty")
         if self.encoding is not ForecastArtifactEncoding.GZIP_JSON:
@@ -120,6 +122,8 @@ def same_forecast_context(left: ForecastCaptureContext, right: ForecastCaptureCo
 
 
 def _document(context: ForecastCaptureContext) -> dict[str, Any]:
+    """Build the canonical object whose bytes define the content hash."""
+
     return {
         "schema_version": FORECAST_CONTEXT_SCHEMA_VERSION,
         "receipt_id": context.receipt_id,
@@ -138,6 +142,8 @@ def _document(context: ForecastCaptureContext) -> dict[str, Any]:
 
 
 def _roster_document(roster: ForecastContextRoster | None) -> dict[str, Any] | None:
+    """Preserve starter slot order, including empty slots."""
+
     if roster is None:
         return None
     return {
@@ -150,6 +156,8 @@ def _roster_document(roster: ForecastContextRoster | None) -> dict[str, Any] | N
 
 
 def _eligibility_document(item: ForecastContextEligibility) -> dict[str, Any]:
+    """Preserve catalog position order for one rostered player."""
+
     return {
         "player_id": item.player_id,
         "positions": list(item.positions),
@@ -158,6 +166,8 @@ def _eligibility_document(item: ForecastContextEligibility) -> dict[str, Any]:
 
 
 def _game_document(item: ForecastContextGame) -> dict[str, Any]:
+    """Store game status as its stable enum value."""
+
     return {
         "game_id": item.game_id,
         "home_team_id": item.home_team_id,
@@ -169,10 +179,14 @@ def _game_document(item: ForecastContextGame) -> dict[str, Any]:
 
 
 def _gap_document(item: ForecastContextGap) -> dict[str, Any]:
+    """Store a gap code without substituting empty companion data."""
+
     return {"code": item.code.value, "subject": item.subject, "detail": item.detail}
 
 
 def _context(document: object) -> ForecastCaptureContext:
+    """Rebuild a snapshot and reapply its domain invariants."""
+
     if not isinstance(document, dict):
         raise ForecastContextCodecError("Forecast context payload must be an object")
     if document.get("schema_version") != FORECAST_CONTEXT_SCHEMA_VERSION:
@@ -197,6 +211,8 @@ def _context(document: object) -> ForecastCaptureContext:
 
 
 def _roster(value: object) -> ForecastContextRoster | None:
+    """Decode one roster, keeping absent sides distinct from empty player lists."""
+
     if value is None:
         return None
     if not isinstance(value, dict):
@@ -214,6 +230,8 @@ def _roster(value: object) -> ForecastContextRoster | None:
 
 
 def _eligibility(value: object) -> ForecastContextEligibility:
+    """Decode one player's positions from the catalog read stored in the snapshot."""
+
     if not isinstance(value, dict):
         raise ForecastContextCodecError("Forecast context eligibility must be an object")
     return ForecastContextEligibility(
@@ -224,6 +242,8 @@ def _eligibility(value: object) -> ForecastContextEligibility:
 
 
 def _game(value: object) -> ForecastContextGame:
+    """Decode one fantasy-week game and reject an unknown status value."""
+
     if not isinstance(value, dict):
         raise ForecastContextCodecError("Forecast context game must be an object")
     try:
@@ -241,6 +261,8 @@ def _game(value: object) -> ForecastContextGame:
 
 
 def _gap(value: object) -> ForecastContextGap:
+    """Decode one explicit companion gap and reject an unknown code."""
+
     if not isinstance(value, dict):
         raise ForecastContextCodecError("Forecast context gap must be an object")
     try:
@@ -255,6 +277,8 @@ def _gap(value: object) -> ForecastContextGap:
 
 
 def _dumps(document: dict[str, Any]) -> bytes:
+    """Serialize with sorted keys so the content hash ignores field order."""
+
     try:
         return json.dumps(
             document,
@@ -268,6 +292,8 @@ def _dumps(document: dict[str, Any]) -> bytes:
 
 
 def _list(document: dict[str, Any], key: str) -> list[object]:
+    """Require a JSON list. A missing field is corrupt, not an empty collection."""
+
     value = document.get(key)
     if not isinstance(value, list):
         raise ForecastContextCodecError(f"Forecast context {key} must be a list")
@@ -275,6 +301,8 @@ def _list(document: dict[str, Any], key: str) -> list[object]:
 
 
 def _text(document: dict[str, Any], key: str) -> str:
+    """Require a JSON string before domain validation strips or rejects it."""
+
     value = document.get(key)
     if not isinstance(value, str):
         raise ForecastContextCodecError(f"Forecast context {key} must be text")
@@ -282,12 +310,16 @@ def _text(document: dict[str, Any], key: str) -> str:
 
 
 def _text_item(value: object, label: str) -> str:
+    """Require one list entry to be text."""
+
     if not isinstance(value, str):
         raise ForecastContextCodecError(f"Forecast context {label} must be text")
     return value
 
 
 def _optional_text_item(value: object) -> str | None:
+    """Allow a JSON null starter slot and reject every other non-text value."""
+
     if value is None:
         return None
     if not isinstance(value, str):
@@ -296,6 +328,8 @@ def _optional_text_item(value: object) -> str | None:
 
 
 def _int(document: dict[str, Any], key: str) -> int:
+    """Require an integer. JSON booleans are not roster or week identifiers."""
+
     value = document.get(key)
     if isinstance(value, bool) or not isinstance(value, int):
         raise ForecastContextCodecError(f"Forecast context {key} must be an integer")
@@ -303,12 +337,16 @@ def _int(document: dict[str, Any], key: str) -> int:
 
 
 def _optional_int(document: dict[str, Any], key: str) -> int | None:
+    """Treat a JSON null matchup id as absent rather than zero."""
+
     if document.get(key) is None:
         return None
     return _int(document, key)
 
 
 def _bool(document: dict[str, Any], key: str) -> bool:
+    """Require a JSON boolean. Integers are not accepted as the bye flag."""
+
     value = document.get(key)
     if not isinstance(value, bool):
         raise ForecastContextCodecError(f"Forecast context {key} must be boolean")
@@ -316,6 +354,8 @@ def _bool(document: dict[str, Any], key: str) -> bool:
 
 
 def _time(value: str, label: str) -> datetime:
+    """Require a timezone-aware ISO timestamp."""
+
     try:
         parsed = datetime.fromisoformat(value)
     except ValueError as error:
