@@ -151,6 +151,19 @@ ON forecast_fetch_receipts (
 
 CREATE INDEX IF NOT EXISTS forecast_fetch_receipts_gap_idx
 ON forecast_fetch_receipts (provider, season, scheduled_for DESC, outcome);
+
+CREATE TABLE IF NOT EXISTS forecast_capture_contexts (
+    receipt_id TEXT PRIMARY KEY,
+    encoding TEXT NOT NULL CHECK (encoding IN ('gzip_json')),
+    encoded_payload BLOB NOT NULL CHECK (length(encoded_payload) > 0),
+    uncompressed_size INTEGER NOT NULL CHECK (uncompressed_size > 0),
+    content_hash TEXT NOT NULL CHECK (length(content_hash) = 64),
+    stored_at TEXT NOT NULL,
+    FOREIGN KEY (receipt_id) REFERENCES forecast_fetch_receipts(receipt_id)
+);
+
+CREATE INDEX IF NOT EXISTS forecast_capture_contexts_stored_idx
+ON forecast_capture_contexts (stored_at, receipt_id);
 """
 
 INSERT_FORECAST_ARTIFACT_SQL = """
@@ -193,6 +206,18 @@ INSERT OR IGNORE INTO forecast_fetch_receipts (
     persisted_at, outcome, timing, http_status, payload_hash,
     semantic_hash, revision_id, error_code
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+INSERT_FORECAST_CONTEXT_SQL = """
+INSERT OR IGNORE INTO forecast_capture_contexts (
+    receipt_id, encoding, encoded_payload, uncompressed_size, content_hash, stored_at
+) VALUES (?, ?, ?, ?, ?, ?)
+"""
+
+LOAD_FORECAST_CONTEXT_SQL = """
+SELECT receipt_id, encoding, encoded_payload, uncompressed_size, content_hash, stored_at
+FROM forecast_capture_contexts
+WHERE receipt_id = ?
 """
 
 LOAD_FORECAST_RECEIPT_SQL = """

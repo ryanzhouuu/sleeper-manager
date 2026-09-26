@@ -8,7 +8,7 @@ import pytest
 from sleeper_manager.persistence.forecast_statements import FORECAST_ARCHIVE_SCHEMA
 
 ROOT = Path(__file__).parents[3]
-MIGRATION = ROOT / "infra" / "cloudflare" / "forecast-migrations" / "0001_forecast_archive.sql"
+MIGRATIONS = ROOT / "infra" / "cloudflare" / "forecast-migrations"
 HASH_A = "a" * 64
 HASH_B = "b" * 64
 SOURCE_VALUES = (
@@ -78,7 +78,10 @@ def insert_revision(
 def test_schema_matches_deployable_forecast_migration() -> None:
     """Keep local repository bootstrap and the separate D1 migration identical."""
 
-    assert MIGRATION.read_text(encoding="utf-8").strip() == FORECAST_ARCHIVE_SCHEMA.strip()
+    deployed = "\n\n".join(
+        path.read_text(encoding="utf-8").strip() for path in sorted(MIGRATIONS.glob("*.sql"))
+    )
+    assert deployed == FORECAST_ARCHIVE_SCHEMA.strip()
 
 
 def test_schema_creates_archive_tables_and_query_indexes() -> None:
@@ -101,6 +104,8 @@ def test_schema_creates_archive_tables_and_query_indexes() -> None:
         ("forecast_fetch_receipts_cutoff_idx", "index"),
         ("forecast_fetch_receipts_source_time_idx", "index"),
         ("forecast_fetch_receipts_gap_idx", "index"),
+        ("forecast_capture_contexts", "table"),
+        ("forecast_capture_contexts_stored_idx", "index"),
     }.issubset(objects)
 
 

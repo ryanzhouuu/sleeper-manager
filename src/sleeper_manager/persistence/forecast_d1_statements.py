@@ -110,8 +110,27 @@ WHERE provider = ? AND endpoint = ? AND season = ? AND season_type = ?
   AND horizon = ? AND adapter_version = ? AND semantic_hash = ?
 """
 
+ASSERT_FORECAST_CONTEXT_SQL = """
+INSERT INTO forecast_capture_contexts (
+    receipt_id, encoding, encoded_payload, uncompressed_size, content_hash, stored_at
+)
+SELECT ?1, ?2, ?3, ?4, ?5, ?6
+WHERE EXISTS (
+    SELECT 1
+    FROM forecast_capture_contexts
+    WHERE receipt_id = ?1
+      AND NOT (
+          encoding IS ?2
+          AND uncompressed_size IS ?4
+          AND content_hash IS ?5
+          AND stored_at IS ?6
+      )
+)
+"""
+
 __all__ = (
     "ASSERT_FORECAST_ARTIFACT_SQL",
+    "ASSERT_FORECAST_CONTEXT_SQL",
     "ASSERT_FORECAST_OUTCOME_SQL",
     "ASSERT_FORECAST_RECEIPT_SQL",
     "ASSERT_FORECAST_REVISION_SQL",
