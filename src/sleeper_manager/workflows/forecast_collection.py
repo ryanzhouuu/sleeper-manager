@@ -1,9 +1,11 @@
 """Collect one due forecast snapshot after lineup planning has finished.
 
 League synchronization discovers the season and whether pre-game captures apply.
-The player catalog is consulted only when the local-day tipoff cache is missing.
-Tipoff lookup failures remain uncached and allow the daily slot to proceed. Feed
-and archive failures propagate to the wake hook, leaving planning unchanged.
+The player catalog is read for tipoffs when the local-day cache is missing, and
+again for eligibility only when that resolve did not already load it. Tipoff
+lookup failures remain uncached and allow the daily slot to proceed. A companion
+snapshot is stored with the receipt, including failed and suppressed slots.
+Feed and archive failures propagate to the wake hook, leaving planning unchanged.
 """
 
 from __future__ import annotations
@@ -20,6 +22,11 @@ from sleeper_manager.integrations.sleeper.sync import LeagueSynchronizationServi
 from sleeper_manager.persistence.base import AsyncNBADataCache
 from sleeper_manager.persistence.forecast_repository import AsyncForecastArchiveRepository
 from sleeper_manager.workflows.forecast_capture import execute_forecast_actions
+from sleeper_manager.workflows.forecast_context_collection import (
+    collect_forecast_context,
+    forecast_context_gap_observation,
+    observe_forecast_context,
+)
 from sleeper_manager.workflows.forecast_schedule import plan_forecast_capture
 from sleeper_manager.workflows.forecast_tipoffs import (
     TeamScheduleSource,
@@ -106,10 +113,17 @@ async def record_due_forecast(
 
     source = season_forecast_source(profile.season, profile.season_type)
     in_season = profile.status == "in_season"
+    prepared_matchups: object | None = None
+    prepared_catalog: dict[str, dict[str, Any]] | None = None
+    prepared = False
 
     async def resolve() -> tuple[datetime, ...]:
+        nonlocal prepared, prepared_catalog, prepared_matchups
         matchups = await sleeper.matchups(profile.league_id, profile.fantasy_week.week)
         catalog = await sleeper.players(active=True)
+        prepared_matchups = matchups
+        prepared_catalog = catalog
+        prepared = True
         return await resolve_relevant_tipoffs(
             player_ids=capture_roster_player_ids(profile, matchups),
             catalog=catalog,
@@ -147,12 +161,33 @@ async def record_due_forecast(
     )
     if not actions:
         return
+    try:
+        if prepared:
+            context = await collect_forecast_context(
+                nba,
+                profile=profile,
+                matchups=prepared_matchups,
+                catalog=prepared_catalog,
+                mapping_overrides=policy.mapping_overrides,
+                read_at=now,
+            )
+        else:
+            context = await observe_forecast_context(
+                sleeper,
+                nba,
+                profile=profile,
+                mapping_overrides=policy.mapping_overrides,
+                read_at=now,
+            )
+    except Exception:
+        context = forecast_context_gap_observation(profile, detail="companion read failed")
     await execute_forecast_actions(
         archive,
         actions,
         source=source,
         fetch=fetch,
         now=now,
+        context=context,
     )
 
 

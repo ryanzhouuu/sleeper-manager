@@ -28,10 +28,15 @@ from sleeper_manager.integrations.sleeper.forecast_parser import (
     SleeperForecastPayloadError,
     parse_sleeper_season_forecasts,
 )
+from sleeper_manager.persistence.forecast_context_codec import same_forecast_context
 from sleeper_manager.persistence.forecast_repository import (
     AsyncForecastArchiveRepository,
     ForecastArchiveConflictError,
     ForecastCaptureWrite,
+)
+from sleeper_manager.workflows.forecast_context_collection import (
+    ForecastContextObservation,
+    bind_forecast_context,
 )
 from sleeper_manager.workflows.forecast_schedule import ForecastPlanAction, ForecastPlanStep
 
@@ -43,8 +48,13 @@ async def execute_forecast_actions(
     source: ForecastSource,
     fetch: Callable[[str], Awaitable[object]],
     now: datetime,
+    context: ForecastContextObservation | None = None,
 ) -> tuple[ForecastFetchReceipt, ...]:
-    """Write every planned action. A fetch uses the supplied raw-response callable."""
+    """Write every planned action. A fetch uses the supplied raw-response callable.
+
+    When ``context`` is supplied, every receipt, including a failed or suppressed
+    slot, stores that same companion observation.
+    """
 
     receipts: list[ForecastFetchReceipt] = []
     for action in actions:
@@ -55,6 +65,7 @@ async def execute_forecast_actions(
                 source=source,
                 fetch=fetch,
                 now=now,
+                context=context,
             )
         )
     return tuple(receipts)
@@ -67,19 +78,22 @@ async def _execute_action(
     source: ForecastSource,
     fetch: Callable[[str], Awaitable[object]],
     now: datetime,
+    context: ForecastContextObservation | None,
 ) -> ForecastFetchReceipt:
     """Persist one slot and accept an exact retry of the same receipt."""
 
     if action.step is ForecastPlanStep.SUPPRESS:
         receipt = _suppressed(action, source, now)
-        return await _save(archive, ForecastCaptureWrite(receipt))
+        return await _save(archive, ForecastCaptureWrite(receipt), context)
     try:
         fetched = await fetch_season_forecast(fetch, source=source, clock=lambda: now)
     except SleeperForecastFetchError as error:
         receipt = _failed(action, source, error, now)
-        return await _save(archive, ForecastCaptureWrite(receipt))
+        return await _save(archive, ForecastCaptureWrite(receipt), context)
     if not fetched.body:
-        return await _save(archive, ForecastCaptureWrite(_empty(action, source, fetched, now)))
+        return await _save(
+            archive, ForecastCaptureWrite(_empty(action, source, fetched, now)), context
+        )
     persisted_at = _persisted_at(now, fetched.received_at, action.scheduled_for)
     try:
         parsed = parse_sleeper_season_forecasts(
@@ -95,6 +109,7 @@ async def _execute_action(
                 _invalid(action, source, fetched, artifact, persisted_at),
                 artifact,
             ),
+            context,
         )
     existing = await archive.load_revision(parsed.revision.revision_id)
     outcome = (
@@ -110,23 +125,51 @@ async def _execute_action(
         persisted_at,
         outcome,
     )
-    return await _save(archive, ForecastCaptureWrite(receipt, parsed.artifact, parsed.revision))
+    return await _save(
+        archive,
+        ForecastCaptureWrite(receipt, parsed.artifact, parsed.revision),
+        context,
+    )
 
 
 async def _save(
     archive: AsyncForecastArchiveRepository,
     capture: ForecastCaptureWrite,
+    context: ForecastContextObservation | None = None,
 ) -> ForecastFetchReceipt:
-    """Store a capture, treating an identical receipt retry as success."""
+    """Store a capture, treating an identical receipt and snapshot retry as success."""
 
+    if context is not None:
+        capture = ForecastCaptureWrite(
+            capture.receipt,
+            capture.artifact,
+            capture.revision,
+            bind_forecast_context(
+                context,
+                receipt_id=capture.receipt.receipt_id,
+                persisted_at=capture.receipt.persisted_at,
+            ),
+        )
     try:
         await archive.save_capture(capture)
     except ForecastArchiveConflictError:
         stored = await archive.load_receipt(capture.receipt.receipt_id)
-        if stored != capture.receipt:
+        if stored != capture.receipt or not await _same_stored_context(archive, capture):
             raise
         return stored
     return capture.receipt
+
+
+async def _same_stored_context(
+    archive: AsyncForecastArchiveRepository,
+    capture: ForecastCaptureWrite,
+) -> bool:
+    """Accept a retry only when the companion snapshot is unchanged."""
+
+    stored = await archive.load_context(capture.receipt.receipt_id)
+    if capture.context is None:
+        return stored is None
+    return stored is not None and same_forecast_context(stored, capture.context)
 
 
 def _suppressed(
