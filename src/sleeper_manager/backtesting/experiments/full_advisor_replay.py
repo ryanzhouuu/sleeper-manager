@@ -46,6 +46,7 @@ from sleeper_manager.decisions.live_lock_in import (
 )
 from sleeper_manager.decisions.lock_in import ScoreMaximizingLockInPolicy
 from sleeper_manager.decisions.weekly_plan import build_weekly_plan
+from sleeper_manager.domain.forecast_capture import ForecastCaptureError, ForecastRetrievalResult
 from sleeper_manager.domain.lock_in import LockInEvaluation, LockInEvaluationKind
 from sleeper_manager.domain.planning import (
     GameOpportunity,
@@ -53,6 +54,7 @@ from sleeper_manager.domain.planning import (
     TeamWeekState,
     WeeklyPlan,
 )
+from sleeper_manager.workflows.forecast_reader import read_player_forecasts
 
 
 class _FullAdvisorExecutor:
@@ -75,6 +77,7 @@ class _FullAdvisorExecutor:
         self.terminal: set[tuple[str, str]] = set()
         self.plans: list[WeeklyPlan] = []
         self.evaluations: list[LockInEvaluation] = []
+        self.forecast_reads: list[ForecastRetrievalResult] = []
         self.lineup_traces: list[ReplayLineupTrace] = []
         self.policy = ScoreMaximizingLockInPolicy(request.lock_in_policy_config)
         try:
@@ -118,6 +121,7 @@ class _FullAdvisorExecutor:
     def _plan_lineup(self, event: ReplayEvent) -> None:
         """Run the shared weekly planner and apply its desired assignments."""
 
+        self._read_forecasts(event.at)
         state = self._planning_state(event.at)
         plan = build_weekly_plan(
             state,
@@ -141,6 +145,28 @@ class _FullAdvisorExecutor:
         )
         self.lineup = desired
         self._trace_lineup(event)
+
+    def _read_forecasts(self, cutoff: datetime) -> None:
+        """Record one cutoff read per rostered player without changing the plan."""
+
+        archive = self.request.forecast_archive
+        source = self.request.forecast_source
+        if archive is None and source is None:
+            return
+        if archive is None or source is None:
+            raise FullAdvisorReplayError("forecast replay requires an archive and a source")
+        try:
+            if archive.load_latest_receipt(source, cutoff=cutoff) is None:
+                return
+            reads = read_player_forecasts(
+                archive,
+                source,
+                self.team_week.roster_player_ids,
+                cutoff,
+            )
+        except ForecastCaptureError as error:
+            raise FullAdvisorReplayError(f"forecast_read_failed:{error}") from error
+        self.forecast_reads.extend(reads)
 
     def _record_tipoff(self, event: ReplayEvent) -> None:
         """Freeze simulated starter evidence for every player in the tipoff batch."""
@@ -386,13 +412,17 @@ class _FullAdvisorExecutor:
 def run_full_advisor_replay(
     request: FullAdvisorReplayRequest,
 ) -> FullAdvisorReplayExecution:
-    """Run one admitted current/current team-week through the full advisor path."""
+    """Run one admitted team-week, publishing forecast reads only on success."""
 
+    request.forecast_reads.clear()
     admission = admit_historical_team_week(request.team_week)
     if not admission.admitted:
         failed = ",".join(check.code for check in admission.checks if not check.passed)
         raise FullAdvisorReplayError(f"admission_failed:{failed}")
-    return _FullAdvisorExecutor(request).run()
+    executor = _FullAdvisorExecutor(request)
+    execution = executor.run()
+    request.forecast_reads.extend(executor.forecast_reads)
+    return execution
 
 
 __all__ = (

@@ -15,8 +15,10 @@ from sleeper_manager.backtesting.replay.projection_surface_models import (
 )
 from sleeper_manager.decisions.lock_in import LockInPolicyConfig
 from sleeper_manager.decisions.weekly_plan import WeeklyPlanPolicyConfig
+from sleeper_manager.domain.forecast_capture import ForecastRetrievalResult, ForecastSource
 from sleeper_manager.domain.lock_in import LockInEvaluation
 from sleeper_manager.domain.planning import WeeklyPlan
+from sleeper_manager.persistence.forecast_repository import ForecastArchiveRepository
 
 FULL_ADVISOR_EXECUTOR_VERSION = "full-advisor-replay-v3"
 
@@ -27,7 +29,11 @@ class FullAdvisorReplayError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class FullAdvisorReplayRequest:
-    """Configure one deterministic current/current full-advisor replay."""
+    """Configure one deterministic current/current full-advisor replay.
+
+    Optional forecast reads are side evidence. They are not part of the execution
+    fingerprint and do not change the projection that drives the plan.
+    """
 
     team_week: HistoricalTeamWeekInput
     projection_surface: HistoricalProjectionSurface
@@ -36,6 +42,9 @@ class FullAdvisorReplayRequest:
     minimum_confidence: float = 0.70
     planning_lead_time: timedelta = timedelta(minutes=10)
     policy_name: str = "current_projection_current_policy"
+    forecast_archive: ForecastArchiveRepository | None = None
+    forecast_source: ForecastSource | None = None
+    forecast_reads: list[ForecastRetrievalResult] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         """Reject settings that cannot identify a reproducible policy run."""
