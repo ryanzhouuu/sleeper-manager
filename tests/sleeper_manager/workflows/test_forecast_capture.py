@@ -5,10 +5,15 @@ import gzip
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 
+import pytest
+
 from sleeper_manager.domain.forecast_capture import ForecastCaptureOutcome, ForecastCaptureTiming
+from sleeper_manager.domain.forecast_context import ForecastContextRoster
 from sleeper_manager.integrations.sleeper.forecast_fetch import season_forecast_source
+from sleeper_manager.persistence.forecast_repository import ForecastArchiveConflictError
 from sleeper_manager.persistence.forecast_sqlite import AsyncSQLiteForecastArchiveRepository
 from sleeper_manager.workflows.forecast_capture import execute_forecast_actions
+from sleeper_manager.workflows.forecast_context_collection import ForecastContextObservation
 from sleeper_manager.workflows.forecast_schedule import (
     ForecastPlanAction,
     ForecastPlanStep,
@@ -177,3 +182,106 @@ def test_suppressed_action_and_exact_retry_do_not_request_the_feed(tmp_path) -> 
     assert first[0].outcome is ForecastCaptureOutcome.SUPPRESSED
     assert first[0].started_at is None
     assert asyncio.run(archive.measure_storage()).receipt_count == 1
+
+
+def test_failed_and_suppressed_slots_store_the_same_companion_snapshot(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """A feed failure and a cap gap both keep the roster evidence read for that wake."""
+
+    archive = _archive(tmp_path)
+    context = _context()
+
+    async def fetch(url: str) -> RawResponse:
+        del url
+        return RawResponse(503, b"")
+
+    failed = asyncio.run(
+        execute_forecast_actions(
+            archive,
+            (_action(NOW - timedelta(minutes=5)),),
+            source=SOURCE,
+            fetch=fetch,
+            now=NOW,
+            context=context,
+        )
+    )
+    suppressed = asyncio.run(
+        execute_forecast_actions(
+            archive,
+            (
+                _action(
+                    NOW - timedelta(minutes=4),
+                    step=ForecastPlanStep.SUPPRESS,
+                    error_code="daily_cap",
+                ),
+            ),
+            source=SOURCE,
+            fetch=fetch,
+            now=NOW,
+            context=context,
+        )
+    )
+
+    failed_context = asyncio.run(archive.load_context(failed[0].receipt_id))
+    suppressed_context = asyncio.run(archive.load_context(suppressed[0].receipt_id))
+    assert failed[0].outcome is ForecastCaptureOutcome.FAILED
+    assert failed_context is not None and failed_context.manager is not None
+    assert suppressed_context is not None and suppressed_context.manager is not None
+    assert failed_context.manager.player_ids == suppressed_context.manager.player_ids
+    assert failed_context.persisted_at == failed[0].persisted_at
+
+
+def test_context_retry_rejects_a_different_snapshot(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """An exact companion retry succeeds and a changed roster does not replace it."""
+
+    archive = _archive(tmp_path)
+    action = _action(
+        NOW - timedelta(minutes=5),
+        step=ForecastPlanStep.SUPPRESS,
+        error_code="daily_cap",
+    )
+
+    async def fetch(url: str) -> RawResponse:
+        del url
+        raise AssertionError("suppressed forecast slot must not fetch")
+
+    asyncio.run(
+        execute_forecast_actions(
+            archive, (action,), source=SOURCE, fetch=fetch, now=NOW, context=_context()
+        )
+    )
+    asyncio.run(
+        execute_forecast_actions(
+            archive, (action,), source=SOURCE, fetch=fetch, now=NOW, context=_context()
+        )
+    )
+    changed = _context(player_ids=("other",))
+    with pytest.raises(ForecastArchiveConflictError):
+        asyncio.run(
+            execute_forecast_actions(
+                archive, (action,), source=SOURCE, fetch=fetch, now=NOW, context=changed
+            )
+        )
+
+
+def _context(*, player_ids: tuple[str, ...] = ("manager",)) -> ForecastContextObservation:
+    """Build one companion observation whose reads do not follow persistence."""
+
+    roster = ForecastContextRoster(
+        roster_id=1,
+        player_ids=player_ids,
+        starter_ids=player_ids,
+        reserve_ids=(),
+        read_at=NOW,
+    )
+    return ForecastContextObservation(
+        league_id="league-1",
+        season="2026",
+        week=1,
+        matchup_id=None,
+        bye=True,
+        manager=roster,
+        opponent=None,
+        eligibility=(),
+        games=(),
+        gaps=(),
+    )

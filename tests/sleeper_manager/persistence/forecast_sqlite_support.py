@@ -35,6 +35,7 @@ def successful_capture(
     persisted_at: datetime = BASE,
     payload: bytes = b"source-payload-1",
     points: float = 21.5,
+    player_id: str = "player-1",
     provider_updated_at: datetime | None = BASE - timedelta(hours=1),
     outcome: ForecastCaptureOutcome = ForecastCaptureOutcome.CHANGED,
 ) -> ForecastCaptureWrite:
@@ -50,7 +51,7 @@ def successful_capture(
     )
     records = (
         NormalizedPlayerForecast(
-            player_id="player-1",
+            player_id=player_id,
             company="sleeper",
             team_id="CHI",
             stats=(("pts", points), ("ast", 5.0)),

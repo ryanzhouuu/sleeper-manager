@@ -18,11 +18,13 @@ Worker deploy. Without an active runtime policy, advisor planning stays blocked 
 forecast capture uses the default 7:00 AM America/Chicago daily schedule.
 
 Forecast receipts, raw payloads, and semantic revisions live in the separate
-`sleeper-manager-forecast-archive` D1 database. Apply
-`infra/cloudflare/forecast-migrations/0001_forecast_archive.sql` before deploying a Worker
-with the `forecast_archive` binding. The scheduled collector uses the existing five-minute
-Cron wake but requests the feed only for due daily or pre-tipoff slots. Capture does not
-change lineup or Lock-In advice.
+`sleeper-manager-forecast-archive` D1 database. Apply every file in
+`infra/cloudflare/forecast-migrations/` before deploying a Worker with the
+`forecast_archive` binding. The scheduled collector uses the existing five-minute
+Cron wake but requests the feed only for due daily or pre-tipoff slots. Each stored
+receipt also keeps the manager and opponent rosters, eligibility, matchup, and
+current fantasy-week games read for that slot, or an explicit gap when one of those
+reads fails. Capture does not change lineup or Lock-In advice.
 
 If the NBA tipoff lookup fails, the Worker logs the failure and retries on later wakes
 without caching an empty slate. The due daily forecast request still runs. Pre-tipoff

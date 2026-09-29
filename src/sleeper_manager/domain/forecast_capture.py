@@ -342,7 +342,9 @@ class ForecastRetrievalResult:
     detail: str
     forecast: NormalizedPlayerForecast | None = None
     provenance: ForecastRevisionProvenance | None = None
+    coverage: ForecastCoverage | None = None
     evidence_receipt_id: str | None = None
+    newer_attempt_receipt_id: str | None = None
 
     def __post_init__(self) -> None:
         require_text(self.player_id, "Forecast retrieval player ID")
@@ -350,20 +352,28 @@ class ForecastRetrievalResult:
         require_text(self.detail, "Forecast retrieval detail")
         if self.evidence_receipt_id is not None:
             require_text(self.evidence_receipt_id, "Forecast retrieval evidence receipt ID")
+        if self.newer_attempt_receipt_id is not None:
+            require_text(self.newer_attempt_receipt_id, "Forecast retrieval newer attempt")
 
         if self.status in (ForecastRetrievalStatus.AVAILABLE, ForecastRetrievalStatus.STALE):
-            if self.forecast is None or self.provenance is None:
+            if self.forecast is None or self.provenance is None or self.coverage is None:
                 raise ForecastCaptureError(
                     "Available or stale retrievals require forecast provenance"
                 )
             if self.forecast.player_id != self.player_id:
                 raise ForecastCaptureError("Retrieved forecast belongs to a different player")
+            if self.newer_attempt_receipt_id == self.provenance.receipt_id:
+                raise ForecastCaptureError("Forecast newer attempt repeats the selected receipt")
         elif self.status is ForecastRetrievalStatus.MISSING:
-            if self.forecast is not None or self.provenance is None:
+            if self.forecast is not None or self.provenance is None or self.coverage is None:
                 raise ForecastCaptureError("Missing retrievals require revision provenance only")
+            if self.newer_attempt_receipt_id == self.provenance.receipt_id:
+                raise ForecastCaptureError("Forecast newer attempt repeats the selected receipt")
         elif (
             self.forecast is not None
             or self.provenance is not None
+            or self.coverage is not None
+            or self.newer_attempt_receipt_id is not None
             or self.evidence_receipt_id is None
         ):
             raise ForecastCaptureError("Invalid or gap retrievals require receipt evidence only")

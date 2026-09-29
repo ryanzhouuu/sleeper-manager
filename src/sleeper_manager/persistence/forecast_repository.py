@@ -17,6 +17,7 @@ from sleeper_manager.domain.forecast_capture import (
     NormalizedForecastRevision,
     RawForecastArtifact,
 )
+from sleeper_manager.domain.forecast_context import ForecastCaptureContext
 from sleeper_manager.domain.forecast_revision_identity import forecast_semantic_hash
 
 
@@ -39,6 +40,7 @@ class ForecastCaptureWrite:
     receipt: ForecastFetchReceipt
     artifact: RawForecastArtifact | None = None
     revision: NormalizedForecastRevision | None = None
+    context: ForecastCaptureContext | None = None
 
     def __post_init__(self) -> None:
         """Require complete, internally consistent evidence before opening a transaction."""
@@ -53,6 +55,8 @@ class ForecastCaptureWrite:
             _validate_artifact(self.receipt, self.artifact)
         if self.revision is not None:
             _validate_revision(self.receipt, self.revision, self.artifact)
+        if self.context is not None:
+            _validate_context(self.receipt, self.context)
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +66,7 @@ class ForecastArchiveWriteResult:
     artifact_created: bool
     revision_created: bool
     receipt_created: bool
+    context_created: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +141,8 @@ class ForecastArchiveRepository(Protocol):
 
     def load_receipt(self, receipt_id: str) -> ForecastFetchReceipt | None: ...
 
+    def load_context(self, receipt_id: str) -> ForecastCaptureContext | None: ...
+
     def load_latest_receipt(
         self,
         source: ForecastSource,
@@ -182,6 +189,8 @@ class AsyncForecastArchiveRepository(Protocol):
     async def load_revision(self, revision_id: str) -> NormalizedForecastRevision | None: ...
 
     async def load_receipt(self, receipt_id: str) -> ForecastFetchReceipt | None: ...
+
+    async def load_context(self, receipt_id: str) -> ForecastCaptureContext | None: ...
 
     async def load_latest_receipt(
         self,
@@ -256,6 +265,15 @@ def _validate_revision(
     calculated = forecast_semantic_hash(revision.source, revision.records)
     if calculated != revision.semantic_hash:
         raise ForecastArchiveError("Forecast revision semantic hash does not match its records")
+
+
+def _validate_context(receipt: ForecastFetchReceipt, context: ForecastCaptureContext) -> None:
+    """Require the companion snapshot to name the same persisted attempt."""
+
+    if context.receipt_id != receipt.receipt_id:
+        raise ForecastArchiveError("Forecast context references a different receipt")
+    if context.persisted_at != receipt.persisted_at:
+        raise ForecastArchiveError("Forecast context persistence time must match its receipt")
 
 
 def validate_capture_outcome(

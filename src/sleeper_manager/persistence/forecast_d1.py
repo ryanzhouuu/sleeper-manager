@@ -18,8 +18,16 @@ from sleeper_manager.domain.forecast_capture import (
     NormalizedForecastRevision,
     RawForecastArtifact,
 )
+from sleeper_manager.domain.forecast_context import ForecastCaptureContext
+from sleeper_manager.persistence.forecast_context_codec import (
+    decode_forecast_context,
+    encode_forecast_context,
+    encoded_context_from_mapping,
+    same_forecast_context,
+)
 from sleeper_manager.persistence.forecast_d1_statements import (
     ASSERT_FORECAST_ARTIFACT_SQL,
+    ASSERT_FORECAST_CONTEXT_SQL,
     ASSERT_FORECAST_OUTCOME_SQL,
     ASSERT_FORECAST_RECEIPT_SQL,
     ASSERT_FORECAST_REVISION_SQL,
@@ -51,11 +59,13 @@ from sleeper_manager.persistence.forecast_rows import (
 )
 from sleeper_manager.persistence.forecast_statements import (
     INSERT_FORECAST_ARTIFACT_SQL,
+    INSERT_FORECAST_CONTEXT_SQL,
     INSERT_FORECAST_RECEIPT_SQL,
     INSERT_FORECAST_REVISION_SQL,
     LIST_FORECAST_RECEIPTS_BETWEEN_SQL,
     LIST_FORECAST_RECEIPTS_SQL,
     LOAD_FORECAST_ARTIFACT_SQL,
+    LOAD_FORECAST_CONTEXT_SQL,
     LOAD_FORECAST_RECEIPT_SQL,
     LOAD_FORECAST_REVISION_SQL,
     LOAD_LATEST_FORECAST_RECEIPT_SQL,
@@ -116,6 +126,20 @@ class D1ForecastArchiveRepository:
         receipt_index = len(statements)
         statements.append(self._statement(INSERT_FORECAST_RECEIPT_SQL, receipt_params))
         statements.append(self._statement(ASSERT_FORECAST_RECEIPT_SQL, receipt_params))
+        context_index: int | None = None
+        if capture.context is not None:
+            encoded = encode_forecast_context(capture.context)
+            context_params = (
+                encoded.receipt_id,
+                encoded.encoding.value,
+                encoded.encoded_payload,
+                encoded.uncompressed_size,
+                encoded.content_hash,
+                encoded.stored_at.isoformat(),
+            )
+            context_index = len(statements)
+            statements.append(self._statement(INSERT_FORECAST_CONTEXT_SQL, context_params))
+            statements.append(self._statement(ASSERT_FORECAST_CONTEXT_SQL, context_params))
 
         try:
             results = await self._batch(statements)
@@ -134,6 +158,9 @@ class D1ForecastArchiveRepository:
                 revision_index is not None and self._changes(results[revision_index]) == 1
             ),
             receipt_created=self._changes(results[receipt_index]) == 1,
+            context_created=(
+                context_index is not None and self._changes(results[context_index]) == 1
+            ),
         )
         validate_capture_outcome(capture, result)
         return result
@@ -159,6 +186,14 @@ class D1ForecastArchiveRepository:
 
         row = await self._first(LOAD_FORECAST_RECEIPT_SQL, receipt_id)
         return receipt_from_mapping(row) if row is not None else None
+
+    async def load_context(self, receipt_id: str) -> ForecastCaptureContext | None:
+        """Load and verify the companion snapshot linked to one receipt."""
+
+        row = await self._first(LOAD_FORECAST_CONTEXT_SQL, receipt_id)
+        if row is None:
+            return None
+        return decode_forecast_context(encoded_context_from_mapping(row))
 
     async def load_latest_receipt(
         self,
@@ -284,6 +319,13 @@ class D1ForecastArchiveRepository:
             raise ForecastArchiveConflictError(
                 "Forecast receipt ID already names a different capture attempt"
             )
+        existing_context = await self.load_context(capture.receipt.receipt_id)
+        if existing_receipt is not None and not _same_optional_context(
+            existing_context, capture.context
+        ):
+            raise ForecastArchiveConflictError(
+                "Forecast receipt already names different companion evidence"
+            )
 
         if capture.artifact is not None:
             existing_artifact = await self.load_artifact(capture.artifact.payload_hash)
@@ -390,6 +432,17 @@ class D1ForecastArchiveRepository:
         if value < 0:
             raise ForecastArchiveError("D1 forecast change count is invalid")
         return value
+
+
+def _same_optional_context(
+    stored: ForecastCaptureContext | None,
+    candidate: ForecastCaptureContext | None,
+) -> bool:
+    """Treat a missing snapshot and a different snapshot as distinct evidence."""
+
+    if stored is None or candidate is None:
+        return stored is None and candidate is None
+    return same_forecast_context(stored, candidate)
 
 
 def _d1_bind_value(value: object) -> object:

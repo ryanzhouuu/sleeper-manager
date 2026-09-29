@@ -86,7 +86,8 @@ has been recorded yet; the command does not create one. The 350 MB figure is the
 sum of stored payload bytes, not a database file size.
 
 The Worker stores forecast captures in the separate `forecast_archive` D1 binding.
-Apply its migration before deploying; see [Cloudflare runtime](docs/cloudflare-runtime.md)
+Each receipt can include the roster and schedule snapshot read at capture time.
+Apply its migrations before deploying; see [Cloudflare runtime](docs/cloudflare-runtime.md)
 for deployment and remote archive checks. Keep this archive out of
 `sleeper_manager_state`. Without an active runtime policy, the Worker captures at
 7:00 AM America/Chicago while advisor planning stays blocked.

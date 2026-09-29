@@ -14,6 +14,13 @@ from sleeper_manager.domain.forecast_capture import (
     NormalizedForecastRevision,
     RawForecastArtifact,
 )
+from sleeper_manager.domain.forecast_context import ForecastCaptureContext
+from sleeper_manager.persistence.forecast_context_codec import (
+    decode_forecast_context,
+    encode_forecast_context,
+    encoded_context_from_mapping,
+    same_forecast_context,
+)
 from sleeper_manager.persistence.forecast_repository import (
     ForecastArchiveConflictError,
     ForecastArchiveIntegrityError,
@@ -40,11 +47,13 @@ from sleeper_manager.persistence.forecast_rows import (
 from sleeper_manager.persistence.forecast_statements import (
     FORECAST_ARCHIVE_SCHEMA,
     INSERT_FORECAST_ARTIFACT_SQL,
+    INSERT_FORECAST_CONTEXT_SQL,
     INSERT_FORECAST_RECEIPT_SQL,
     INSERT_FORECAST_REVISION_SQL,
     LIST_FORECAST_RECEIPTS_BETWEEN_SQL,
     LIST_FORECAST_RECEIPTS_SQL,
     LOAD_FORECAST_ARTIFACT_SQL,
+    LOAD_FORECAST_CONTEXT_SQL,
     LOAD_FORECAST_RECEIPT_SQL,
     LOAD_FORECAST_REVISION_SQL,
     LOAD_LATEST_FORECAST_RECEIPT_SQL,
@@ -83,10 +92,12 @@ class SQLiteForecastArchiveRepository:
             artifact_created = self._save_artifact(connection, capture)
             revision_created = self._save_revision(connection, capture)
             receipt_created = self._save_receipt(connection, capture)
+            context_created = self._save_context(connection, capture, receipt_created)
             result = ForecastArchiveWriteResult(
                 artifact_created=artifact_created,
                 revision_created=revision_created,
                 receipt_created=receipt_created,
+                context_created=context_created,
             )
             validate_capture_outcome(capture, result)
             return result
@@ -119,6 +130,15 @@ class SQLiteForecastArchiveRepository:
         with self._connect() as connection:
             row = _mapping(connection.execute(LOAD_FORECAST_RECEIPT_SQL, (receipt_id,)).fetchone())
         return receipt_from_mapping(row) if row is not None else None
+
+    def load_context(self, receipt_id: str) -> ForecastCaptureContext | None:
+        """Load and verify the companion snapshot linked to one receipt."""
+
+        with self._connect() as connection:
+            row = _mapping(connection.execute(LOAD_FORECAST_CONTEXT_SQL, (receipt_id,)).fetchone())
+        if row is None:
+            return None
+        return decode_forecast_context(encoded_context_from_mapping(row))
 
     def load_latest_receipt(
         self,
@@ -286,6 +306,58 @@ class SQLiteForecastArchiveRepository:
             )
         return False
 
+    def _save_context(
+        self,
+        connection: sqlite3.Connection,
+        capture: ForecastCaptureWrite,
+        receipt_created: bool,
+    ) -> bool:
+        """Store one companion snapshot or accept an exact retry of the same bytes."""
+
+        context = capture.context
+        row = _mapping(
+            connection.execute(
+                LOAD_FORECAST_CONTEXT_SQL,
+                (capture.receipt.receipt_id,),
+            ).fetchone()
+        )
+        stored = (
+            decode_forecast_context(encoded_context_from_mapping(row)) if row is not None else None
+        )
+        if context is None:
+            if stored is not None:
+                raise ForecastArchiveConflictError(
+                    "Forecast receipt already names different companion evidence"
+                )
+            return False
+        if stored is not None:
+            if not same_forecast_context(stored, context):
+                raise ForecastArchiveConflictError(
+                    "Forecast receipt already names different companion evidence"
+                )
+            return False
+        if not receipt_created:
+            raise ForecastArchiveConflictError(
+                "Forecast receipt already names different companion evidence"
+            )
+        encoded = encode_forecast_context(context)
+        cursor = connection.execute(
+            INSERT_FORECAST_CONTEXT_SQL,
+            (
+                encoded.receipt_id,
+                encoded.encoding.value,
+                encoded.encoded_payload,
+                encoded.uncompressed_size,
+                encoded.content_hash,
+                encoded.stored_at.isoformat(),
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise ForecastArchiveConflictError(
+                "Forecast receipt already names different companion evidence"
+            )
+        return True
+
     def _save_receipt(
         self,
         connection: sqlite3.Connection,
@@ -341,6 +413,11 @@ class AsyncSQLiteForecastArchiveRepository:
         """Load one capture attempt by its immutable identity."""
 
         return self._repository.load_receipt(receipt_id)
+
+    async def load_context(self, receipt_id: str) -> ForecastCaptureContext | None:
+        """Load and verify the companion snapshot linked to one receipt."""
+
+        return self._repository.load_context(receipt_id)
 
     async def load_latest_receipt(
         self,

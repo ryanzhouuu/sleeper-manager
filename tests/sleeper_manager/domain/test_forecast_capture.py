@@ -51,6 +51,12 @@ def player(player_id: str = "1000") -> NormalizedPlayerForecast:
     )
 
 
+def coverage() -> ForecastCoverage:
+    """Build revision coverage attached to a cutoff retrieval."""
+
+    return ForecastCoverage(total_rows=2, numeric_forecast_rows=1, core_complete_rows=1)
+
+
 def provenance(*, persisted_at: datetime = AT) -> ForecastRevisionProvenance:
     """Build provenance whose persistence time controls cutoff visibility."""
 
@@ -253,9 +259,12 @@ def test_available_retrieval_reports_cutoff_age() -> None:
         detail="latest revision before cutoff",
         forecast=player(),
         provenance=provenance(),
+        coverage=coverage(),
+        newer_attempt_receipt_id="failed-receipt",
     )
 
     assert result.age == timedelta(hours=2)
+    assert result.newer_attempt_receipt_id == "failed-receipt"
 
 
 def test_retrieval_rejects_post_cutoff_and_mismatched_player_evidence() -> None:
@@ -267,6 +276,7 @@ def test_retrieval_rejects_post_cutoff_and_mismatched_player_evidence() -> None:
             detail="future evidence",
             forecast=player(),
             provenance=provenance(persisted_at=AT + timedelta(seconds=1)),
+            coverage=coverage(),
         )
     with pytest.raises(ForecastCaptureError, match="different player"):
         ForecastRetrievalResult(
@@ -276,6 +286,18 @@ def test_retrieval_rejects_post_cutoff_and_mismatched_player_evidence() -> None:
             detail="wrong player",
             forecast=player(),
             provenance=provenance(),
+            coverage=coverage(),
+        )
+    with pytest.raises(ForecastCaptureError, match="repeats the selected receipt"):
+        ForecastRetrievalResult(
+            status=ForecastRetrievalStatus.AVAILABLE,
+            player_id="1000",
+            cutoff=AT + timedelta(hours=2),
+            detail="same receipt",
+            forecast=player(),
+            provenance=provenance(),
+            coverage=coverage(),
+            newer_attempt_receipt_id="receipt-1",
         )
 
 
@@ -286,6 +308,7 @@ def test_missing_and_gap_retrievals_preserve_distinct_evidence() -> None:
         cutoff=AT,
         detail="player has no numeric source row",
         provenance=provenance(),
+        coverage=coverage(),
     )
     gap = ForecastRetrievalResult(
         status=ForecastRetrievalStatus.GAP,

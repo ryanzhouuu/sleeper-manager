@@ -115,8 +115,8 @@ class CountingNba:
         return ProviderResult((game,), _quality("schedule"))
 
 
-def test_preseason_capture_stores_a_daily_receipt_without_the_catalog(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """A daily snapshot does not need opponent games before the season."""
+def test_preseason_capture_stores_a_daily_receipt_without_tipoff_lookup(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """A daily snapshot reads eligibility without scheduling opponent tipoffs."""
 
     archive = _archive(tmp_path)
     sleeper = FixtureSleeper("pre_draft")
@@ -142,9 +142,14 @@ def test_preseason_capture_stores_a_daily_receipt_without_the_catalog(tmp_path) 
         )
     )
 
-    assert sleeper.player_calls == 0
+    assert sleeper.player_calls == 1
     assert fetches == 1
-    assert asyncio.run(archive.measure_storage()).receipt_count == 1
+    receipt = asyncio.run(archive.load_newest_receipt())
+    assert receipt is not None
+    context = asyncio.run(archive.load_context(receipt.receipt_id))
+    assert context is not None
+    assert context.manager is not None
+    assert context.receipt_id == receipt.receipt_id
 
 
 def test_in_season_capture_reads_the_catalog_once_per_local_day(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -179,9 +184,14 @@ def test_in_season_capture_reads_the_catalog_once_per_local_day(tmp_path) -> Non
     asyncio.run(exercise())
 
     assert sleeper.player_calls == 1
-    assert nba.roster_calls == 1
+    assert nba.roster_calls == 2
     assert fetches == 1
-    assert asyncio.run(archive.measure_storage()).receipt_count == 1
+    receipt = asyncio.run(archive.load_newest_receipt())
+    assert receipt is not None
+    context = asyncio.run(archive.load_context(receipt.receipt_id))
+    assert context is not None
+    assert context.week == 1
+    assert context.games
 
 
 def test_tipoff_provider_failure_still_captures_daily_forecast(
@@ -221,7 +231,11 @@ def test_tipoff_provider_failure_still_captures_daily_forecast(
 
     assert fetches == 1
     assert cache.records == {}
-    assert asyncio.run(archive.measure_storage()).receipt_count == 1
+    receipt = asyncio.run(archive.load_newest_receipt())
+    assert receipt is not None
+    context = asyncio.run(archive.load_context(receipt.receipt_id))
+    assert context is not None
+    assert context.gaps
     assert capsys.readouterr().err == "Forecast tipoff lookup failed: RuntimeError\n"
 
 
