@@ -56,3 +56,11 @@ once and loads one revision for all requested players. An empty archive uses int
 fallback; archive corruption propagates as an error. Its single-target `project`
 method conforms to the existing live projection boundary, but active advice still
 uses the current provider. Shadow/replay consumers should retain the batch results.
+
+`build_hybrid_projection_surfaces` takes one or both roster team-week inputs and
+creates every remaining player-game at every existing replay cutoff. It batches
+shared targets across rosters and retains blockers as failed surface entries. Its
+sidecars pass the existing strict artifact codec and can be supplied directly to
+`FullAdvisorReplayRequest`. The surface finalization policy describes the existing
+team-week replay clock; conditional history uses each supplied observation's own
+`finalized_at`. No approximation is silently inserted into hybrid history.
