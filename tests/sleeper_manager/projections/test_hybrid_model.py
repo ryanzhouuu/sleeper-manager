@@ -15,10 +15,13 @@ from sleeper_manager.domain.forecast_capture import (
 )
 from sleeper_manager.domain.scoring import ScoringPolicy, calculate_fantasy_points
 from sleeper_manager.integrations.sleeper.forecast_fetch import season_forecast_source
+from sleeper_manager.integrations.sleeper.forecast_parser import parse_sleeper_season_forecasts
 from sleeper_manager.projections.hybrid_config import CORE_STATS, HybridProjectionConfig
+from sleeper_manager.projections.hybrid_external import qualify_external_center
 from sleeper_manager.projections.hybrid_model import HybridProjectionBatch
 from sleeper_manager.projections.hybrid_types import HybridHistory, ParticipationOpportunity
 from sleeper_manager.projections.live_baseline import LiveProjectionTarget
+from tests.paths import FIXTURES_DIR
 from tests.sleeper_manager.projections.hybrid_support import CUTOFF, TIPOFF, game, history
 
 TARGET = LiveProjectionTarget("sleeper-target", "next", TIPOFF, "target")
@@ -49,7 +52,7 @@ def forecast(center: tuple[float, ...], *, age: float = 0) -> ForecastRetrievalR
         "visible",
         NormalizedPlayerForecast(
             TARGET.sleeper_player_id,
-            "sleeper",
+            "rotowire",
             tuple(zip(CORE_STATS, center, strict=True)),
             provider_updated_at=CUTOFF - timedelta(days=90),
         ),
@@ -83,6 +86,53 @@ def test_external_priority_preserves_whole_outcomes_and_bonus_scoring() -> None:
     assert result.projection.scoring_policy_version == POLICY.version
     assert result.effective_sample >= 20
     assert result.maximum_weight <= 0.1
+
+
+def test_external_qualification_accepts_the_parsed_season_feed() -> None:
+    """Keep the feed's company distinct from Sleeper's source provider identity."""
+    source = season_forecast_source("2026", "regular")
+    parsed = parse_sleeper_season_forecasts(
+        (FIXTURES_DIR / "sleeper" / "season_forecasts.json").read_bytes(),
+        source=source,
+        persisted_at=CUTOFF,
+    )
+    row = parsed.revision.records[0]
+    read = ForecastRetrievalResult(
+        ForecastRetrievalStatus.AVAILABLE,
+        row.player_id,
+        CUTOFF,
+        "visible",
+        forecast=row,
+        provenance=ForecastRevisionProvenance(
+            "receipt",
+            parsed.revision.revision_id,
+            source,
+            parsed.artifact.payload_hash,
+            parsed.revision.semantic_hash,
+            CUTOFF,
+        ),
+        coverage=parsed.revision.coverage,
+    )
+    result = qualify_external_center(
+        read,
+        player_id=row.player_id,
+        cutoff=CUTOFF,
+        game_start=TIPOFF,
+        config=HybridProjectionConfig(),
+    )
+    assert result.rejection is None
+    assert result.values == (15.77, 3.37, 4.2, 1.14, 0.2, 1.23, 0.63)
+
+
+@pytest.mark.parametrize("company", ["sleeper", "other"])
+def test_unsupported_forecast_companies_use_internal_fallback(company: str) -> None:
+    prepared = batch()
+    read = forecast(prepared.pools.pool("target").means)
+    read = replace(read, forecast=replace(read.forecast, company=company))
+    result = prepared.project(TARGET, forecast=read)
+    assert result.source == "internal"
+    assert result.external_rejection == "forecast_source_mismatch"
+    assert result.joint_weights == prepared.project(TARGET).joint_weights
 
 
 def test_unsupported_external_center_rebuilds_the_internal_distribution() -> None:

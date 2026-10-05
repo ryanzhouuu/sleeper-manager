@@ -34,7 +34,7 @@ def qualify_external_center(
         return ExternalCenter(None, f"forecast_{retrieval.status.value}")
     assert retrieval.provenance is not None and retrieval.forecast is not None
     expected = season_forecast_source(str(nba_season_start_year(game_start)), "regular")
-    if retrieval.provenance.source != expected or retrieval.forecast.company != "sleeper":
+    if retrieval.provenance.source != expected or retrieval.forecast.company != "rotowire":
         return ExternalCenter(None, "forecast_source_mismatch")
     if cutoff - retrieval.provenance.persisted_at > timedelta(hours=config.forecast_max_age_hours):
         return ExternalCenter(None, "stale_forecast_receipt")
