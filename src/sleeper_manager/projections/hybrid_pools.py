@@ -107,9 +107,13 @@ class HybridHistoryPools:
             age = self.season - nba_season_start_year(row.game_start)
             if row.finalized_at > cutoff or row.game_start >= cutoff or age not in (0, 1, 2):
                 continue
-            if not row.did_play or row.minutes is None or row.minutes <= 0:
+            if not row.did_play:
                 continue
-            if not required.issubset(row.verified_fields):
+            if (
+                row.minutes is None
+                or row.minutes <= 0
+                or not required.issubset(row.verified_fields)
+            ):
                 self.incomplete_players.add(row.player_id)
                 self.excluded_games.append((row.player_id, row.game_id))
                 continue
@@ -119,10 +123,13 @@ class HybridHistoryPools:
             for player, rows in sorted(by_player.items())
         }
         self.profiles = {player: self._profile(rows) for player, rows in self.games.items()}
+        eligible = [
+            self.profiles[player]
+            for player, rows in self.games.items()
+            if len(rows) >= config.minimum_donor_games
+        ]
         self.scales = tuple(
-            max(pstdev([profile[k] for profile in self.profiles.values()]), floor)
-            if self.profiles
-            else floor
+            max(pstdev([profile[k] for profile in eligible]), floor) if eligible else floor
             for k, floor in enumerate(config.profile_scale_floors)
         )
 
@@ -131,7 +138,11 @@ class HybridHistoryPools:
         own = self.games.get(player_id, ())
         if not own and player_id in self.incomplete_players:
             raise HybridProjectionError("unverified_player_stats")
-        others = [profile for player, profile in self.profiles.items() if player != player_id]
+        others = [
+            profile
+            for player, profile in self.profiles.items()
+            if player != player_id and len(self.games[player]) >= self.config.minimum_donor_games
+        ]
         own_strength = fsum(weight for _, weight in own)
         if center is None:
             if not others and not own:

@@ -8,7 +8,6 @@ from sleeper_manager.projections.hybrid_config import HybridProjectionConfig, Hy
 from sleeper_manager.projections.hybrid_types import (
     GameAvailability,
     HybridHistory,
-    ParticipationOpportunity,
     require_aware,
 )
 
@@ -23,7 +22,6 @@ class ParticipationEstimate:
     pooled_bucket_count: int
     bucket: str | None
     fallback: str | None
-    opportunities: tuple[ParticipationOpportunity, ...]
     availability: GameAvailability | None
 
 
@@ -102,7 +100,6 @@ class HybridParticipation:
             pooled_bucket_count=len(pooled_bucket),
             bucket=bucket,
             fallback=fallback,
-            opportunities=self.opportunities,
             availability=usable,
         )
 

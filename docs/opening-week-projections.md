@@ -33,3 +33,18 @@ the pooled history rate, and player bucket counts shrink toward that pooled buck
 rate, each at strength 20. Missing reports and submitted-but-not-listed reports remain
 distinct. Missing bucket evidence uses history-only output; absent pooled opportunities
 block output. These estimates are provisional, not calibrated injury probabilities.
+
+`HybridProjectionBatch` prepares one history/cutoff/season/scoring-policy combination,
+then projects multiple `LiveProjectionTarget`s. Provider identity must be explicitly
+resolved. External acceptance requires the supported Sleeper regular-season adapter,
+complete coherent core stats, and a successful receipt no older than 48 hours. Provider
+update time remains diagnostic; newer failures do not renew freshness. An unsupported
+fit independently rebuilds the internal pool. Internal-only configuration has a distinct
+model version and does not consume external evidence.
+
+`HybridProjectionResult` retains blocked target keys, source and fallback reasons,
+forecast receipts, donor identities, actual and requested stat centers, joint weights,
+participation evidence, excluded games, ESS, and maximum weight. Successful snapshots
+use the existing league scorer, including nonlinear bonuses and verified foul penalties,
+then mix explicit DNP mass at zero. Input fingerprints include visible history and census
+evidence; post-cutoff outcomes are excluded. Reuse batches outside scenario loops.
