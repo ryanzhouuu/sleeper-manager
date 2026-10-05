@@ -75,6 +75,9 @@ uv run sleeper-manager --help
 
 ## Forecast capture
 
+The [opening-week hybrid candidate](docs/opening-week-projections.md) uses captured
+forecasts with internal fallback for paired shadow output and full-advisor replay.
+
 `run-scheduled` writes forecast evidence to `forecasts.db` beside `SQLITE_PATH`
 (`.local/forecasts.db` by default). That write does not change the planning
 exit status or lineup and Lock-In advice.

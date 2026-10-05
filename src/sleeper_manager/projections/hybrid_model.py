@@ -46,6 +46,7 @@ class HybridProjectionResult:
     participation: ParticipationEstimate | None = None
     joint_weights: tuple[tuple[str, str, float], ...] = ()
     excluded_games: tuple[tuple[str, str], ...] = ()
+    history_fingerprint: str | None = None
 
 
 def _json_default(value: object) -> str:
@@ -112,13 +113,23 @@ class HybridProjectionBatch:
     ) -> HybridProjectionResult:
         require_aware(target.game_start)
         if target.game_start <= self.cutoff:
-            return HybridProjectionResult(target, self.cutoff, failure="game_already_started")
+            return HybridProjectionResult(
+                target,
+                self.cutoff,
+                failure="game_already_started",
+                history_fingerprint=self.history_fingerprint,
+            )
         if nba_season_start_year(target.game_start) != self.season:
             raise HybridProjectionError("batch_season_mismatch")
         if target.provider_player_id is None:
             return HybridProjectionResult(
-                target, self.cutoff, failure="unresolved_history_identity"
+                target,
+                self.cutoff,
+                failure="unresolved_history_identity",
+                history_fingerprint=self.history_fingerprint,
             )
+        if not self.config.use_external:
+            forecast = None
         external = qualify_external_center(
             forecast,
             player_id=target.sleeper_player_id,
@@ -163,6 +174,7 @@ class HybridProjectionBatch:
                 external_rejection=rejected,
                 forecast=forecast,
                 excluded_games=tuple(self.pools.excluded_games),
+                history_fingerprint=self.history_fingerprint,
             )
         played_probability = participation.probability
         scores = tuple(
@@ -245,4 +257,5 @@ class HybridProjectionBatch:
                 for row, w in zip(pool.samples, weights, strict=True)
             ),
             excluded_games=tuple(self.pools.excluded_games),
+            history_fingerprint=self.history_fingerprint,
         )

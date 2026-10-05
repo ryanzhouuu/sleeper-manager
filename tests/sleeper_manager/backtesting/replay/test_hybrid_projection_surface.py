@@ -42,6 +42,7 @@ def opening_week(roster: int = 1):  # type: ignore[no-untyped-def]
             sleeper_id=f"r{roster}-{row.sleeper_id}",
             provider_player_id="target" if row.sleeper_id == "p1" else "donor-0",
             fantasy_team_id=roster,
+            actual_score=float(row.actual_score),
             projection=replace(row.projection, player_id=f"r{roster}-{row.sleeper_id}"),
         )
         for row in original.player_games
@@ -107,3 +108,28 @@ def test_pairing_unrelated_weeks_is_rejected() -> None:
             HybridProjectionProvider(history()),
             scoring_policy=POLICY,
         )
+
+
+def test_archived_external_forecast_drives_the_candidate_full_replay(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from sleeper_manager.persistence.forecast_sqlite import SQLiteForecastArchiveRepository
+    from tests.sleeper_manager.projections.hybrid_support import CUTOFF
+    from tests.sleeper_manager.projections.test_hybrid_model import batch, forecast
+    from tests.sleeper_manager.projections.test_hybrid_provider import capture
+
+    weeks = (opening_week(1), opening_week(2))
+    archive = SQLiteForecastArchiveRepository(tmp_path / "forecasts.sqlite")
+    archive.initialize()
+    player = replace(forecast(batch().pools.pool("target").means).forecast, player_id="r1-p1")
+    archive.save_capture(capture("opening", CUTOFF, player=player))
+    built = build_hybrid_projection_surfaces(
+        weeks, HybridProjectionProvider(history(), archive=archive), scoring_policy=POLICY
+    )
+    assert any(
+        attempt.source == "external" and attempt.target.sleeper_player_id == "r1-p1"
+        for attempt in built.attempts
+    )
+    assert any(attempt.external_rejection == "stale_forecast_receipt" for attempt in built.attempts)
+    assert all(
+        run_full_advisor_replay(request(week, surface)).status == "success"
+        for week, surface in zip(weeks, built.surfaces, strict=True)
+    )

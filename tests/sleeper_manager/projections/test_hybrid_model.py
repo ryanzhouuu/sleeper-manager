@@ -223,3 +223,39 @@ def test_missing_minutes_cannot_be_presented_as_no_history() -> None:
         ),
     )
     assert batch(missing).project(TARGET).failure == "unverified_player_stats"
+
+
+def test_threshold_bonuses_and_fouls_come_from_each_joint_outcome() -> None:
+    data = history()
+    first = data.observations[0]
+    exceptional = replace(
+        first,
+        line=replace(
+            first.line, points=50, rebounds=20, assists=15, technical_fouls=1, flagrant_fouls=2
+        ),
+    )
+    policy = replace(
+        POLICY, bonus_40_points=7, bonus_50_points=11, bonus_15_assists=5, bonus_20_rebounds=3
+    )
+    prepared = HybridProjectionBatch(
+        replace(data, observations=(exceptional,) + data.observations[1:]),
+        cutoff=CUTOFF,
+        game_start=TIPOFF,
+        scoring_policy=policy,
+    )
+    result = prepared.project(TARGET)
+    assert result.projection is not None
+    assert any(score == 129.5 for score, _ in result.projection.distribution.weighted_observations)
+
+
+def test_blocked_internal_only_attempt_ignores_forecasts_and_retains_history_identity() -> None:
+    data = replace(history(), opportunities=())
+    prepared = batch(data, config=HybridProjectionConfig(use_external=False))
+    blocked = prepared.project(TARGET)
+    assert blocked == prepared.project(TARGET, forecast=forecast((100, 8, 4, 1, 0.5, 1, 1)))
+    changed = batch(
+        replace(data, dataset_version="new-evidence"),
+        config=HybridProjectionConfig(use_external=False),
+    ).project(TARGET)
+    assert blocked.failure == changed.failure
+    assert blocked.history_fingerprint != changed.history_fingerprint

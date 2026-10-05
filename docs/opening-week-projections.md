@@ -64,3 +64,50 @@ sidecars pass the existing strict artifact codec and can be supplied directly to
 `FullAdvisorReplayRequest`. The surface finalization policy describes the existing
 team-week replay clock; conditional history uses each supplied observation's own
 `finalized_at`. No approximation is silently inserted into hybrid history.
+
+Run paired local shadow generation with the existing roster artifacts and control
+surfaces in the same order:
+
+```bash
+uv run python -m sleeper_manager.workflows.hybrid_shadow_cli \
+  --history .local/hybrid/history.json \
+  --league .local/league.json \
+  --team-week .local/replay/own.json .local/replay/opponent.json \
+  --control-surface .local/replay/own-control.json .local/replay/opponent-control.json \
+  --forecast-archive .local/forecasts.db \
+  --output-dir .local/hybrid/shadow
+```
+
+Add `--internal-only` for the separately versioned internal comparison, or omit the
+archive for ordinary external-missing fallback. Optional `--availability` reads a
+JSON list of `{cutoff, player_id, report}` assignments; `report` contains `game_id`,
+`observed_at`, `status`, `observation`, and `source_version`. `player_id` here is the
+Sleeper ID. Each exact cutoff assignment is checked for game and 15-minute freshness;
+absent assignments use history-only participation.
+
+The command writes `roster-<id>-candidate.json` sidecars and `shadow.json`. Each pair
+retains the control snapshot or failure and full candidate diagnostics, including
+conditional stat centers and DNP probability. Score deltas require matching scoring
+policies and cutoff schedules. Candidate failures remain paired records with no
+score delta. Repeated identical inputs produce identical artifacts. Sidecars are
+immutable; use a new output directory when evidence or model configuration changes.
+
+History JSON has `dataset_version`, `observations`, and `opportunities`, matching
+the typed contracts above. IDs in this file are historical provider player IDs.
+Every observation contains game/finalization timestamps, participation, minutes,
+a `line` with the actual source stat values, `verified_fields`, and `source_version`.
+Unknown keys, naive timestamps, string-to-boolean coercions, duplicate records,
+and declared coverage for absent stat values are rejected. Opportunities must come
+from an independently enumerated census with resolved outcomes. The existing
+normalized box-score archive alone cannot supply a verified opportunity denominator
+or prove technical/flagrant coverage. Supply that evidence explicitly; gaps are
+reported instead of manufacturing a history export from normalized defaults.
+
+For full replay, load either generated candidate sidecar using
+`load_historical_projection_surface_artifact(path, team_week=week)`, then pass it
+as `FullAdvisorReplayRequest.projection_surface` to `run_full_advisor_replay` with
+the existing weekly and Lock-In policy configurations. Keep the original admitted
+team-week bundle: its diagnostic projections remain an admission requirement, while
+the explicit candidate surface supplies all planning projections. Run the control
+surface with the same policies for a comparison. This delivery changes no scheduled
+runtime provider, notification behavior, or production promotion setting.
