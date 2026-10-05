@@ -24,3 +24,12 @@ absolute floors of 1 point, 0.5 rebounds/assists, 0.15 steals/blocks, and 0.25
 turnovers/threes. `weight_support` requires ESS at least 20 and individual game mass
 at most 10%. These are concentration checks, not predictive calibration. Infeasible
 or nonconverged fits return failure evidence for internal fallback.
+
+`HybridParticipation` uses current and previous season census opportunities, including
+DNPs, rather than deriving a denominator from archived box scores. A player's rate
+shrinks toward other players with 20 opportunity equivalents. A fresh, matching game
+report uses a separate observation/status bucket: pooled bucket counts shrink toward
+the pooled history rate, and player bucket counts shrink toward that pooled bucket
+rate, each at strength 20. Missing reports and submitted-but-not-listed reports remain
+distinct. Missing bucket evidence uses history-only output; absent pooled opportunities
+block output. These estimates are provisional, not calibrated injury probabilities.
