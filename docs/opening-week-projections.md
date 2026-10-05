@@ -118,6 +118,39 @@ invalid counts, duplicate player-games, and conflicting NBA teams are rejected.
 Technical/flagrant coverage requires actual source fields; play-by-play counts are not
 automatically accepted as complete coverage.
 
+`build_hybrid_history` in `projections.hybrid_history_adapter` joins the parsed
+sources to reviewed `GameRosterCensus` records. Use `load_final_roster_evidence`
+to verify the retained reports and pass both its censuses and source fingerprints.
+Only players listed on a participating team enter the expected-opportunity count.
+Reviewed players absent from both teams do not become DNPs. A listed player needs
+an explicit played/DNP outcome and finalization evidence; unresolved joins remain gaps.
+
+Separately verified inactive evidence can supply `HistoryOutcome` records through
+`supplemental_dnp`. Bind each supplement's source version to its reviewed evidence
+hash. Played supplements, contradictory outcomes/teams, and duplicate evidence are
+rejected. Raw outcomes outside census coverage remain available for stat history,
+but never expand the participation denominator.
+
+```python
+built = build_hybrid_history(
+    (parsed,),
+    games=games,
+    resolved_player_ids=resolved_player_ids,
+    finalization=finalization,
+    censuses=reviewed.censuses,
+    census_sources=reviewed.source_fingerprints,
+    supplemental_dnp=verified_dnp_outcomes,
+)
+write_hybrid_history_build(Path(".local/hybrid/selected-history"), built)
+```
+
+The export writes `history.json` for the existing history loader and `coverage.json`
+with source identities, timing policies, declared census scope, counts, and per-record
+gaps. Identical reruns preserve bytes; conflicting existing outputs are rejected before
+either file is written. Dataset identity binds source values, outcomes, census/cohort
+evidence, gaps, and explicit finalization policy. Inspect coverage before claiming
+complete history: a scoped census is not a full-season participation inventory.
+
 For full replay, load either generated candidate sidecar using
 `load_historical_projection_surface_artifact(path, team_week=week)`, then pass it
 as `FullAdvisorReplayRequest.projection_surface` to `run_full_advisor_replay` with
