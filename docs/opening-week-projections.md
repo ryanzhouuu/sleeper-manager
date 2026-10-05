@@ -103,6 +103,21 @@ normalized box-score archive alone cannot supply a verified opportunity denomina
 or prove technical/flagrant coverage. Supply that evidence explicitly; gaps are
 reported instead of manufacturing a history export from normalized defaults.
 
+`parse_hybrid_history_rows` in `projections.hybrid_history_rows` converts raw
+SportsDataverse player-box rows for `season_type == 2`. Supply the validated NBA
+schedule, resolved provider player IDs, a source version binding the raw file hash,
+and explicit game-keyed `HistoryFinalization` evidence. Each timing record requires
+an aware timestamp and source/policy version. Missing timing remains a gap; game end,
+retrieval time, and the existing retrospective finalization bound are never substituted
+automatically. Callers using a retrospective bound must explicitly supply and label it.
+
+The converter returns played observations, explicit participation outcomes, and gaps.
+Absent or null stats remain unverified; present zero counts gain coverage. Missing
+minutes remain visible. DNPs supply only participation outcomes. Nonboolean participation,
+invalid counts, duplicate player-games, and conflicting NBA teams are rejected.
+Technical/flagrant coverage requires actual source fields; play-by-play counts are not
+automatically accepted as complete coverage.
+
 For full replay, load either generated candidate sidecar using
 `load_historical_projection_surface_artifact(path, team_week=week)`, then pass it
 as `FullAdvisorReplayRequest.projection_surface` to `run_full_advisor_replay` with
