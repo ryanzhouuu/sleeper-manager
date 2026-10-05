@@ -16,3 +16,11 @@ up to 20 other players with at least 10 verified played games, ordered by standa
 seven-stat profile distance and stable player identity. Five donors are required for
 pooling; sufficient own history can stand alone. All joint stat lines remain intact.
 Uncovered games are exposed through `excluded_games` rather than inferred as zero stats.
+
+`fit_joint_weights` minimizes relative-entropy departure from initial probabilities
+subject to core-stat mean intervals. It uses a dependency-free exponential-tilt dual
+solver with 200 coordinate iterations. Intervals allow 10% center mismatch with
+absolute floors of 1 point, 0.5 rebounds/assists, 0.15 steals/blocks, and 0.25
+turnovers/threes. `weight_support` requires ESS at least 20 and individual game mass
+at most 10%. These are concentration checks, not predictive calibration. Infeasible
+or nonconverged fits return failure evidence for internal fallback.
