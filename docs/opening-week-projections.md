@@ -48,3 +48,11 @@ participation evidence, excluded games, ESS, and maximum weight. Successful snap
 use the existing league scorer, including nonlinear bonuses and verified foul penalties,
 then mix explicit DNP mass at zero. Input fingerprints include visible history and census
 evidence; post-cutoff outcomes are excluded. Reuse batches outside scenario loops.
+
+`HybridProjectionProvider(history, archive=...)` reads the existing SQLite forecast
+archive by cutoff. `project_batch` accepts all targets on both rosters and optional
+availability keyed by `(sleeper_player_id, game_id)`. It prepares each cutoff/season
+once and loads one revision for all requested players. An empty archive uses internal
+fallback; archive corruption propagates as an error. Its single-target `project`
+method conforms to the existing live projection boundary, but active advice still
+uses the current provider. Shadow/replay consumers should retain the batch results.
