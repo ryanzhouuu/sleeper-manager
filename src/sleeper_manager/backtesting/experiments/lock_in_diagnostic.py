@@ -35,14 +35,19 @@ from sleeper_manager.backtesting.experiments.lock_in_diagnostic_report import (
 from sleeper_manager.backtesting.replay.engine import compare_team_week
 from sleeper_manager.backtesting.replay.inputs.models import HistoricalTeamWeekInput
 from sleeper_manager.backtesting.replay.state import ReplayState
-from sleeper_manager.domain.planning import PlanningQuality
+from sleeper_manager.domain.planning import PlanningQuality, PlanningReasonCode
 
 
-def admit_historical_team_week(team_week: HistoricalTeamWeekInput) -> AdmissionResult:
-    """Return structured admission checks for one persisted team-week artifact."""
+def admit_historical_team_week(
+    team_week: HistoricalTeamWeekInput, *, require_bundle_projections: bool = True
+) -> AdmissionResult:
+    """Check bundle facts; independent-surface callers must validate projections separately."""
 
     coverage = team_week.coverage
-    checks = (
+    critical_exclusions = DECISION_CRITICAL_EXCLUSIONS
+    if not require_bundle_projections:
+        critical_exclusions = critical_exclusions - {PlanningReasonCode.MISSING_PROJECTION}
+    checks: tuple[AdmissionCheck, ...] = (
         AdmissionCheck(
             "has_expected_player_games",
             coverage.expected_player_games > 0,
@@ -54,7 +59,10 @@ def admit_historical_team_week(team_week: HistoricalTeamWeekInput) -> AdmissionR
             == coverage.joined_player_games
             == coverage.resolved_identities
             == coverage.scored_player_games
-            == coverage.projected_player_games,
+            and (
+                not require_bundle_projections
+                or coverage.expected_player_games == coverage.projected_player_games
+            ),
             (
                 "expected="
                 f"{coverage.expected_player_games} joined={coverage.joined_player_games} "
@@ -73,7 +81,7 @@ def admit_historical_team_week(team_week: HistoricalTeamWeekInput) -> AdmissionR
         ),
         AdmissionCheck(
             "no_decision_critical_exclusions",
-            not any(item.reason in DECISION_CRITICAL_EXCLUSIONS for item in team_week.exclusions),
+            not any(item.reason in critical_exclusions for item in team_week.exclusions),
             f"exclusions={tuple(item.reason.value for item in team_week.exclusions)}",
         ),
         AdmissionCheck(
@@ -118,6 +126,8 @@ def admit_historical_team_week(team_week: HistoricalTeamWeekInput) -> AdmissionR
             ),
         ),
     )
+    if not require_bundle_projections:
+        checks = tuple(check for check in checks if check.code != "projections_present")
     return AdmissionResult(all(check.passed for check in checks), checks)
 
 

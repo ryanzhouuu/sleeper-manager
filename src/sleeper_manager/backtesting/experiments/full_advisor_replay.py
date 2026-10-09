@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime
 
+from sleeper_manager.backtesting.experiments.full_advisor_admission import (
+    validate_full_advisor_inputs,
+)
 from sleeper_manager.backtesting.experiments.full_advisor_replay_legality import (
     active_target_slots,
     automatic_final_scores,
@@ -18,9 +21,6 @@ from sleeper_manager.backtesting.experiments.full_advisor_replay_models import (
     ReplayLineupTrace,
     StartedPlayerGame,
 )
-from sleeper_manager.backtesting.experiments.lock_in_diagnostic import (
-    admit_historical_team_week,
-)
 from sleeper_manager.backtesting.experiments.lock_in_diagnostic_oracle import (
     oracle_feasibility_checks,
     oracle_from_planning_state,
@@ -33,7 +33,6 @@ from sleeper_manager.backtesting.replay.projection_surface import (
     full_advisor_events,
     full_advisor_planning_cutoffs,
     player_games_with_projection_surface,
-    validate_historical_projection_surface,
 )
 from sleeper_manager.backtesting.replay.runner import (
     ReplayEvent,
@@ -80,14 +79,6 @@ class _FullAdvisorExecutor:
         self.forecast_reads: list[ForecastRetrievalResult] = []
         self.lineup_traces: list[ReplayLineupTrace] = []
         self.policy = ScoreMaximizingLockInPolicy(request.lock_in_policy_config)
-        try:
-            validate_historical_projection_surface(
-                request.projection_surface,
-                team_week=self.team_week,
-                planning_lead_time=request.planning_lead_time,
-            )
-        except HistoricalProjectionSurfaceError as error:
-            raise FullAdvisorReplayError(f"projection_surface_invalid:{error}") from error
         self.events = full_advisor_events(self.team_week, request.planning_lead_time)
         self.planning_cutoffs = frozenset(
             full_advisor_planning_cutoffs(self.team_week, request.planning_lead_time)
@@ -415,10 +406,7 @@ def run_full_advisor_replay(
     """Run one admitted team-week, publishing forecast reads only on success."""
 
     request.forecast_reads.clear()
-    admission = admit_historical_team_week(request.team_week)
-    if not admission.admitted:
-        failed = ",".join(check.code for check in admission.checks if not check.passed)
-        raise FullAdvisorReplayError(f"admission_failed:{failed}")
+    validate_full_advisor_inputs(request)
     executor = _FullAdvisorExecutor(request)
     execution = executor.run()
     request.forecast_reads.extend(executor.forecast_reads)

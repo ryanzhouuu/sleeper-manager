@@ -163,8 +163,12 @@ complete history: a scoped census is not a full-season participation inventory.
 For full replay, load either generated candidate sidecar using
 `load_historical_projection_surface_artifact(path, team_week=week)`, then pass it
 as `FullAdvisorReplayRequest.projection_surface` to `run_full_advisor_replay` with
-the existing weekly and Lock-In policy configurations. Keep the original admitted
-team-week bundle: its diagnostic projections remain an admission requirement, while
-the explicit candidate surface supplies all planning projections. Run the control
-surface with the same policies for a comparison. This delivery changes no scheduled
+the existing weekly and Lock-In policy configurations. Keep the original
+team-week bundle: missing embedded diagnostic projections do not block full replay
+when the explicit candidate surface supplies every required cutoff projection.
+Full replay validates surface identity, timing, scoring, and completeness before
+execution; any failed entry blocks that candidate. Bundle coverage and unrelated
+input checks remain intact, and standalone diagnostics still require embedded
+projections. Run the control surface with the same policies for a comparison.
+This delivery changes no scheduled
 runtime provider, notification behavior, or production promotion setting.

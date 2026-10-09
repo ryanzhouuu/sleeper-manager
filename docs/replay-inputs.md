@@ -165,7 +165,14 @@ oracle. An active starter cannot disappear from a target lineup because moving t
 the bench would forfeit that player-game performance. Historical
 `observed_starter_ids` are not policy inputs on this path.
 
-The default reference configuration is `full-advisor-replay-v3` with
+Full replay checks non-projection bundle coverage and requires a successful supplied
+surface entry for every required cutoff/player/game key before execution begins.
+Missing embedded diagnostic projections and their missing-projection exclusions do
+not block an otherwise supported full replay. Original bundle coverage is preserved;
+standalone Lock-In diagnostics retain their embedded-projection requirements.
+Identity, outcome, membership, schedule, and unsupported-scoring failures still block.
+
+The default reference configuration is `full-advisor-replay-v4` with
 `weekly-planner-v2`: weekly planner and
 Lock-In policy each use 2,000 scenarios, seed 0, and tie tolerance 0.01; lineup moves use
 a ten-minute lead and the live balanced confidence threshold is 0.70. A run fails closed
