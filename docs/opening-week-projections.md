@@ -1,6 +1,6 @@
 # Opening-week projection candidate
 
-The version-one candidate is independent of the active `direct_baseline` advisor.
+The version-two candidate is independent of the active `direct_baseline` advisor.
 Its engineering defaults are explicit and model-versioned in `HybridProjectionConfig`.
 They are not fitted coefficients or a claim of predictive calibration.
 
@@ -16,6 +16,15 @@ up to 20 other players with at least 10 verified played games, ordered by standa
 seven-stat profile distance and stable player identity. Five donors are required for
 pooling; sufficient own history can stand alone. All joint stat lines remain intact.
 Uncovered games are exposed through `excluded_games` rather than inferred as zero stats.
+
+Version two limits sparse own-history concentration before fitting. With qualified
+donors, it uniformly reduces own-game weights only as much as needed to keep the
+largest normalized own-game weight at the configured 10% cap. Donor selection,
+relative own recency weights, and donor raw mass remain unchanged. Supported pools
+are unchanged; absent donor support still requires own history to pass all checks.
+The external fit and final internal distribution must still pass ESS and maximum
+weight checks. This prevents a first observed game from invalidating a supported
+donor-based projection without relaxing the concentration limit.
 
 `fit_joint_weights` minimizes relative-entropy departure from initial probabilities
 subject to core-stat mean intervals. It uses a dependency-free exponential-tilt dual

@@ -182,7 +182,14 @@ class HybridHistoryPools:
         )
         if len(donor_ids) < self.config.minimum_donors:
             donor_ids = ()
-        combined = list(own)
+        own_scale = 1.0
+        if own and donor_ids:
+            cap = self.config.maximum_game_weight
+            largest = max(weight for _, weight in own)
+            if largest > cap * (own_strength + self.config.donor_strength):
+                # Solve largest*a / (own_strength*a + donor_strength) <= cap.
+                own_scale = cap * self.config.donor_strength / (largest - cap * own_strength)
+        combined = [(row, weight * own_scale) for row, weight in own]
         for donor in donor_ids:
             rows = self.games[donor]
             mass = self.config.donor_strength / len(donor_ids)
