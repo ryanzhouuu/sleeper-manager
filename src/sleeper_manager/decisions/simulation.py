@@ -11,6 +11,7 @@ import random
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from itertools import accumulate
 
 from sleeper_manager.decisions.lineup import (
     AssignmentCandidate,
@@ -84,11 +85,19 @@ def generate_projection_scenarios(
                 f"Projection for {record.candidate_id} is not available at decision time"
             )
     randomizer = random.Random(seed)
+    samplers = tuple(
+        (record.candidate_id, *_prepare_projection(record.projection)) for record in records
+    )
     scenarios: list[Scenario] = []
     for _ in range(count):
         values = tuple(
-            (record.candidate_id, _sample_projection(record.projection, randomizer))
-            for record in records
+            (
+                candidate_id,
+                randomizer.choices(population, cum_weights=cumulative, k=1)[0]
+                if cumulative
+                else population[0],
+            )
+            for candidate_id, population, cumulative in samplers
         )
         scenarios.append(Scenario(values))
     return tuple(scenarios)
@@ -172,15 +181,17 @@ def rollout_scenario_assignments(
     return tuple(results)
 
 
-def _sample_projection(projection: ProjectionSnapshot, randomizer: random.Random) -> float:
-    """Sample empirical observations or fall back to the distribution mean."""
+def _prepare_projection(
+    projection: ProjectionSnapshot,
+) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """Reuse Random.choices' cumulative sums while preserving observation and draw order."""
 
     observations = projection.distribution.weighted_observations
     if not observations:
-        return projection.distribution.expected_value
+        return (projection.distribution.expected_value,), ()
     values = tuple(value for value, _ in observations)
-    weights = tuple(weight for _, weight in observations)
-    return randomizer.choices(values, weights=weights, k=1)[0]
+    cumulative = tuple(accumulate(weight for _, weight in observations))
+    return values, cumulative
 
 
 __all__ = (
