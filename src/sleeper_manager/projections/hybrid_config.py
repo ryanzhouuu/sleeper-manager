@@ -75,4 +75,4 @@ class HybridProjectionConfig:
     @property
     def model_version(self) -> str:
         payload = json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
-        return f"opening-week-hybrid-v3-{sha256(payload.encode()).hexdigest()[:12]}"
+        return f"opening-week-hybrid-v4-{sha256(payload.encode()).hexdigest()[:12]}"

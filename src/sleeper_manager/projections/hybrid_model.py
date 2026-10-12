@@ -164,7 +164,10 @@ class HybridProjectionBatch:
                     raise HybridProjectionError(failure)
             assert pool is not None
             participation = self.participation.estimate(
-                target.provider_player_id, game_id=target.game_id, availability=availability
+                target.provider_player_id,
+                game_id=target.game_id,
+                availability=availability,
+                donor_player_ids=pool.donor_ids,
             )
         except HybridProjectionError as error:
             return HybridProjectionResult(
@@ -215,13 +218,18 @@ class HybridProjectionBatch:
             ProjectionReason(
                 "provisional_participation",
                 f"played={played_probability:.6f}; own={participation.own_count}; "
-                f"pooled={participation.pooled_count}; bucket={participation.bucket}",
+                f"pooled={participation.pooled_count}; pool={participation.pool_kind}; "
+                f"players={participation.pooled_player_count}; bucket={participation.bucket}",
             ),
         ]
         if rejected:
             reasons.append(ProjectionReason("external_fallback", rejected))
         if participation.fallback:
             reasons.append(ProjectionReason("history_only_participation", participation.fallback))
+        if participation.pool_fallback:
+            reasons.append(
+                ProjectionReason("participation_pool_fallback", participation.pool_fallback)
+            )
         if forecast_evidence and forecast_evidence.newer_attempt_receipt_id:
             reasons.append(
                 ProjectionReason(

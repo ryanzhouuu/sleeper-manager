@@ -213,6 +213,44 @@ def test_dnp_mass_is_mixed_after_conditional_scoring_without_epsilon_samples() -
     )
 
 
+@pytest.mark.parametrize("external", [False, True])
+def test_projection_uses_its_stat_donors_for_participation(external: bool) -> None:
+    data = history()
+    bench = tuple(
+        ParticipationOpportunity(
+            "bench", str(i), CUTOFF - timedelta(days=1), CUTOFF - timedelta(hours=12), False, "v1"
+        )
+        for i in range(300)
+    )
+    prepared = batch(replace(data, opportunities=data.opportunities + bench))
+    read = forecast(prepared.pools.pool("target").means) if external else None
+    result = prepared.project(TARGET, forecast=read)
+    assert result.source == ("external" if external else "internal")
+    assert result.participation.pool_kind == "stat_profile_donors"
+    assert result.participation.pooled_player_count == len(result.donor_ids)
+    assert result.participation.pooled_count == 30 * len(result.donor_ids)
+    assert result.participation.probability == 1
+    assert not any(
+        reason.code == "participation_pool_fallback" for reason in result.projection.reasons
+    )
+
+
+def test_projection_records_sparse_participation_pool_fallback() -> None:
+    data = history()
+    data = replace(
+        data, opportunities=tuple(r for r in data.opportunities if r.player_id == "donor-0")
+    )
+    result = batch(data).project(TARGET)
+    assert result.projection is not None
+    assert result.participation.pool_kind == "global"
+    assert result.participation.pool_fallback == "insufficient_role_census"
+    assert any(
+        reason.code == "participation_pool_fallback"
+        and reason.message == "insufficient_role_census"
+        for reason in result.projection.reasons
+    )
+
+
 def test_no_history_identity_and_source_gaps_are_distinct() -> None:
     new = batch(history(include_player=False)).project(TARGET)
     assert new.history_kind == "no_history"

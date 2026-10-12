@@ -119,3 +119,35 @@ def test_future_finalization_and_old_seasons_cannot_change_estimate() -> None:
 def test_own_games_without_a_pool_are_an_explicit_gap() -> None:
     with pytest.raises(HybridProjectionError, match="missing_pooled_participation"):
         estimator((opportunity("p", 0, True),)).estimate("p", game_id="next")
+
+
+def test_role_prior_uses_verified_donor_opportunities_and_excludes_bench_pool() -> None:
+    donors = tuple(f"donor-{i}" for i in range(5))
+    rows = tuple(opportunity(player, i, True) for i, player in enumerate(donors))
+    rows += tuple(opportunity("bench", i, False) for i in range(30))
+    result = estimator(rows).estimate("new", game_id="next", donor_player_ids=donors)
+    assert result.probability == 1
+    assert result.pool_kind == "stat_profile_donors"
+    assert result.pooled_count == 5
+    assert result.pooled_player_count == 5
+    assert result.pool_fallback is None
+
+
+def test_sparse_donor_census_falls_back_explicitly_to_global_pool() -> None:
+    donors = tuple(f"donor-{i}" for i in range(5))
+    rows = tuple(opportunity(player, i, True) for i, player in enumerate(donors[:4]))
+    rows += (opportunity("bench", 0, False),)
+    result = estimator(rows).estimate("new", game_id="next", donor_player_ids=donors)
+    assert result.probability == pytest.approx(0.8)
+    assert result.pool_kind == "global"
+    assert result.pool_fallback == "insufficient_role_census"
+    assert result.pooled_count == 5
+
+
+def test_unfinalized_donor_rows_cannot_satisfy_role_coverage() -> None:
+    donors = tuple(f"donor-{i}" for i in range(5))
+    rows = tuple(opportunity(player, i, True) for i, player in enumerate(donors[:4]))
+    pending = replace(opportunity(donors[4], 9, False), finalized_at=CUTOFF + timedelta(seconds=1))
+    result = estimator(rows + (pending,)).estimate("new", game_id="next", donor_player_ids=donors)
+    assert result.pool_fallback == "insufficient_role_census"
+    assert result.pooled_player_count == 4

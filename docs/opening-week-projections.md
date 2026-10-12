@@ -42,8 +42,12 @@ or nonconverged fits return failure evidence for internal fallback.
 
 `HybridParticipation` uses current and previous season census opportunities, including
 DNPs, rather than deriving a denominator from archived box scores. A player's rate
-shrinks toward other players with 20 opportunity equivalents. A fresh, matching game
-report uses a separate observation/status bucket: pooled bucket counts shrink toward
+shrinks toward the selected stat-profile donors with 20 opportunity equivalents.
+At least five distinct donors must have cutoff-visible census evidence; otherwise
+the estimate falls back to all other census players and records the coverage gap.
+All verified evidence remains in history, and the player's own census is unchanged.
+The trace records the selected pool, opportunity count, and covered player count.
+A fresh, matching game report uses a separate observation/status bucket: pooled counts shrink toward
 the pooled history rate, and player bucket counts shrink toward that pooled bucket
 rate, each at strength 20. Missing reports and submitted-but-not-listed reports remain
 distinct. Missing bucket evidence uses history-only output; absent pooled opportunities

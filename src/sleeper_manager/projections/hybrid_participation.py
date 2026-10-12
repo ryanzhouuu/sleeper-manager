@@ -23,6 +23,9 @@ class ParticipationEstimate:
     bucket: str | None
     fallback: str | None
     availability: GameAvailability | None
+    pool_kind: str = "global"
+    pool_fallback: str | None = None
+    pooled_player_count: int = 0
 
 
 class HybridParticipation:
@@ -60,12 +63,23 @@ class HybridParticipation:
         *,
         game_id: str,
         availability: GameAvailability | None = None,
+        donor_player_ids: tuple[str, ...] = (),
     ) -> ParticipationEstimate:
-        """Shrink player counts toward other players; absent pooled evidence blocks output."""
+        """Use census-covered stat donors, with explicit global fallback for sparse coverage."""
         own = tuple(row for row in self.opportunities if row.player_id == player_id)
         pooled = tuple(row for row in self.opportunities if row.player_id != player_id)
         if not pooled:
             raise HybridProjectionError("missing_pooled_participation_opportunities")
+        donor_ids = frozenset(donor_player_ids) - {player_id}
+        role_pool = tuple(row for row in pooled if row.player_id in donor_ids)
+        role_players = {row.player_id for row in role_pool}
+        pool_kind = "global"
+        pool_fallback: str | None = (
+            "missing_role_donors" if not donor_ids else "insufficient_role_census"
+        )
+        if len(role_players) >= self.config.minimum_donors:
+            pooled = role_pool
+            pool_kind, pool_fallback = "stat_profile_donors", None
         pooled_rate = sum(row.did_play for row in pooled) / len(pooled)
         strength = self.config.participation_prior_strength
         history_probability = (sum(row.did_play for row in own) + strength * pooled_rate) / (
@@ -101,6 +115,9 @@ class HybridParticipation:
             bucket=bucket,
             fallback=fallback,
             availability=usable,
+            pool_kind=pool_kind,
+            pool_fallback=pool_fallback,
+            pooled_player_count=len({row.player_id for row in pooled}),
         )
 
     def _availability_gap(self, availability: GameAvailability | None, game_id: str) -> str | None:
