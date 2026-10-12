@@ -74,6 +74,15 @@ sidecars pass the existing strict artifact codec and can be supplied directly to
 team-week replay clock; conditional history uses each supplied observation's own
 `finalized_at`. No approximation is silently inserted into hybrid history.
 
+`backtesting.replay.final_roster_text.parse_final_roster_text` extracts explicit
+named minute rows, DNP/DND/NWT rows, and inactive names from official final-report
+layout text. It does not resolve provider identities or infer DNPs from absence or
+zero minutes. Reviewers must bind each unique identity, team side, and outcome to
+the retained PDF hash before adding census evidence. Unsupported layouts and
+ambiguous inactive names remain coverage gaps; a lone inactive block has no inferred
+team side. Expanding the census changes dataset identity, independently of model
+coefficient changes.
+
 Run paired local shadow generation with the existing roster artifacts and control
 surfaces in the same order:
 
