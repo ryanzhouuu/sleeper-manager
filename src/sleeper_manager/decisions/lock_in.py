@@ -9,13 +9,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sleeper_manager.decisions.lineup import AssignmentCandidate
+from sleeper_manager.decisions._lock_in_continuations import lock_in_continuations
 from sleeper_manager.decisions.simulation import (
-    Scenario,
     ScenarioInput,
     generate_projection_scenarios,
-    rollout_scenario_assignments,
-    rollout_scenario_terminal_score,
     stable_scenario_seed,
 )
 from sleeper_manager.domain.eligibility import eligible_for_slot
@@ -23,7 +20,6 @@ from sleeper_manager.domain.lock_in import LockInDecision, LockInDecisionKind
 from sleeper_manager.domain.planning import (
     GameOpportunity,
     PlanningGameStatus,
-    StarterSlot,
     TeamWeekState,
 )
 
@@ -142,45 +138,19 @@ class ScoreMaximizingLockInPolicy:
             count=self.config.scenario_count,
             seed=seed,
         )
-        pass_value = locked_score + _remaining_terminal_value(
+        continuations = lock_in_continuations(
             inputs,
             open_slots,
             scenarios=scenarios,
+            player_id=completed_game.sleeper_player_id,
+            completed_score=completed_score,
+            legal_slot_indices=tuple(slot.index for slot in legal_open_slots),
+            locked_score=locked_score,
         )
-        pass_scores = _scenario_terminal_scores(
-            inputs,
-            open_slots,
-            scenarios=scenarios,
-            fixed_score=locked_score,
-        )
+        pass_value, pass_scores = continuations.pass_value, continuations.pass_scores
         best_lock: tuple[float, int, float, tuple[float, ...]] | None = None
-        for slot in legal_open_slots:
-            fixed = AssignmentCandidate(
-                candidate_id=(
-                    f"locked:{completed_game.sleeper_player_id}:{completed_game.game_id}"
-                ),
-                player_id=completed_game.sleeper_player_id,
-                score=completed_score,
-                eligible_positions=completed_game.eligible_positions,
-                game_id=completed_game.game_id,
-                eligible_slot_indices=(slot.index,),
-            )
-            remaining_slots = tuple(item for item in open_slots if item.index != slot.index)
-            lock_value = locked_score + rollout_scenario_terminal_score(
-                fixed_assignments=(fixed,),
-                remaining_inputs=inputs,
-                open_slots=tuple(item.position for item in remaining_slots),
-                slot_indices=tuple(item.index for item in remaining_slots),
-                scenarios=scenarios,
-            )
-            lock_scores = _scenario_terminal_scores(
-                inputs,
-                remaining_slots,
-                scenarios=scenarios,
-                fixed_assignments=(fixed,),
-                fixed_score=locked_score + completed_score,
-            )
-            candidate = (lock_value, slot.index, lock_value - pass_value, lock_scores)
+        for slot_index, lock_value, lock_scores in continuations.lock_options:
+            candidate = (lock_value, slot_index, lock_value - pass_value, lock_scores)
             if best_lock is None or candidate[0] > best_lock[0] + 1e-9:
                 best_lock = candidate
 
@@ -295,43 +265,6 @@ def _scenario_input(opportunity: GameOpportunity) -> ScenarioInput:
         projection=opportunity.projection,
         eligible_slot_indices=opportunity.eligible_slot_indices,
     )
-
-
-def _remaining_terminal_value(
-    inputs: tuple[ScenarioInput, ...],
-    open_slots: tuple[StarterSlot, ...],
-    *,
-    scenarios: tuple[Scenario, ...],
-) -> float:
-    """Evaluate the unfixed remainder without duplicating accepted fixed scores."""
-
-    return rollout_scenario_terminal_score(
-        fixed_assignments=(),
-        remaining_inputs=inputs,
-        open_slots=tuple(slot.position for slot in open_slots),
-        slot_indices=tuple(slot.index for slot in open_slots),
-        scenarios=scenarios,
-    )
-
-
-def _scenario_terminal_scores(
-    inputs: tuple[ScenarioInput, ...],
-    open_slots: tuple[StarterSlot, ...],
-    *,
-    scenarios: tuple[Scenario, ...],
-    fixed_score: float,
-    fixed_assignments: tuple[AssignmentCandidate, ...] = (),
-) -> tuple[float, ...]:
-    """Return one complete terminal score for each deterministic scenario."""
-
-    results = rollout_scenario_assignments(
-        fixed_assignments=fixed_assignments,
-        remaining_inputs=inputs,
-        open_slots=tuple(slot.position for slot in open_slots),
-        slot_indices=tuple(slot.index for slot in open_slots),
-        scenarios=scenarios,
-    )
-    return tuple(fixed_score + result.score for result in results)
 
 
 def _terminal_pass(
