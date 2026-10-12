@@ -56,7 +56,7 @@ def seasonal_games(
     season: int,
     config: HybridProjectionConfig,
 ) -> tuple[WeightedGame, ...]:
-    """Cap each prior season's total influence without erasing it over the offseason."""
+    """Preserve opening-night priors, then fade their mass as verified current games accrue."""
     counts: dict[int, int] = defaultdict(int)
     for row in rows:
         counts[nba_season_start_year(row.game_start)] += 1
@@ -69,7 +69,7 @@ def seasonal_games(
         elif age in (1, 2):
             strength = config.previous_season_strength if age == 1 else config.older_season_strength
             count = counts[season - age]
-            weight = min(strength, count) / count
+            weight = min(strength, count) / count * strength / (strength + counts[season])
         else:
             continue
         if weight > 0:

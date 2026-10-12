@@ -10,8 +10,14 @@ from source coverage checks: normalized zero values do not establish field prese
 Unresolved identities or outcomes are gaps, not automatic rookie classifications or DNPs.
 
 `HybridHistoryPools` prepares profiles for a cutoff, target season, and scoring policy.
-It uses 14-day current-season recency, caps previous-season influence at six games
-and older-season influence at three, and adds a five-game donor prior. Donors are
+It uses 14-day current-season recency, caps opening-night previous-season influence
+at six games and older-season influence at three, and adds a five-game donor prior.
+The v3 model fades each old-season weight by `strength / (strength + current_games)`
+as verified positive-minute, stat-covered current-season games become available.
+For a full six-game prior, 24 such current games reduce prior mass to 1.2. Current
+recency weights remain unchanged; old outcomes retain positive support. This avoids
+a constant old-role prior dominating a current-season weight sum that saturates
+under recency decay. Donors are
 up to 20 other players with at least 10 verified played games, ordered by standardized
 seven-stat profile distance and stable player identity. Five donors are required for
 pooling; sufficient own history can stand alone. All joint stat lines remain intact.
