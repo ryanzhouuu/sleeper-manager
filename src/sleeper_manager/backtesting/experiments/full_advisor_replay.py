@@ -253,6 +253,9 @@ class _FullAdvisorExecutor:
                 replay_state=self.state,
                 team_week=self.team_week,
             )
+            self.active = {
+                player: slot for slot, player in self.lineup.items() if player in self.active
+            }
         self.state = self.state.apply_decision(candidate, decision)
         self._trace_lineup(event)
 

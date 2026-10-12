@@ -61,16 +61,21 @@ def realign_for_lock(
 ) -> dict[int, str]:
     """Place a completed starter while preserving active and previously fixed slots."""
 
-    players = tuple(sorted(set(lineup.values())))
+    players = tuple(sorted(set(lineup.values()) | {player_id} | set(active)))
     positions = _positions_by_player(replay_state, team_week)
     candidates = tuple(
-        AssignmentCandidate(f"lineup:{item}", item, 1.0, positions[item]) for item in players
+        AssignmentCandidate(
+            f"lineup:{item}",
+            item,
+            float(len(players) + 1 if item in active else 1),
+            positions[item],
+        )
+        for item in players
     )
     required = {(target_slot, f"lineup:{player_id}")}
     required.update(
         (fixed.slot_index, f"lineup:{fixed.player_id}") for fixed in replay_state.locked_slots
     )
-    required.update((slot, f"lineup:{item}") for item, slot in active.items())
     try:
         assignment = maximum_weight_assignment(
             candidates,
@@ -79,11 +84,14 @@ def realign_for_lock(
         )
     except ValueError as error:
         raise FullAdvisorReplayError(f"lock_lineup_infeasible:{error}") from error
-    return {
+    result = {
         item.slot_index: item.player_id
         for item in assignment.assignments
         if item.player_id is not None
     }
+    if not set(active) <= set(result.values()):
+        raise FullAdvisorReplayError("lock_lineup_infeasible:active_player_omitted")
+    return result
 
 
 def automatic_final_scores(

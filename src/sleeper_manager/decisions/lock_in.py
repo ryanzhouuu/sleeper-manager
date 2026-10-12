@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from sleeper_manager.decisions._lock_in_continuations import lock_in_continuations
+from sleeper_manager.decisions._lock_in_placements import feasible_lock_slot_indices
 from sleeper_manager.decisions.simulation import (
     ScenarioInput,
     generate_projection_scenarios,
@@ -105,11 +106,13 @@ class ScoreMaximizingLockInPolicy:
         open_slots = tuple(
             slot for slot in state.starter_slots if slot.index in state.open_slot_indices
         )
+        feasible_indices = feasible_lock_slot_indices(state, completed_game)
         legal_open_slots = tuple(
             slot
             for slot in open_slots
             if slot.index in completed_game.eligible_slot_indices
             and eligible_for_slot(completed_game.eligible_positions, slot.position)
+            and slot.index in feasible_indices
         )
         if not legal_open_slots:
             return LockInComparison(

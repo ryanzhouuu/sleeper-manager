@@ -172,7 +172,7 @@ not block an otherwise supported full replay. Original bundle coverage is preser
 standalone Lock-In diagnostics retain their embedded-projection requirements.
 Identity, outcome, membership, schedule, and unsupported-scoring failures still block.
 
-The default reference configuration is `full-advisor-replay-v4` with
+The default reference configuration is `full-advisor-replay-v5` with
 `weekly-planner-v3`: weekly planner and
 Lock-In policy each use 2,000 scenarios, seed 0, and tie tolerance 0.01; lineup moves use
 a ten-minute lead and the live balanced confidence threshold is 0.70. A run fails closed
@@ -194,3 +194,8 @@ replays. The bounded stage resolves the current batch together before the modele
 future. It does not model overlapping finalizations, relocation of accepted scores,
 repeated Waits, or later reforecasting. Future assignment value remains a hindsight
 approximation, and the separate perfect-information bound remains an upper bound.
+
+Lock placement can restore a previously started player from the current bench and
+realign active starters to other eligible slots. Every active player and fixed slot
+must survive the assignment. Optional Lock evaluations wait when no placement can
+preserve all active starters; they retry when later replay events release capacity.

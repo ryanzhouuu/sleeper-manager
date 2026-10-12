@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from math import isfinite
 
+from sleeper_manager.decisions._lock_in_placements import feasible_lock_slot_indices
 from sleeper_manager.decisions.lock_in import (
     LockInPolicyError,
     ScoreMaximizingLockInPolicy,
@@ -87,6 +88,16 @@ def evaluate_live_lock_in(
             manager_policy_version=manager_policy_version,
             kind=LockInEvaluationKind.AUTOMATIC_FINAL,
             reason="final_eligible_game",
+            trace=trace,
+        )
+    if not feasible_lock_slot_indices(state, completed_game):
+        return _deferred_evaluation(
+            state,
+            completed_game,
+            deadline=deadline,
+            manager_policy_version=manager_policy_version,
+            kind=LockInEvaluationKind.WAIT,
+            reason="active_starters_block_lock",
             trace=trace,
         )
     try:
