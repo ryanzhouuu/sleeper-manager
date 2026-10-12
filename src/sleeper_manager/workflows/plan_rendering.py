@@ -338,6 +338,8 @@ def serialize_weekly_plan_trace(
             "seed": plan.distribution_summary.seed,
             "approximation": plan.distribution_summary.approximation,
             "perfect_information_bound": plan.distribution_summary.perfect_information_bound,
+            "postgame_scenario_count": plan.distribution_summary.postgame_scenario_count,
+            "minimum_lock_in_confidence": plan.distribution_summary.minimum_lock_in_confidence,
         }
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 

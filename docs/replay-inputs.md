@@ -173,10 +173,24 @@ standalone Lock-In diagnostics retain their embedded-projection requirements.
 Identity, outcome, membership, schedule, and unsupported-scoring failures still block.
 
 The default reference configuration is `full-advisor-replay-v4` with
-`weekly-planner-v2`: weekly planner and
+`weekly-planner-v3`: weekly planner and
 Lock-In policy each use 2,000 scenarios, seed 0, and tie tolerance 0.01; lineup moves use
 a ten-minute lead and the live balanced confidence threshold is 0.70. A run fails closed
 on blocked point-in-time projections, omitted or position-ineligible active starters,
 infeasible Lock placement, automatic-final cardinality gaps, and oracle deadline
 violations. Callers running a sample must retain those failures and bind outputs to
 immutable input hashes; a raised error is not permission to drop the team-week.
+
+The planner uses `postgame_recourse_rollout`: it samples current scores, then values
+keeping or passing them before the later assignment continuation. Joint retained
+subsets use their current placements as lock slots. Optional locks must improve the
+inner expected value and meet the live confidence threshold against dropping that
+player from the subset. Final eligible games omit that optional confidence gate.
+The postgame stage uses 128 independent future scenarios by default
+(`postgame_scenario_count`), with seed `outer_seed XOR 0x504F5354`; it cannot inspect
+the outer future realization being scored. `minimum_lock_in_confidence` defaults to
+0.70 and is replaced with the manager's live threshold in scheduled runs and full
+replays. The bounded stage resolves the current batch together before the modeled
+future. It does not model overlapping finalizations, relocation of accepted scores,
+repeated Waits, or later reforecasting. Future assignment value remains a hindsight
+approximation, and the separate perfect-information bound remains an upper bound.

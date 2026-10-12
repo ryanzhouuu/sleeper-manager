@@ -166,7 +166,7 @@ def test_equal_terminal_values_prefer_observed_placement_and_return_alternative(
 
     decision = score_weekly_options(state, config=WeeklyPlanPolicyConfig(scenario_count=5, seed=7))
 
-    assert decision.approximation is TerminalValueApproximation.COMPLETE_ASSIGNMENT_ROLLOUT
+    assert decision.approximation is TerminalValueApproximation.POSTGAME_RECOURSE_ROLLOUT
     assert _assignment_players(decision) == ("p1",)
     assert decision.alternative is not None
     assert tuple(item.player_id for item in decision.alternative.assignments) == ("p2",)
@@ -251,7 +251,7 @@ def test_terminal_value_bound_holds_when_current_slot_conflicts_with_future_play
             evaluation.expected_terminal_value,
         )
         for evaluation in decision.evaluations
-    } == {("p1", -20, 10), ("p2", -20, 10)}
+    } == {("p1", 0, 30), ("p2", 0, 30)}
 
 
 def test_complete_assignment_scoring_charges_joint_continuation_conflict_once() -> None:

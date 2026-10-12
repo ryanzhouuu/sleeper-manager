@@ -117,7 +117,10 @@ class _FullAdvisorExecutor:
         plan = build_weekly_plan(
             state,
             lead_time=self.request.planning_lead_time,
-            policy=self.request.weekly_policy_config,
+            policy=replace(
+                self.request.weekly_policy_config,
+                minimum_lock_in_confidence=self.request.minimum_confidence,
+            ),
         )
         self.plans.append(plan)
         if plan.status is PlanStatus.BLOCKED:

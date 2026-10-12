@@ -55,6 +55,11 @@ def test_full_replay_builds_lineups_and_scores_a_legal_week() -> None:
     assert first.to_dict() == second.to_dict()
     assert first.status == "success"
     assert first.plans
+    assert all(
+        plan.distribution_summary.minimum_lock_in_confidence == 0
+        for plan in first.plans
+        if plan.distribution_summary is not None
+    )
     assert first.lineup_traces
     assert first.started_player_games
     assert first.model_result.realized_score <= first.oracle_result.realized_score

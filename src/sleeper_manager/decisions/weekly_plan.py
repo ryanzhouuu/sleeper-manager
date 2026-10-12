@@ -139,6 +139,8 @@ def build_weekly_plan(
             seed=decision.seed,
             approximation=decision.approximation.value,
             perfect_information_bound=decision.perfect_information_bound,
+            postgame_scenario_count=policy_config.postgame_scenario_count,
+            minimum_lock_in_confidence=policy_config.minimum_lock_in_confidence,
         ),
         fixed_slots=tuple(sorted(state.fixed_slots, key=lambda fixed: fixed.slot_index)),
         passed_opportunities=tuple(sorted(state.passed_opportunities, key=_passed_sort_key)),

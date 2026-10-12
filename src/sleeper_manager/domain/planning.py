@@ -330,6 +330,8 @@ class PlanDistributionSummary:
     seed: int
     approximation: str
     perfect_information_bound: float
+    postgame_scenario_count: int | None = None
+    minimum_lock_in_confidence: float | None = None
 
     def __post_init__(self) -> None:
         if self.scenario_count <= 0:
@@ -337,6 +339,11 @@ class PlanDistributionSummary:
         _require_text(self.approximation, "Plan approximation")
         if not isfinite(self.perfect_information_bound):
             raise PlanningStateError("Plan bounds must be finite")
+        if self.postgame_scenario_count is not None and self.postgame_scenario_count <= 0:
+            raise PlanningStateError("Postgame scenario counts must be positive")
+        confidence = self.minimum_lock_in_confidence
+        if confidence is not None and (not isfinite(confidence) or not 0 <= confidence <= 1):
+            raise PlanningStateError("Postgame confidence must be between zero and one")
 
 
 @dataclass(frozen=True, slots=True)
@@ -685,6 +692,8 @@ class WeeklyPlan:
                 self.distribution_summary.seed,
                 self.distribution_summary.approximation,
                 repr(round(self.distribution_summary.perfect_information_bound, 6)),
+                self.distribution_summary.postgame_scenario_count,
+                self.distribution_summary.minimum_lock_in_confidence,
             ),
             tuple(
                 passed.player_id

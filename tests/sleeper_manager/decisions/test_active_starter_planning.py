@@ -223,7 +223,7 @@ def test_locked_player_is_not_reintroduced_as_an_active_candidate() -> None:
 def test_equivalent_slot_variants_reuse_continuation_and_tie_evaluations(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Use one current and perfect-information table per scenario."""
+    """Share current, postgame, and bound tables across concrete placements."""
 
     state = _state(
         slots=(StarterSlot(0, "G"), StarterSlot(1, "UTIL"), StarterSlot(2, "UTIL")),
@@ -291,7 +291,7 @@ def test_equivalent_slot_variants_reuse_continuation_and_tie_evaluations(
 
     score_weekly_options(state, config=WeeklyPlanPolicyConfig(scenario_count=5))
 
-    assert calls == 10
+    assert calls == 10 + 128
     assert tie_calls == 21
     assert comparison_calls == 57
 

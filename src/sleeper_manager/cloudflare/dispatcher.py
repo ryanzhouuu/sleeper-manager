@@ -269,7 +269,10 @@ async def _run_planning(
         open_sleeper_url=open_sleeper_url,
         player_names=assembly.player_names,
         local_timezone=assembly.local_timezone,
-        policy=plan_policy,
+        policy=replace(
+            plan_policy or WeeklyPlanPolicyConfig(),
+            minimum_lock_in_confidence=policy.manager_intent.minimum_confidence,
+        ),
         clock=clock,
     )
     if _delivery_failed(result):

@@ -12,7 +12,7 @@ from math import isfinite
 
 from sleeper_manager.decisions.lineup import SlotAssignment
 
-WEEKLY_PLANNER_VERSION = "weekly-planner-v2"
+WEEKLY_PLANNER_VERSION = "weekly-planner-v3"
 DEFAULT_MOVE_LEAD_TIME = timedelta(minutes=10)
 
 
@@ -25,6 +25,7 @@ class TerminalValueApproximation(StrEnum):
 
     COMMON_BASELINE_MARGINAL = "common_baseline_marginal"
     COMPLETE_ASSIGNMENT_ROLLOUT = "complete_assignment_rollout"
+    POSTGAME_RECOURSE_ROLLOUT = "postgame_recourse_rollout"
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,11 +35,20 @@ class WeeklyPlanPolicyConfig:
     scenario_count: int = 2000
     seed: int = 0
     tie_tolerance: float = 0.01
+    postgame_scenario_count: int = 128
+    minimum_lock_in_confidence: float = 0.70
 
     def __post_init__(self) -> None:
         """Reject invalid sampling counts and comparison tolerances."""
         if self.scenario_count <= 0:
             raise ValueError("Weekly plan scenario count must be positive")
+        if self.postgame_scenario_count <= 0:
+            raise ValueError("Postgame scenario count must be positive")
+        if (
+            not isfinite(self.minimum_lock_in_confidence)
+            or not 0 <= self.minimum_lock_in_confidence <= 1
+        ):
+            raise ValueError("Postgame Lock-In confidence must be between zero and one")
         if not isfinite(self.tie_tolerance) or self.tie_tolerance < 0:
             raise ValueError("Weekly plan tie tolerance must be finite and non-negative")
 
