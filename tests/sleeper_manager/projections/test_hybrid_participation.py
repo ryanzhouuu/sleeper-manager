@@ -151,3 +151,56 @@ def test_unfinalized_donor_rows_cannot_satisfy_role_coverage() -> None:
     result = estimator(rows + (pending,)).estimate("new", game_id="next", donor_player_ids=donors)
     assert result.pool_fallback == "insufficient_role_census"
     assert result.pooled_player_count == 4
+
+
+def test_confirmed_game_absence_overrides_missing_status_history() -> None:
+    report = GameAvailability(
+        "next",
+        CUTOFF,
+        AvailabilityStatus.OUT,
+        AvailabilityObservation.REPORTED,
+        "official-report-sha256",
+        confirmed_absence=True,
+    )
+    result = estimator((opportunity("other", 0, True),)).estimate(
+        "p", game_id="next", availability=report
+    )
+    assert result.history_probability == 1
+    assert result.probability == 0
+    assert result.pooled_bucket_count == 0
+    assert result.fallback is None
+    assert result.availability == report
+
+
+@pytest.mark.parametrize("gap", ["other", "future", "stale"])
+def test_inapplicable_confirmed_absence_does_not_zero_participation(gap: str) -> None:
+    report = GameAvailability(
+        "other" if gap == "other" else "next",
+        CUTOFF + timedelta(seconds=1)
+        if gap == "future"
+        else CUTOFF - timedelta(minutes=16)
+        if gap == "stale"
+        else CUTOFF,
+        AvailabilityStatus.OUT,
+        AvailabilityObservation.REPORTED,
+        "official-v1",
+        confirmed_absence=True,
+    )
+    result = estimator((opportunity("other", 0, True),)).estimate(
+        "p", game_id="next", availability=report
+    )
+    assert result.probability == 1
+    assert result.availability is None
+
+
+@pytest.mark.parametrize("status", [AvailabilityStatus.QUESTIONABLE, AvailabilityStatus.AVAILABLE])
+def test_only_reported_out_can_be_a_confirmed_absence(status: AvailabilityStatus) -> None:
+    with pytest.raises(HybridProjectionError, match="invalid_confirmed_absence"):
+        GameAvailability(
+            "next",
+            CUTOFF,
+            status,
+            AvailabilityObservation.REPORTED,
+            "official-v1",
+            confirmed_absence=True,
+        )

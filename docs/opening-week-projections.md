@@ -53,6 +53,12 @@ rate, each at strength 20. Missing reports and submitted-but-not-listed reports 
 distinct. Missing bucket evidence uses history-only output; absent pooled opportunities
 block output. These estimates are provisional, not calibrated injury probabilities.
 
+Version five distinguishes explicitly confirmed game absences from generic injury
+designations. A fresh, matching `GameAvailability(confirmed_absence=True)` requires
+a reported `out` status and forces participation to zero even without status-tagged
+history. Generic `out` records retain the provisional bucket estimator. Wrong-game,
+future, and stale confirmations cannot override historical participation.
+
 `HybridProjectionBatch` prepares one history/cutoff/season/scoring-policy combination,
 then projects multiple `LiveProjectionTarget`s. Provider identity must be explicitly
 resolved. External acceptance requires the supported Sleeper regular-season adapter,

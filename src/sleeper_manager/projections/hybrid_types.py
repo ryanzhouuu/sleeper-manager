@@ -79,11 +79,20 @@ class GameAvailability:
     status: AvailabilityStatus
     observation: AvailabilityObservation
     source_version: str
+    confirmed_absence: bool = False
 
     def __post_init__(self) -> None:
         require_aware(self.observed_at)
         if not self.game_id.strip() or not self.source_version.strip():
             raise HybridProjectionError("missing_availability_identity")
+        if not isinstance(self.confirmed_absence, bool) or (
+            self.confirmed_absence
+            and (
+                self.status is not AvailabilityStatus.OUT
+                or self.observation is not AvailabilityObservation.REPORTED
+            )
+        ):
+            raise HybridProjectionError("invalid_confirmed_absence")
 
     @property
     def bucket(self) -> str:

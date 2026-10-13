@@ -96,7 +96,9 @@ class HybridParticipation:
         )
         probability = history_probability
         if bucket is not None:
-            if not pooled_bucket:
+            if usable is not None and usable.confirmed_absence:
+                probability = 0.0
+            elif not pooled_bucket:
                 fallback = "missing_pooled_status_opportunities"
             else:
                 bucket_prior = (
