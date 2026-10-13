@@ -65,6 +65,10 @@ fields remain visible. A new history version requires a freshly prepared index.
 Runtime artifacts use bounded deterministic compression and content hashes. Typed
 index, manifest, and player-partition decoders reject unknown fields, contradictory
 counts, and declared stat coverage without actual values.
+`HybridRuntimeProjectionProvider` loads one prepared index and one async external
+revision for a batch. It fetches only the target and the union of internal/external
+donor selections, with at most six concurrent reads, then reuses those outcomes
+across that player's games. Full attempt diagnostics remain available in `results`.
 
 Version five distinguishes explicitly confirmed game absences from generic injury
 designations. A fresh, matching `GameAvailability(confirmed_absence=True)` requires

@@ -197,7 +197,7 @@ class HybridProjectionBatch:
                 failure=error.reason,
                 external_rejection=rejected,
                 forecast=forecast,
-                excluded_games=tuple(self.pools.excluded_games),
+                excluded_games=self.pools.excluded_game_keys,
                 history_fingerprint=self.history_fingerprint,
             )
         played_probability = participation.probability
@@ -285,6 +285,6 @@ class HybridProjectionBatch:
                 (row.player_id, row.game_id, w)
                 for row, w in zip(pool.samples, weights, strict=True)
             ),
-            excluded_games=tuple(self.pools.excluded_games),
+            excluded_games=self.pools.excluded_game_keys,
             history_fingerprint=self.history_fingerprint,
         )

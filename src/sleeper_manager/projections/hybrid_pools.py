@@ -134,6 +134,11 @@ class HybridHistoryPools:
         )
         self.scales = self.population.scales
 
+    @property
+    def excluded_game_keys(self) -> tuple[tuple[str, str], ...]:
+        """Expose immutable diagnostics; indexed preparation can share an existing tuple."""
+        return tuple(self.excluded_games)
+
     def pool(self, player_id: str, center: tuple[float, ...] | None = None) -> JointStatPool:
         """External lookup uses its center; internal lookup independently uses historical priors."""
         own = self.games.get(player_id, ())

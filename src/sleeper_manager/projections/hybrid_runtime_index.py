@@ -186,6 +186,7 @@ class IndexedHistoryPools(HybridHistoryPools):
         self.config, self.season, self.population = config, index.season, population
         self.incomplete_players = set(index.incomplete_players)
         self.excluded_games = list(index.excluded_games)
+        self._index_exclusions = index.excluded_games
         self.scales = population.scales
         self.profiles = {player: row.means for player, row in population.profiles.items()}
         required = set(STAT_FIELDS)
@@ -217,3 +218,11 @@ class IndexedHistoryPools(HybridHistoryPools):
             )
             for player, rows in observations.items()
         }
+        for player, rows in self.games.items():
+            expected = population.profiles.get(player)
+            if expected is not None and len(rows) != expected.count:
+                raise HybridProjectionError("runtime_partition_profile_mismatch")
+
+    @property
+    def excluded_game_keys(self) -> tuple[tuple[str, str], ...]:
+        return self._index_exclusions
