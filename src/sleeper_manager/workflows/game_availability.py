@@ -81,6 +81,8 @@ def bind_official_game_availability(
         return GameAvailabilityEvidence(warnings=("future_official_availability",))
     if cutoff - snapshot.source.retrieved_at > max_age:
         return GameAvailabilityEvidence(warnings=("stale_official_availability",))
+    if cutoff - snapshot.published_at > timedelta(hours=1):
+        return GameAvailabilityEvidence(warnings=("stale_official_publication",))
     if not snapshot.source.content_hash:
         return GameAvailabilityEvidence(warnings=("unverified_official_availability",))
     return _bind_game_report(

@@ -79,13 +79,17 @@ def test_uncertain_or_available_status_is_not_confirmed_absence(status: Availabi
     assert not report.confirmed_absence
 
 
-@pytest.mark.parametrize("kind", ["stale", "future_retrieval", "future_publication", "hash"])
+@pytest.mark.parametrize(
+    "kind", ["stale", "stale_publication", "future_retrieval", "future_publication", "hash"]
+)
 def test_unusable_evidence_does_not_assign_status(kind: str) -> None:
     game, player, snapshot = evidence()
     if kind == "stale":
         snapshot = replace(
             snapshot, source=replace(snapshot.source, retrieved_at=NOW - timedelta(minutes=16))
         )
+    elif kind == "stale_publication":
+        snapshot = replace(snapshot, published_at=NOW - timedelta(hours=1, seconds=1))
     elif kind == "future_retrieval":
         snapshot = replace(
             snapshot, source=replace(snapshot.source, retrieved_at=NOW + timedelta(seconds=1))

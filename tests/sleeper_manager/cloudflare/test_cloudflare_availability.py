@@ -1,7 +1,7 @@
 """Worker-native report fetches expose source failures and publication identity."""
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -70,3 +70,15 @@ def test_report_size_is_bounded_with_or_without_content_length(header: bool) -> 
 
     with pytest.raises(OfficialInjuryReportError, match="byte limit"):
         asyncio.run(CloudflareOfficialAvailability(fetch).report(NOW))
+
+
+def test_cached_response_with_wrong_publication_cannot_renew_a_status() -> None:
+    async def fetch(url: str) -> Response:
+        return Response(200)
+
+    with pytest.raises(OfficialInjuryReportError, match="timestamp.*header"):
+        asyncio.run(
+            CloudflareOfficialAvailability(fetch, extract=lambda _: TEXT).report(
+                NOW + timedelta(minutes=15)
+            )
+        )

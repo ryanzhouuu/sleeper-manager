@@ -21,6 +21,8 @@ Official game availability uses a Workers-native fetch adapter and the shared PD
 parser, now included in runtime dependencies. The adapter checks recent publication
 slots directly rather than renewing an old cached designation. Missing publications,
 provider failures, parsing failures, and oversized reports remain explicit gaps.
+PDF publication must match its requested slot; fresh retrieval cannot renew a report
+published more than one hour before the decision cutoff.
 Live planning passes matched official game reports through the shared projection
 batch boundary. Confirmed absences set only that game's distribution to zero,
 including when the direct baseline has insufficient history. Questionable, doubtful,
