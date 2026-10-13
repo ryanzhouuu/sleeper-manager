@@ -15,7 +15,12 @@ from sleeper_manager.projections.hybrid_runtime_index import (
     HybridRuntimeIndex,
     IndexedPlayerProfile,
 )
-from sleeper_manager.projections.hybrid_types import JointGameObservation, require_aware
+from sleeper_manager.projections.hybrid_types import (
+    GameAvailability,
+    JointGameObservation,
+    ParticipationOpportunity,
+    require_aware,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +32,7 @@ class HybridHistoryManifest:
     reference_time: datetime
     index_artifact_id: str
     player_artifacts: tuple[tuple[str, str], ...]
+    census_artifacts: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         require_aware(self.reference_time)
@@ -79,6 +85,26 @@ def decode_player_partition(value: object, player_id: str) -> tuple[JointGameObs
     return result
 
 
-def history_manifest_version(index_id: str, partitions: tuple[tuple[str, str], ...]) -> str:
+def decode_census_partition(value: object) -> tuple[ParticipationOpportunity, ...]:
+    """Retain source-tagged census rows separately from the compact estimator counts."""
+    if not isinstance(value, list):
+        raise HybridProjectionError("invalid_census_partition")
+    for item in value:
+        row = _shape(item, ParticipationOpportunity)
+        if row.get("availability") is not None:
+            _shape(row["availability"], GameAvailability)
+    result: tuple[ParticipationOpportunity, ...] = _typed(
+        value, tuple[ParticipationOpportunity, ...]
+    )
+    return result
+
+
+def history_manifest_version(
+    index_id: str,
+    partitions: tuple[tuple[str, str], ...],
+    census: tuple[str, ...] = (),
+) -> str:
     """Bind preparation and exact outcomes through content-addressed references."""
-    return "hybrid-runtime-v1-" + encode_hybrid_artifact((index_id, partitions)).content_hash
+    return (
+        "hybrid-runtime-v1-" + encode_hybrid_artifact((index_id, partitions, census)).content_hash
+    )

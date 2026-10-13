@@ -28,6 +28,12 @@ and probable designations retain provisional estimates and warning evidence.
 Collection can defer projection until both rosters have been read; async batch
 providers receive all targets together instead of one call per player-game.
 
+State migration `0005_hybrid_runtime.sql` adds immutable compressed artifacts,
+prepared history versions, and shadow run references. History manifests are published
+only after their index, exact player outcomes, and original census partitions verify.
+Shadow evidence uses the state database; captured external forecasts remain in the
+separate forecast archive. The local SQLite adapter uses the same artifact contracts.
+
 Forecast receipts, raw payloads, and semantic revisions live in the separate
 `sleeper-manager-forecast-archive` D1 database. Apply every file in
 `infra/cloudflare/forecast-migrations/` before deploying a Worker with the
