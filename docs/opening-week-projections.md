@@ -47,6 +47,9 @@ At least five distinct donors must have cutoff-visible census evidence; otherwis
 the estimate falls back to all other census players and records the coverage gap.
 All verified evidence remains in history, and the player's own census is unchanged.
 The trace records the selected pool, opportunity count, and covered player count.
+Participation preparation also exposes validated per-player/status census counts.
+`HybridParticipation.from_counts` reproduces the same estimator without loading
+individual opportunity rows; it requires already cutoff-filtered evidence.
 A fresh, matching game report uses a separate observation/status bucket: pooled counts shrink toward
 the pooled history rate, and player bucket counts shrink toward that pooled bucket
 rate, each at strength 20. Missing reports and submitted-but-not-listed reports remain

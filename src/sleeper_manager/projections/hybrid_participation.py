@@ -1,10 +1,18 @@
 """Provisional participation estimates from an explicit resolved opportunity census."""
 
+from __future__ import annotations
+
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from sleeper_manager.domain.nba_season import nba_season_start_year
 from sleeper_manager.projections.hybrid_config import HybridProjectionConfig, HybridProjectionError
+from sleeper_manager.projections.hybrid_participation_counts import (
+    ParticipationCounts,
+    census_participation_counts,
+    merge_participation_counts,
+)
 from sleeper_manager.projections.hybrid_types import (
     GameAvailability,
     HybridHistory,
@@ -56,6 +64,23 @@ class HybridParticipation:
                 key=lambda row: (row.player_id, row.game_start, row.game_id),
             )
         )
+        self.counts = census_participation_counts(self.opportunities)
+
+    @classmethod
+    def from_counts(
+        cls,
+        counts: Mapping[str, ParticipationCounts],
+        *,
+        cutoff: datetime,
+        config: HybridProjectionConfig,
+    ) -> HybridParticipation:
+        """Use versioned, cutoff-filtered census aggregates without loading opportunity rows."""
+        require_aware(cutoff)
+        prepared = cls.__new__(cls)
+        prepared.cutoff, prepared.config = cutoff, config
+        prepared.opportunities = ()
+        prepared.counts = dict(counts)
+        return prepared
 
     def estimate(
         self,
@@ -66,60 +91,54 @@ class HybridParticipation:
         donor_player_ids: tuple[str, ...] = (),
     ) -> ParticipationEstimate:
         """Use census-covered stat donors, with explicit global fallback for sparse coverage."""
-        own = tuple(row for row in self.opportunities if row.player_id == player_id)
-        pooled = tuple(row for row in self.opportunities if row.player_id != player_id)
-        if not pooled:
+        own = self.counts.get(player_id, ParticipationCounts())
+        pooled_rows = {
+            player: row for player, row in self.counts.items() if player != player_id and row.total
+        }
+        if not pooled_rows:
             raise HybridProjectionError("missing_pooled_participation_opportunities")
         donor_ids = frozenset(donor_player_ids) - {player_id}
-        role_pool = tuple(row for row in pooled if row.player_id in donor_ids)
-        role_players = {row.player_id for row in role_pool}
+        role_pool = {player: row for player, row in pooled_rows.items() if player in donor_ids}
         pool_kind = "global"
         pool_fallback: str | None = (
             "missing_role_donors" if not donor_ids else "insufficient_role_census"
         )
-        if len(role_players) >= self.config.minimum_donors:
-            pooled = role_pool
+        if len(role_pool) >= self.config.minimum_donors:
+            pooled_rows = role_pool
             pool_kind, pool_fallback = "stat_profile_donors", None
-        pooled_rate = sum(row.did_play for row in pooled) / len(pooled)
+        pooled = merge_participation_counts(tuple(pooled_rows.values()))
+        pooled_rate = pooled.played / pooled.total
         strength = self.config.participation_prior_strength
-        history_probability = (sum(row.did_play for row in own) + strength * pooled_rate) / (
-            len(own) + strength
-        )
+        history_probability = (own.played + strength * pooled_rate) / (own.total + strength)
         fallback = self._availability_gap(availability, game_id)
         usable = availability if fallback is None else None
         bucket = usable.bucket if usable is not None else None
-        own_bucket = tuple(
-            row for row in own if row.availability and row.availability.bucket == bucket
-        )
-        pooled_bucket = tuple(
-            row for row in pooled if row.availability and row.availability.bucket == bucket
-        )
+        own_bucket = own.bucket(bucket)
+        pooled_bucket = pooled.bucket(bucket)
         probability = history_probability
         if bucket is not None:
             if usable is not None and usable.confirmed_absence:
                 probability = 0.0
-            elif not pooled_bucket:
+            elif not pooled_bucket[1]:
                 fallback = "missing_pooled_status_opportunities"
             else:
-                bucket_prior = (
-                    sum(row.did_play for row in pooled_bucket) + strength * pooled_rate
-                ) / (len(pooled_bucket) + strength)
-                probability = (
-                    sum(row.did_play for row in own_bucket) + strength * bucket_prior
-                ) / (len(own_bucket) + strength)
+                bucket_prior = (pooled_bucket[0] + strength * pooled_rate) / (
+                    pooled_bucket[1] + strength
+                )
+                probability = (own_bucket[0] + strength * bucket_prior) / (own_bucket[1] + strength)
         return ParticipationEstimate(
             probability=probability,
             history_probability=history_probability,
-            own_count=len(own),
-            pooled_count=len(pooled),
-            own_bucket_count=len(own_bucket),
-            pooled_bucket_count=len(pooled_bucket),
+            own_count=own.total,
+            pooled_count=pooled.total,
+            own_bucket_count=own_bucket[1],
+            pooled_bucket_count=pooled_bucket[1],
             bucket=bucket,
             fallback=fallback,
             availability=usable,
             pool_kind=pool_kind,
             pool_fallback=pool_fallback,
-            pooled_player_count=len({row.player_id for row in pooled}),
+            pooled_player_count=len(pooled_rows),
         )
 
     def _availability_gap(self, availability: GameAvailability | None, game_id: str) -> str | None:
