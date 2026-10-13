@@ -29,6 +29,7 @@ from sleeper_manager.notifications.factory import build_notification_dispatcher
 from sleeper_manager.persistence.async_sqlite import AsyncSQLiteStateRepository
 from sleeper_manager.persistence.d1 import D1StateRepository
 from sleeper_manager.persistence.forecast_sqlite import AsyncSQLiteForecastArchiveRepository
+from sleeper_manager.persistence.hybrid_sqlite import SQLiteHybridRuntimeRepository
 from sleeper_manager.workflows.forecast_collection import capture_scheduled_forecast
 from sleeper_manager.workflows.notification_loop import (
     NotificationLoop,
@@ -39,10 +40,15 @@ from sleeper_manager.workflows.postgame_lock_in import LOCK_IN_ACKNOWLEDGEMENT_K
 class _HttpxFetchResponse:
     def __init__(self, response: httpx.Response) -> None:
         self.status = response.status_code
-        self._payload = response.json()
+        self.headers = response.headers
+        self._response = response
 
     def json(self) -> object:
-        return self._payload
+        return self._response.json()
+
+    async def bytes(self) -> bytes:
+        """Match the Python Workers response body API for official PDF collection."""
+        return self._response.content
 
 
 async def _run_scheduled(settings: Settings) -> int:
@@ -61,6 +67,12 @@ async def _run_scheduled(settings: Settings) -> int:
     try:
         repository = AsyncSQLiteStateRepository(settings.sqlite_path)
         await repository.initialize()
+        shadow = SQLiteHybridRuntimeRepository(settings.sqlite_path)
+        await shadow.initialize()
+        archive = AsyncSQLiteForecastArchiveRepository(
+            settings.sqlite_path.with_name("forecasts.db")
+        )
+        await archive.initialize()
         notifications = NotificationLoop(
             repository,
             build_notification_dispatcher(settings),
@@ -84,18 +96,9 @@ async def _run_scheduled(settings: Settings) -> int:
                     repository=repository,
                     policy=policy,
                     scheduled_at=scheduled_at,
-                    clock=lambda: now,
+                    shadow_repository=shadow,
+                    forecast_archive=archive,
                 )
-
-            summary = await dispatch_due_work(
-                repository,
-                notifications=notifications,
-                collect=collect,
-                scheduled_at=now,
-                correlation_id=uuid4().hex,
-                open_sleeper_url="https://sleeper.com",
-                fetch_game_summary=CloudflareESPNProvider(fetch, clock=lambda: now).game_summary,
-            )
 
             async def fetch_raw(url: str) -> httpx.Response:
                 return await client.get(url)
@@ -104,13 +107,18 @@ async def _run_scheduled(settings: Settings) -> int:
                 settings,
                 repository,
                 CloudflareSleeperClient(fetch),
-                nba=AsyncCachedNBAProvider(
-                    CloudflareESPNProvider(fetch, clock=lambda: now),
-                    repository,
-                    clock=lambda: now,
-                ),
+                nba=AsyncCachedNBAProvider(CloudflareESPNProvider(fetch), repository),
                 fetch=fetch_raw,
                 now=now,
+            )
+            summary = await dispatch_due_work(
+                repository,
+                notifications=notifications,
+                collect=collect,
+                scheduled_at=now,
+                correlation_id=uuid4().hex,
+                open_sleeper_url="https://sleeper.com",
+                fetch_game_summary=CloudflareESPNProvider(fetch).game_summary,
             )
     except (OSError, RuntimeError, ValueError) as error:
         print(redact_secrets(f"Scheduled run failed: {error}"), file=sys.stderr)

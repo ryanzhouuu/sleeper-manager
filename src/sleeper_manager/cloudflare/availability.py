@@ -51,9 +51,9 @@ class CloudflareOfficialAvailability:
                 length = response.headers.get("content-length")
                 if length is not None and int(length) > MAX_REPORT_BYTES:
                     raise OfficialInjuryReportError("Official report exceeds byte limit")
-                body = await asyncio.wait_for(response.arrayBuffer(), timeout=15)
-                converter = getattr(body, "to_py", None)
-                content = bytes(converter() if callable(converter) else body)
+                content = await asyncio.wait_for(response.bytes(), timeout=15)
+                if not isinstance(content, bytes):
+                    raise OfficialInjuryReportError("Official report body is not bytes")
                 if len(content) > MAX_REPORT_BYTES:
                     raise OfficialInjuryReportError("Official report exceeds byte limit")
                 retrieved_at = self._clock()

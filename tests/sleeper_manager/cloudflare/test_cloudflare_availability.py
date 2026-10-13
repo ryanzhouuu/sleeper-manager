@@ -19,7 +19,7 @@ class Response:
         self.status, self.body = status, body
         self.headers = {"content-length": length} if length else {}
 
-    async def arrayBuffer(self) -> bytes:
+    async def bytes(self) -> bytes:
         return self.body
 
 
