@@ -222,5 +222,32 @@ Full replay validates surface identity, timing, scoring, and completeness before
 execution; any failed entry blocks that candidate. Bundle coverage and unrelated
 input checks remain intact, and standalone diagnostics still require embedded
 projections. Run the control surface with the same policies for a comparison.
-This delivery changes no scheduled
-runtime provider, notification behavior, or production promotion setting.
+The scheduled runtime integration is configured separately as described in
+`cloudflare-runtime.md`; hybrid promotion remains disabled.
+
+To attach historical status buckets without changing the resolved census, run:
+
+```bash
+uv run --extra historical python -m sleeper_manager.workflows.hybrid_status_cli \
+  --history .local/hybrid/source/history.json \
+  --raw-dir .local/model-validation/raw \
+  --injury-archive .local/model-validation/injuries \
+  --roster-ledger .local/hybrid/source/reviewed-final-game-rosters.json \
+  --output-dir .local/hybrid/status-history
+```
+
+Repeat `--roster-ledger` for separate seasons. If reviewed players need stable identity
+recovery, supply both `--identity-ledger` and `--sleeper-catalog`; these recover names
+and provider IDs, never historical teams. Reviewed game censuses supply affiliations.
+The default cutoff is 30 minutes before tipoff. The command selects the latest
+publication at that cutoff within 24 hours, verifies retained PDF and metadata hashes,
+and reparses the PDF. Its AM/PM-free clock must match a unique scheduled team game.
+It never resurrects a removed row from an older report.
+
+The separate output retains every original stat observation and played/DNP outcome.
+`coverage.json` records tagged buckets, unmatched opportunities, and source hashes.
+Historical tags explicitly declare reconstructed publication semantics and retain actual
+archive retrieval timestamps; they are not prospective live captures or calibration
+evidence. Existing outputs with different content are rejected. Use the resulting
+`history.json` as the indexed synchronization input and retain the original coverage
+report alongside it. Source gaps, including unsupported scoring fields, stay visible.
