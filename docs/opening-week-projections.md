@@ -56,6 +56,13 @@ rate, each at strength 20. Missing reports and submitted-but-not-listed reports 
 distinct. Missing bucket evidence uses history-only output; absent pooled opportunities
 block output. These estimates are provisional, not calibrated injury probabilities.
 
+`build_hybrid_runtime_index` prepares the complete donor population and census counts
+at an explicit reference cutoff. Current-season mass decays after that reference;
+prior-season mass stays fixed. `IndexedHistoryPools` reads only selected players'
+exact outcomes while using the full profile population. Backdated reads, mismatched
+model configuration, and mismatched scoring policies are rejected. Excluded scoring
+fields remain visible. A new history version requires a freshly prepared index.
+
 Version five distinguishes explicitly confirmed game absences from generic injury
 designations. A fresh, matching `GameAvailability(confirmed_absence=True)` requires
 a reported `out` status and forces participation to zero even without status-tagged

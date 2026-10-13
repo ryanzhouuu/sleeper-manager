@@ -104,6 +104,27 @@ class HybridProjectionBatch:
             }
         )
 
+    @classmethod
+    def from_prepared(
+        cls,
+        *,
+        cutoff: datetime,
+        season: int,
+        scoring_policy: ScoringPolicy,
+        config: HybridProjectionConfig,
+        pools: HybridHistoryPools,
+        participation: HybridParticipation,
+        history_fingerprint: str,
+    ) -> "HybridProjectionBatch":
+        """Reuse verified indexed preparation while retaining the ordinary projection algorithm."""
+        require_aware(cutoff)
+        prepared = cls.__new__(cls)
+        prepared.cutoff, prepared.season = cutoff, season
+        prepared.scoring_policy, prepared.config = scoring_policy, config
+        prepared.pools, prepared.participation = pools, participation
+        prepared.history_fingerprint = history_fingerprint
+        return prepared
+
     def project(
         self,
         target: LiveProjectionTarget,
