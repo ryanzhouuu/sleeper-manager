@@ -83,13 +83,68 @@ def bind_official_game_availability(
         return GameAvailabilityEvidence(warnings=("stale_official_availability",))
     if not snapshot.source.content_hash:
         return GameAvailabilityEvidence(warnings=("unverified_official_availability",))
+    return _bind_game_report(
+        snapshot,
+        players=players,
+        games=games,
+        cutoff=cutoff,
+        observed_at=snapshot.source.retrieved_at,
+        source_kind="official",
+        confirm_absences=True,
+    )
+
+
+def bind_reconstructed_game_availability(
+    snapshot: OfficialInjuryReportSnapshot,
+    *,
+    players: tuple[ProviderPlayer, ...],
+    games: tuple[ScheduledGame, ...],
+    cutoff: datetime,
+    max_publication_age: timedelta = timedelta(hours=24),
+) -> GameAvailabilityEvidence:
+    """Group historical outcomes by published reports, explicitly distinct from live captures."""
+    require_aware(cutoff)
+    require_aware(snapshot.published_at)
+    require_aware(snapshot.source.retrieved_at)
+    if max_publication_age <= timedelta(0):
+        raise ValueError("Historical report age must be positive")
+    if snapshot.published_at > cutoff:
+        return GameAvailabilityEvidence(warnings=("future_historical_report",))
+    if cutoff - snapshot.published_at > max_publication_age:
+        return GameAvailabilityEvidence(warnings=("stale_historical_report",))
+    if not snapshot.source.content_hash:
+        return GameAvailabilityEvidence(warnings=("unverified_historical_report",))
+    return _bind_game_report(
+        snapshot,
+        players=players,
+        games=games,
+        cutoff=cutoff,
+        observed_at=snapshot.published_at,
+        source_kind=f"reconstructed-official:archive-retrieved:{snapshot.source.retrieved_at.isoformat()}",
+        confirm_absences=False,
+    )
+
+
+def _bind_game_report(
+    snapshot: OfficialInjuryReportSnapshot,
+    *,
+    players: tuple[ProviderPlayer, ...],
+    games: tuple[ScheduledGame, ...],
+    cutoff: datetime,
+    observed_at: datetime,
+    source_kind: str,
+    confirm_absences: bool,
+) -> GameAvailabilityEvidence:
+    """Share identity and game-scope checks across declared live and retrospective semantics."""
     mapped = map_official_injury_report(snapshot, players)
     warnings = list(mapped.warnings)
     unavailable_teams = {normalize_team(row.entry.team_abbreviation) for row in mapped.unresolved}
     by_player = {player.provider_id: player for player in players}
     assignments: dict[tuple[str, str], GameAvailability] = {}
     conflicted: set[tuple[str, str]] = set()
-    source_version = f"official:{snapshot.source.content_hash}:{snapshot.published_at.isoformat()}"
+    source_version = (
+        f"{source_kind}:{snapshot.source.content_hash}:{snapshot.published_at.isoformat()}"
+    )
     for player in players:
         for game in games:
             if (
@@ -147,11 +202,11 @@ def bind_official_game_availability(
                 )
             report = GameAvailability(
                 game.provider_id,
-                snapshot.source.retrieved_at,
+                observed_at,
                 designation,
                 observation,
                 source_version,
-                confirmed_absence=designation is AvailabilityStatus.OUT,
+                confirmed_absence=confirm_absences and designation is AvailabilityStatus.OUT,
             )
             key = player.provider_id, game.provider_id
             if key in assignments and assignments[key] != report:
