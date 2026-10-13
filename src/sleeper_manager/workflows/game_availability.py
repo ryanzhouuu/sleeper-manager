@@ -5,7 +5,7 @@ Generic provider injury designations are deliberately excluded from this boundar
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from typing import Protocol
 
 from sleeper_manager.domain.nba import AvailabilityStatus, ProviderPlayer, ScheduledGame
@@ -159,8 +159,23 @@ def _bind_game_report(
                 for row in snapshot.team_statuses
                 if normalize_team(row.team_abbreviation) == team
                 and row.game_date == local.date()
-                and row.game_time == local.time().replace(tzinfo=None)
+                and _matches_report_clock(row.game_time, local.time().replace(tzinfo=None))
                 and team in {normalize_team(part) for part in row.matchup.split("@")}
+                and len(
+                    {
+                        candidate.provider_id
+                        for candidate in games
+                        if player.team_id in (candidate.home_team_id, candidate.away_team_id)
+                        and candidate.start_time.astimezone(EASTERN_TIME).date() == row.game_date
+                        and _matches_report_clock(
+                            row.game_time,
+                            candidate.start_time.astimezone(EASTERN_TIME)
+                            .time()
+                            .replace(tzinfo=None),
+                        )
+                    }
+                )
+                == 1
             )
             if len(statuses) != 1:
                 warnings.append(
@@ -219,4 +234,13 @@ def _bind_game_report(
             if (player, game) not in conflicted
         ),
         tuple(sorted(set(warnings))),
+    )
+
+
+def _matches_report_clock(reported: time, scheduled: time) -> bool:
+    """Official PDFs omit AM/PM; the scheduled game resolves that ambiguity."""
+    return reported == scheduled or (
+        1 <= reported.hour <= 12
+        and reported.hour % 12 == scheduled.hour % 12
+        and (reported.minute, reported.second) == (scheduled.minute, scheduled.second)
     )

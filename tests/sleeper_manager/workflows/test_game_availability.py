@@ -136,3 +136,17 @@ def test_late_update_replaces_previous_out_without_carrying_confirmation() -> No
     new = bind(update, player, game).assignments[0][1]
     assert old.confirmed_absence
     assert not new.confirmed_absence
+
+
+def test_official_twelve_hour_clock_binds_only_to_unique_scheduled_game() -> None:
+    game, player, snapshot = evidence()
+    game = replace(game, start_time=game.start_time + timedelta(hours=4))
+    entry = replace(snapshot.entries[0], game_time=snapshot.entries[0].game_time.replace(hour=7))
+    team = replace(snapshot.team_statuses[0], game_time=entry.game_time)
+    snapshot = replace(snapshot, entries=(entry,), team_statuses=(team,))
+    assert game.start_time.astimezone(EASTERN_TIME).hour == 19
+    assert bind(snapshot, player, game).assignments[0][1].confirmed_absence
+    ambiguous = replace(
+        game, provider_id="morning", start_time=game.start_time - timedelta(hours=12)
+    )
+    assert bind(snapshot, player, game, ambiguous).assignments == ()

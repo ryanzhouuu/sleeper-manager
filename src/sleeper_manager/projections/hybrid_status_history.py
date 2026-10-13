@@ -114,7 +114,7 @@ def attach_hybrid_status_history(
             bind_reconstructed_game_availability(
                 report,
                 players=scoped,
-                games=(game,),
+                games=games,
                 cutoff=game.start_time - timedelta(minutes=cutoff_minutes),
             )
             if report is not None and game is not None
