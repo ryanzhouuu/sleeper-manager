@@ -21,6 +21,12 @@ Official game availability uses a Workers-native fetch adapter and the shared PD
 parser, now included in runtime dependencies. The adapter checks recent publication
 slots directly rather than renewing an old cached designation. Missing publications,
 provider failures, parsing failures, and oversized reports remain explicit gaps.
+Live planning passes matched official game reports through the shared projection
+batch boundary. Confirmed absences set only that game's distribution to zero,
+including when the direct baseline has insufficient history. Questionable, doubtful,
+and probable designations retain provisional estimates and warning evidence.
+Collection can defer projection until both rosters have been read; async batch
+providers receive all targets together instead of one call per player-game.
 
 Forecast receipts, raw payloads, and semantic revisions live in the separate
 `sleeper-manager-forecast-archive` D1 database. Apply every file in

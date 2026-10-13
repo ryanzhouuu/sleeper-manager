@@ -28,6 +28,12 @@ from sleeper_manager.integrations.nba.identity import (
     SleeperPlayerIdentity,
     parse_sleeper_player_identity,
 )
+from sleeper_manager.projections.hybrid_types import GameAvailability
+from sleeper_manager.projections.live_baseline import LiveProjectionTarget
+from sleeper_manager.workflows.game_availability import (
+    OfficialAvailabilitySource,
+    collect_official_game_evidence,
+)
 from sleeper_manager.workflows.lock_in_evidence import merge_lock_in_opportunity_evidence
 from sleeper_manager.workflows.planning_inputs import (
     AvailabilityResourceResult,
@@ -40,7 +46,11 @@ from sleeper_manager.workflows.planning_inputs import (
     ResolvedPlayerIdentity,
     ScheduleResourceResult,
 )
-from sleeper_manager.workflows.planning_projections import _project_targets
+from sleeper_manager.workflows.planning_projections import (
+    LiveBatchProjectionProvider,
+    live_projection_targets,
+    project_live_targets,
+)
 
 
 class PlanningCollectionError(RuntimeError):
@@ -68,6 +78,8 @@ class CollectedLiveEvidence:
     inputs: LivePlanningInputs
     decision_time: datetime
     warnings: tuple[str, ...]
+    projection_targets: tuple[LiveProjectionTarget, ...] = ()
+    game_availability: tuple[tuple[str, GameAvailability], ...] = ()
 
 
 async def collect_live_planning_inputs(
@@ -75,7 +87,7 @@ async def collect_live_planning_inputs(
     profile_source: LeagueProfileSource,
     catalog_source: SleeperPlayerCatalogSource,
     nba: NBAProvider,
-    projection_provider: LiveProjectionProvider,
+    projection_provider: LiveProjectionProvider | LiveBatchProjectionProvider,
     week_window: FantasyWeekWindow,
     freshness_policy: PlanningFreshnessPolicy,
     runtime_policy_version: str,
@@ -85,6 +97,8 @@ async def collect_live_planning_inputs(
     acknowledgement_source: AcknowledgementSource | None = None,
     mapping_overrides: Mapping[str, str] | None = None,
     clock: Callable[[], datetime] | None = None,
+    official_availability_source: OfficialAvailabilitySource | None = None,
+    skip_projections: bool = False,
 ) -> CollectedLiveEvidence:
     """Fetch current evidence read-only; assembly stays pure and offline.
 
@@ -135,14 +149,39 @@ async def collect_live_planning_inputs(
     availability_result, availability_warnings = await _injury_availability(nba, tick)
     warnings.extend(availability_warnings)
 
-    decision_time = tick()
-    projections = _project_targets(
+    resolved = {identity.provider_player_id for identity in identities}
+    decision_time, game_evidence = await collect_official_game_evidence(
+        official_availability_source,
+        players=tuple(player for player in provider_players if player.provider_id in resolved),
+        games=tuple(game for result in schedule_results for game in result.games),
+        clock=tick,
+        max_age=freshness_policy.max_availability_age,
+    )
+    warnings.extend(game_evidence.warnings)
+    targets = live_projection_targets(
         profile=profile,
         identities=identities,
         schedule_results=schedule_results,
-        projection_provider=projection_provider,
         week_window=week_window,
         decision_time=decision_time,
+    )
+    reports = {(player, report.game_id): report for player, report in game_evidence.assignments}
+    availability = {
+        (target.sleeper_player_id, target.game_id): report
+        for target in targets
+        if (report := reports.get((target.provider_player_id or "", target.game_id))) is not None
+    }
+    projections = (
+        ()
+        if skip_projections
+        else await project_live_targets(
+            targets,
+            projection_provider=projection_provider,
+            scoring_policy=profile.scoring,
+            decision_time=decision_time,
+            availability=availability,
+            max_availability_age=freshness_policy.max_availability_age,
+        )
     )
     acknowledgements = (
         await acknowledgement_source.load_acknowledged_decisions(
@@ -181,7 +220,13 @@ async def collect_live_planning_inputs(
     except PlanningInputsError as error:
         raise PlanningCollectionError(str(error)) from error
     return CollectedLiveEvidence(
-        inputs=inputs, decision_time=decision_time, warnings=tuple(warnings)
+        inputs=inputs,
+        decision_time=decision_time,
+        warnings=tuple(warnings),
+        projection_targets=targets,
+        game_availability=tuple(
+            (player, report) for (player, _), report in sorted(availability.items())
+        ),
     )
 
 

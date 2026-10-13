@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from sleeper_manager.cloudflare.availability import CloudflareOfficialAvailability
 from sleeper_manager.cloudflare.projection_history import D1ProjectionHistory
 from sleeper_manager.cloudflare.providers import (
     CloudflareESPNProvider,
@@ -111,6 +112,7 @@ async def collect_cloudflare_planning_inputs(
         projection_history_retrieved_at=history.loaded_at,
         acknowledgement_source=repository,
         mapping_overrides=policy.mapping_overrides,
+        official_availability_source=CloudflareOfficialAvailability(fetcher, clock=tick),
         clock=tick,
     )
     catalog = catalog_source.catalog or {}

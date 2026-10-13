@@ -3,8 +3,10 @@
 Generic provider injury designations are deliberately excluded from this boundary.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Protocol
 
 from sleeper_manager.domain.nba import AvailabilityStatus, ProviderPlayer, ScheduledGame
 from sleeper_manager.integrations.nba.historical_feature_models import AvailabilityObservation
@@ -24,6 +26,41 @@ class GameAvailabilityEvidence:
 
     assignments: tuple[tuple[str, GameAvailability], ...] = ()
     warnings: tuple[str, ...] = ()
+
+
+class OfficialAvailabilitySource(Protocol):
+    """Provide a cutoff-visible report; collection captures its completed retrieval time."""
+
+    async def report(self, cutoff: datetime) -> OfficialInjuryReportSnapshot | None: ...
+
+
+async def collect_official_game_evidence(
+    source: OfficialAvailabilitySource | None,
+    *,
+    players: tuple[ProviderPlayer, ...],
+    games: tuple[ScheduledGame, ...],
+    clock: Callable[[], datetime],
+    max_age: timedelta,
+) -> tuple[datetime, GameAvailabilityEvidence]:
+    """Keep source failures explicit without replacing valid control projections."""
+    if source is None:
+        return clock(), GameAvailabilityEvidence()
+    try:
+        snapshot = await source.report(clock())
+    except Exception as error:
+        return clock(), GameAvailabilityEvidence(
+            warnings=(f"official_availability_failed:{type(error).__name__}",)
+        )
+    cutoff = clock()
+    if snapshot is None:
+        return cutoff, GameAvailabilityEvidence(warnings=("official_availability_missing",))
+    return cutoff, bind_official_game_availability(
+        snapshot,
+        players=players,
+        games=games,
+        cutoff=cutoff,
+        max_age=max_age,
+    )
 
 
 def bind_official_game_availability(
