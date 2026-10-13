@@ -20,6 +20,7 @@ from sleeper_manager.domain.forecast_capture import (
     ForecastSource,
 )
 from sleeper_manager.persistence.forecast_repository import (
+    AsyncForecastArchiveRepository,
     ForecastArchiveRepository,
     ForecastArchiveSelection,
 )
@@ -35,6 +36,30 @@ def read_player_forecasts(
 
     selection = archive.load_revision_at_cutoff(source, cutoff=cutoff)
     latest = archive.load_latest_receipt(source, cutoff=cutoff)
+    return select_player_forecasts(player_ids, cutoff, selection, latest)
+
+
+async def read_player_forecasts_async(
+    archive: AsyncForecastArchiveRepository,
+    source: ForecastSource,
+    player_ids: tuple[str, ...],
+    cutoff: datetime,
+) -> tuple[ForecastRetrievalResult, ...]:
+    """Read one D1 revision for the batch; an empty archive is ordinary missing evidence."""
+    selection = await archive.load_revision_at_cutoff(source, cutoff=cutoff)
+    latest = await archive.load_latest_receipt(source, cutoff=cutoff)
+    if selection is None and latest is None:
+        return ()
+    return select_player_forecasts(player_ids, cutoff, selection, latest)
+
+
+def select_player_forecasts(
+    player_ids: tuple[str, ...],
+    cutoff: datetime,
+    selection: ForecastArchiveSelection | None,
+    latest: ForecastFetchReceipt | None,
+) -> tuple[ForecastRetrievalResult, ...]:
+    """Share selection semantics across SQLite and D1 without hiding archive integrity errors."""
     if selection is None and latest is None:
         raise ForecastCaptureError("No forecast receipt is visible at the cutoff")
     return tuple(_select_player(player_id, cutoff, selection, latest) for player_id in player_ids)
@@ -139,4 +164,4 @@ def _provenance(selection: ForecastArchiveSelection) -> ForecastRevisionProvenan
     )
 
 
-__all__ = ("read_player_forecasts",)
+__all__ = ("read_player_forecasts", "read_player_forecasts_async", "select_player_forecasts")

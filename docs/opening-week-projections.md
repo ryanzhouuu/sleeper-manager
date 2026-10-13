@@ -84,6 +84,9 @@ once and loads one revision for all requested players. An empty archive uses int
 fallback; archive corruption propagates as an error. Its single-target `project`
 method conforms to the existing live projection boundary, but active advice still
 uses the current provider. Shadow/replay consumers should retain the batch results.
+`read_player_forecasts_async` uses the same selection rules against D1 and loads
+the revision once for all requested players. An empty archive returns no reads;
+corruption remains an integrity error rather than ordinary missing evidence.
 
 `build_hybrid_projection_surfaces` takes one or both roster team-week inputs and
 creates every remaining player-game at every existing replay cutoff. It batches
