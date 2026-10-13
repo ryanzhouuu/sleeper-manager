@@ -71,6 +71,27 @@ async def finish_hybrid_shadow_planning(
         decision_time=cutoff,
         availability=availability,
         max_availability_age=policy.availability_max_age,
+        generic_availability={
+            row.player_id: row
+            for item in evidence
+            for result in item.inputs.availability_results
+            for row in result.records
+        },
+        availability_gap=next(
+            (
+                warning
+                for warning in manager.warnings
+                if warning.startswith(
+                    (
+                        "official_availability_",
+                        "stale_official_",
+                        "future_official_",
+                        "unverified_official_",
+                    )
+                )
+            ),
+            None,
+        ),
     )
     manager_roster = next(
         roster for roster in profile.rosters if roster.roster_id == profile.manager_roster_id

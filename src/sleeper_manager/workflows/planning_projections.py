@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Protocol, runtime_checkable
 
 from sleeper_manager.domain.league import LeagueProfile
-from sleeper_manager.domain.nba import DataQualityState
+from sleeper_manager.domain.nba import DataQualityState, PlayerAvailability
 from sleeper_manager.domain.planning import PlanningReasonCode
 from sleeper_manager.domain.projection import ProjectionSnapshot
 from sleeper_manager.domain.scoring import ScoringPolicy
@@ -84,6 +84,8 @@ async def project_live_targets(
     decision_time: datetime,
     availability: Mapping[tuple[str, str], GameAvailability],
     max_availability_age: timedelta,
+    generic_availability: Mapping[str, PlayerAvailability] | None = None,
+    availability_gap: str | None = None,
 ) -> tuple[LiveProjectionResult, ...]:
     """Use one async batch when supported; enforce availability on either provider boundary."""
     if isinstance(projection_provider, LiveBatchProjectionProvider):
@@ -118,6 +120,8 @@ async def project_live_targets(
             cutoff=decision_time,
             scoring_policy=scoring_policy,
             max_age=max_availability_age,
+            generic_report=(generic_availability or {}).get(target.provider_player_id or ""),
+            availability_gap=availability_gap,
         )
         projections.append(
             LiveProjectionResult(

@@ -181,6 +181,22 @@ async def collect_live_planning_inputs(
             decision_time=decision_time,
             availability=availability,
             max_availability_age=freshness_policy.max_availability_age,
+            generic_availability={row.player_id: row for row in availability_result.records},
+            availability_gap=next(
+                (
+                    warning
+                    for warning in game_evidence.warnings
+                    if warning.startswith(
+                        (
+                            "official_availability_",
+                            "stale_official_",
+                            "future_official_",
+                            "unverified_official_",
+                        )
+                    )
+                ),
+                None,
+            ),
         )
     )
     acknowledgements = (

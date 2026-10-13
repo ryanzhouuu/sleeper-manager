@@ -75,6 +75,10 @@ designations. A fresh, matching `GameAvailability(confirmed_absence=True)` requi
 a reported `out` status and forces participation to zero even without status-tagged
 history. Generic `out` records retain the provisional bucket estimator. Wrong-game,
 future, and stale confirmations cannot override historical participation.
+Live status revisions also change projection input identity when their numeric
+estimate remains provisional. Generic ESPN designations carry an explicit warning
+about unverified game applicability; they cannot force zero participation. Official
+source failures remain separate data-gap reasons rather than healthy designations.
 `bind_official_game_availability` resolves official report entries against provider
 identities and unique schedule team/date/time matches. It preserves submitted-but-not-listed
 and missing submissions separately and rejects stale, future, or unhashed evidence.
