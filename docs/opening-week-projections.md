@@ -62,6 +62,9 @@ prior-season mass stays fixed. `IndexedHistoryPools` reads only selected players
 exact outcomes while using the full profile population. Backdated reads, mismatched
 model configuration, and mismatched scoring policies are rejected. Excluded scoring
 fields remain visible. A new history version requires a freshly prepared index.
+Runtime artifacts use bounded deterministic compression and content hashes. Typed
+index, manifest, and player-partition decoders reject unknown fields, contradictory
+counts, and declared stat coverage without actual values.
 
 Version five distinguishes explicitly confirmed game absences from generic injury
 designations. A fresh, matching `GameAvailability(confirmed_absence=True)` requires
