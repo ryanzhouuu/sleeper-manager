@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, tzinfo
 from typing import Literal
 
@@ -23,6 +23,12 @@ from sleeper_manager.persistence.base import (
     AsyncStateRepository,
     RecommendationRecord,
     RecommendationStatus,
+)
+from sleeper_manager.workflows.availability_advice import (
+    append_availability_message,
+    append_availability_trace,
+    availability_material_hash,
+    state_availability_notes,
 )
 from sleeper_manager.workflows.notification_loop import (
     Clock,
@@ -113,13 +119,20 @@ async def _run_weekly_lineup_workflow(
         player_names=player_names,
         local_timezone=local_timezone,
     )
-    trace = serialize_weekly_plan_trace(plan, trigger=trigger)
-    idempotency_key = await _allocate_idempotency_key(repository, plan)
+    notes = state_availability_notes(
+        state, player_names=player_names, local_timezone=local_timezone
+    )
+    rendered = replace(rendered, message=append_availability_message(rendered.message, notes))
+    material_hash = availability_material_hash(plan.material_hash, notes)
+    trace = append_availability_trace(
+        serialize_weekly_plan_trace(plan, trigger=trigger), notes, material_hash
+    )
+    idempotency_key = await _allocate_idempotency_key(repository, plan, material_hash=material_hash)
     await _supersede_other_pending(
         repository,
         plan.league_id,
         plan.week,
-        material_hash=plan.material_hash,
+        material_hash=material_hash,
         now=now,
     )
 
@@ -207,8 +220,9 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def _material_idempotency_base(plan: WeeklyPlan) -> str:
-    return f"{plan.league_id}:{plan.week}:{WEEKLY_LINEUP_DECISION_TYPE}:{plan.material_hash}"
+def _material_idempotency_base(plan: WeeklyPlan, material_hash: str | None = None) -> str:
+    identity = material_hash or plan.material_hash
+    return f"{plan.league_id}:{plan.week}:{WEEKLY_LINEUP_DECISION_TYPE}:{identity}"
 
 
 def _idempotency_key_for_revision(base: str, revision: int) -> str:
@@ -228,9 +242,11 @@ def _material_hash_from_idempotency_key(key: str) -> str | None:
 async def _allocate_idempotency_key(
     repository: AsyncStateRepository,
     plan: WeeklyPlan,
+    *,
+    material_hash: str | None = None,
 ) -> str:
     """Mint a fresh key when a prior material plan was superseded or expired."""
-    base = _material_idempotency_base(plan)
+    base = _material_idempotency_base(plan, material_hash)
     revision = 0
     while True:
         key = _idempotency_key_for_revision(base, revision)

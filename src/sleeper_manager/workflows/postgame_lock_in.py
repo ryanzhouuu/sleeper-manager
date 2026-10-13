@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
 from hashlib import sha256
 from typing import Literal, Protocol
+from zoneinfo import ZoneInfo
 
 from sleeper_manager.decisions.live_lock_in import (
     LiveLockInPolicyConfig,
@@ -26,6 +27,12 @@ from sleeper_manager.persistence.base import AsyncRuntimeStateRepository, Recomm
 from sleeper_manager.persistence.lock_in_opportunities import (
     LockInObservation,
     LockInOpportunityRecord,
+)
+from sleeper_manager.workflows.availability_advice import (
+    append_availability_message,
+    append_availability_trace,
+    availability_material_hash,
+    state_availability_notes,
 )
 from sleeper_manager.workflows.lock_in_evidence import merge_lock_in_opportunity_evidence
 from sleeper_manager.workflows.lock_in_rendering import (
@@ -238,8 +245,13 @@ async def _evaluate_opportunity(
             policy=policy,
             config=LiveLockInPolicyConfig(runtime_policy.manager_intent.minimum_confidence),
         )
-    evaluation_hash = _evaluation_hash(evaluation)
-    trace_json = _evaluation_trace_json(evaluation, opportunity)
+    notes = state_availability_notes(
+        state, player_names=player_names, local_timezone=ZoneInfo(runtime_policy.manager_timezone)
+    )
+    evaluation_hash = availability_material_hash(_evaluation_hash(evaluation), notes)
+    trace_json = append_availability_trace(
+        _evaluation_trace_json(evaluation, opportunity), notes, evaluation_hash
+    )
     if evaluation.kind is LockInEvaluationKind.WAIT:
         await _supersede_changed_recommendation(
             repository,
@@ -290,7 +302,7 @@ async def _evaluate_opportunity(
         game_id=opportunity.key.game_id,
         decision_type=decision_type,
         title=_evaluation_title(evaluation, player_names),
-        message=_evaluation_message(evaluation),
+        message=append_availability_message(_evaluation_message(evaluation), notes),
         deadline=opportunity.action_deadline,
         policy_version=runtime_policy.manager_intent.version,
         open_sleeper_url=open_sleeper_url,

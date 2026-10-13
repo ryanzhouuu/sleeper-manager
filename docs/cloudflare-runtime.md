@@ -66,6 +66,11 @@ deadline (15 minutes before tipoff with the default 10-minute lead). This preser
 the movement margin instead of collecting statuses when the deadline has already
 arrived. Live collection and the final advice cutoff use completed collection time;
 shadow work cannot preserve an earlier advice time after consuming that margin.
+Lineup and Lock-In messages explain confirmed absences, provisional injury estimates,
+and unavailable official reports. Source hashes remain in projection/shadow diagnostics.
+Visible availability changes revise notification identity; identical refreshed warnings
+deduplicate. Recommendation traces retain `availability_notes` and a separate
+`availability_material_hash`, preserving the underlying plan's material identity.
 
 Forecast receipts, raw payloads, and semantic revisions live in the separate
 `sleeper-manager-forecast-archive` D1 database. Apply every file in
