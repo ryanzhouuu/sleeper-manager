@@ -123,9 +123,9 @@ async def run_scheduled(
             repository=repository,
             policy=policy,
             scheduled_at=scheduled_at,
-            clock=lambda: now,
         )
 
+    await _capture_forecast(env, fetcher, repository, now)
     summary = await dispatch_due_work(
         repository,
         notifications=NotificationLoop(
@@ -141,7 +141,6 @@ async def run_scheduled(
         open_sleeper_url=_value(env, "OPEN_SLEEPER_URL", "https://sleeper.com"),
         fetch_game_summary=CloudflareESPNProvider(fetcher, clock=lambda: now).game_summary,
     )
-    await _capture_forecast(env, fetcher, repository, now)
     return summary.as_dict()
 
 

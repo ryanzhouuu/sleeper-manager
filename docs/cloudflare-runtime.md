@@ -54,6 +54,13 @@ same contracts to local SQLite. Dry-run never creates a database or activates po
 The history reference cutoff and its actual publication time are retained separately;
 runtime reads reject a version published after the requested decision cutoff.
 Shadow runs likewise retain their decision cutoff and actual persistence time.
+When shadow is enabled, the runtime resolves the opponent and batches both rosters
+at one cutoff. Durable records pair control snapshots with candidate attempts,
+including source/fallback evidence, participation, donor weights, and exclusions.
+Shared large diagnostics are referenced by content hash. Candidate computation has
+a 60-second async timeout; failures remain paired blockers. Persistence and opponent
+collection failures are logged explicitly and preserve valid manager control advice.
+Due forecast capture runs before planning so that wake's stored revision can be read.
 
 Forecast receipts, raw payloads, and semantic revisions live in the separate
 `sleeper-manager-forecast-archive` D1 database. Apply every file in

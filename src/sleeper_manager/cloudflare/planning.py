@@ -12,12 +12,19 @@ from sleeper_manager.cloudflare.providers import (
     CloudflareESPNProvider,
     CloudflareSleeperClient,
 )
+from sleeper_manager.cloudflare.shadow_planning import finish_hybrid_shadow_planning
 from sleeper_manager.domain.league import LeagueProfile
 from sleeper_manager.domain.runtime_policy import RuntimePolicy
 from sleeper_manager.domain.scheduling import eastern_fantasy_week
 from sleeper_manager.integrations.nba.cached_provider import AsyncCachedNBAProvider
 from sleeper_manager.integrations.sleeper.sync import LeagueSynchronizationService
 from sleeper_manager.persistence.base import AsyncRuntimeStateRepository
+from sleeper_manager.persistence.forecast_d1 import D1ForecastArchiveRepository
+from sleeper_manager.persistence.forecast_repository import AsyncForecastArchiveRepository
+from sleeper_manager.persistence.hybrid_runtime import (
+    D1HybridRuntimeRepository,
+    HybridRuntimeRepository,
+)
 from sleeper_manager.projections.live_baseline import DirectBaselineProjectionProvider
 from sleeper_manager.workflows.planning_collection import (
     CollectedLiveEvidence,
@@ -67,6 +74,8 @@ async def collect_cloudflare_planning_inputs(
     policy: RuntimePolicy,
     scheduled_at: datetime,
     clock: Callable[[], datetime] | None = None,
+    shadow_repository: HybridRuntimeRepository | None = None,
+    forecast_archive: AsyncForecastArchiveRepository | None = None,
 ) -> CloudflarePlanningAssembly:
     if scheduled_at.tzinfo is None:
         raise CloudflarePlanningConfigurationError("Scheduled time must be timezone-aware")
@@ -95,26 +104,52 @@ async def collect_cloudflare_planning_inputs(
         provider_name="espn",
     )
     catalog_source = _CatalogSource(sleeper)
-    evidence = await collect_live_planning_inputs(
-        profile_source=_StaticProfileSource(profile),
-        catalog_source=catalog_source,
-        nba=nba,
-        projection_provider=DirectBaselineProjectionProvider(history),
-        week_window=week_window,
-        freshness_policy=PlanningFreshnessPolicy(
-            max_sleeper_age=policy.sleeper_max_age,
-            max_nba_schedule_age=policy.team_data_max_age,
-            max_availability_age=policy.availability_max_age,
-        ),
-        runtime_policy_version=policy.manager_intent.version,
-        move_lead_time=policy.move_lead_time,
-        projection_history_version=history.history_version,
-        projection_history_retrieved_at=history.loaded_at,
-        acknowledgement_source=repository,
-        mapping_overrides=policy.mapping_overrides,
-        official_availability_source=CloudflareOfficialAvailability(fetcher, clock=tick),
-        clock=tick,
-    )
+    control = DirectBaselineProjectionProvider(history)
+
+    async def collect(selected: LeagueProfile) -> CollectedLiveEvidence:
+        """Share caches while keeping roster ownership and eligibility separate."""
+        return await collect_live_planning_inputs(
+            profile_source=_StaticProfileSource(selected),
+            catalog_source=catalog_source,
+            nba=nba,
+            projection_provider=control,
+            week_window=week_window,
+            freshness_policy=PlanningFreshnessPolicy(
+                max_sleeper_age=policy.sleeper_max_age,
+                max_nba_schedule_age=policy.team_data_max_age,
+                max_availability_age=policy.availability_max_age,
+            ),
+            runtime_policy_version=policy.manager_intent.version,
+            move_lead_time=policy.move_lead_time,
+            projection_history_version=history.history_version,
+            projection_history_retrieved_at=history.loaded_at,
+            acknowledgement_source=repository,
+            mapping_overrides=policy.mapping_overrides,
+            official_availability_source=CloudflareOfficialAvailability(fetcher, clock=tick),
+            clock=tick,
+            skip_projections=policy.hybrid_shadow_enabled,
+        )
+
+    evidence = await collect(profile)
+    if policy.hybrid_shadow_enabled:
+        binding = getattr(env, "sleeper_manager_state", None)
+        store = shadow_repository or (
+            D1HybridRuntimeRepository(binding) if binding is not None else None
+        )
+        archive_binding = getattr(env, "forecast_archive", None)
+        archive = forecast_archive or (
+            D1ForecastArchiveRepository(archive_binding) if archive_binding is not None else None
+        )
+        evidence = await finish_hybrid_shadow_planning(
+            evidence,
+            sleeper=sleeper,
+            collect_opponent=collect,
+            control=control,
+            policy=policy,
+            store=store,
+            archive=archive,
+            clock=tick,
+        )
     catalog = catalog_source.catalog or {}
     player_names = {
         player_id: name

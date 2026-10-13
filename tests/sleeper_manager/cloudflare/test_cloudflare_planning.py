@@ -1,5 +1,6 @@
 import asyncio
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,6 +17,7 @@ from sleeper_manager.persistence.async_sqlite import AsyncSQLiteStateRepository
 from sleeper_manager.persistence.base import ProjectionObservationRecord
 from sleeper_manager.projections.live_baseline import ProjectionHistoryError
 from sleeper_manager.workflows.planning_inputs import build_live_team_week_state
+from sleeper_manager.workflows.planning_projections import project_live_targets
 from tests.paths import FIXTURES_DIR
 
 FIXTURES = FIXTURES_DIR
@@ -82,7 +84,25 @@ def test_cloudflare_assembly_fails_closed_without_projection_history(tmp_path) -
         asyncio.run(exercise())
 
 
-def test_cloudflare_assembly_refreshes_live_evidence(tmp_path) -> None:  # type: ignore[no-untyped-def]
+@pytest.mark.parametrize("shadow", [False, True])
+def test_cloudflare_assembly_refreshes_live_evidence(tmp_path, monkeypatch, shadow) -> None:  # type: ignore[no-untyped-def]
+    calls = []
+
+    async def finish(manager, **kwargs):  # type: ignore[no-untyped-def]
+        calls.append(kwargs["policy"].hybrid_shadow_enabled)
+        assert manager.inputs.projections == ()
+        projected = await project_live_targets(
+            manager.projection_targets,
+            projection_provider=kwargs["control"],
+            scoring_policy=manager.inputs.league_profile.scoring,
+            decision_time=manager.decision_time,
+            availability={},
+            max_availability_age=kwargs["policy"].availability_max_age,
+        )
+        return replace(manager, inputs=replace(manager.inputs, projections=projected))
+
+    monkeypatch.setattr("sleeper_manager.cloudflare.planning.finish_hybrid_shadow_planning", finish)
+
     async def exercise():  # type: ignore[no-untyped-def]
         repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
         await repository.initialize()
@@ -110,7 +130,11 @@ def test_cloudflare_assembly_refreshes_live_evidence(tmp_path) -> None:  # type:
             ),
             fetch,
             repository=repository,
-            policy=default_runtime_policy(history_version="history-v1"),
+            policy=replace(
+                default_runtime_policy(history_version="history-v1"),
+                hybrid_shadow_enabled=shadow,
+                hybrid_history_version="hybrid-v1" if shadow else None,
+            ),
             scheduled_at=NOW,
             clock=lambda: NOW,
         )
@@ -136,3 +160,4 @@ def test_cloudflare_assembly_refreshes_live_evidence(tmp_path) -> None:  # type:
     assert "nba:team-schedule:team-home" in freshness
     assert "nba:injuries" in freshness
     assert "/v1/league/league-current/rosters" in fetch.paths
+    assert calls == ([True] if shadow else [])
