@@ -10,10 +10,10 @@ import json
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from hashlib import sha256
 from typing import Protocol
 
 from sleeper_manager.cloudflare.planning import CloudflarePlanningAssembly
+from sleeper_manager.cloudflare.planning_schedule import _replace_future_pre_tipoff, _work_id
 from sleeper_manager.cloudflare.postgame_dispatch import dispatch_postgame_work
 from sleeper_manager.cloudflare.scheduler_types import (
     FailureCategory,
@@ -23,7 +23,6 @@ from sleeper_manager.cloudflare.scheduler_types import (
     WorkAttemptSummary,
 )
 from sleeper_manager.decisions.weekly_plan import WeeklyPlanPolicyConfig
-from sleeper_manager.domain.nba import GameStatus, ScheduledGame
 from sleeper_manager.domain.runtime_policy import RuntimePolicy, RuntimePolicyError
 from sleeper_manager.domain.scheduling import manager_daily_schedule, manager_local_day
 from sleeper_manager.persistence.base import (
@@ -40,7 +39,6 @@ from sleeper_manager.workflows.lock_in_planning import (
     sync_live_lock_in_opportunities,
 )
 from sleeper_manager.workflows.notification_loop import NotificationLoop
-from sleeper_manager.workflows.planning_inputs import LivePlanningInputs
 from sleeper_manager.workflows.postgame_lock_in import DirectGameSummarySource
 from sleeper_manager.workflows.pre_tipoff_check import run_pre_tipoff_check
 
@@ -367,66 +365,6 @@ async def _run_delivery_retry(
     )
 
 
-async def _replace_future_pre_tipoff(
-    repository: AsyncRuntimeStateRepository,
-    policy: RuntimePolicy,
-    inputs: LivePlanningInputs,
-    scheduled_at: datetime,
-) -> None:
-    wanted = {
-        game.provider_id: game
-        for game in _roster_games(inputs)
-        if game.start_time > scheduled_at and game.status is GameStatus.SCHEDULED
-    }
-    existing = await repository.list_scheduled_work(
-        kind=DueWorkKind.PRE_TIPOFF,
-        statuses=(ScheduledWorkStatus.PENDING, ScheduledWorkStatus.RETRY),
-    )
-    for work in existing:
-        if work.game_id in wanted:
-            continue
-        if work.due_at <= scheduled_at and (work.deadline is None or work.deadline <= scheduled_at):
-            continue
-        await repository.upsert_scheduled_work(
-            replace(work, status=ScheduledWorkStatus.CANCELED, updated_at=scheduled_at)
-        )
-    for game in wanted.values():
-        key = f"pre_tipoff:{game.provider_id}"
-        await repository.upsert_scheduled_work(
-            ScheduledWorkRecord(
-                work_id=_work_id(key),
-                dedupe_key=key,
-                kind=DueWorkKind.PRE_TIPOFF,
-                due_at=game.start_time - policy.move_lead_time,
-                status=ScheduledWorkStatus.PENDING,
-                game_id=game.provider_id,
-                deadline=game.start_time,
-                created_at=scheduled_at,
-                updated_at=scheduled_at,
-            )
-        )
-
-
-def _roster_games(inputs: LivePlanningInputs) -> tuple[ScheduledGame, ...]:
-    roster = next(
-        item
-        for item in inputs.league_profile.rosters
-        if item.roster_id == inputs.league_profile.manager_roster_id
-    )
-    rostered = set(roster.player_ids)
-    team_ids = {
-        identity.provider_team_id
-        for identity in inputs.identities
-        if identity.sleeper_player_id in rostered and identity.provider_team_id
-    }
-    games: dict[str, ScheduledGame] = {}
-    for result in inputs.schedule_results:
-        for game in result.games:
-            if game.home_team_id in team_ids or game.away_team_id in team_ids:
-                games[game.provider_id] = game
-    return tuple(games.values())
-
-
 def _delivery_failed(result: WeeklyLineupWorkflowResult) -> bool:
     if result.outcome == "delivery_failed":
         return True
@@ -591,10 +529,6 @@ def _summary(
         attempts=attempts,
         failure_category=failure,
     )
-
-
-def _work_id(dedupe_key: str) -> str:
-    return sha256(dedupe_key.encode("utf-8")).hexdigest()[:32]
 
 
 def scheduled_at_from_controller(controller: object | None) -> datetime | None:
