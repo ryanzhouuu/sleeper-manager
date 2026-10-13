@@ -1,8 +1,8 @@
 """Opening-week joint-outcome candidate; every failed attempt preserves its opportunity."""
 
 import json
-from dataclasses import asdict, dataclass
-from datetime import datetime
+from dataclasses import asdict, dataclass, replace
+from datetime import datetime, timedelta
 from hashlib import sha256
 from math import fsum
 
@@ -23,6 +23,7 @@ from sleeper_manager.projections.hybrid_participation import (
 )
 from sleeper_manager.projections.hybrid_pools import HybridHistoryPools, JointStatPool, stat_means
 from sleeper_manager.projections.hybrid_types import GameAvailability, HybridHistory, require_aware
+from sleeper_manager.projections.live_availability import constrain_live_availability
 from sleeper_manager.projections.live_baseline import LiveProjectionTarget
 
 
@@ -47,6 +48,7 @@ class HybridProjectionResult:
     joint_weights: tuple[tuple[str, str, float], ...] = ()
     excluded_games: tuple[tuple[str, str], ...] = ()
     history_fingerprint: str | None = None
+    conditional_projection_gap: str | None = None
 
 
 def _json_default(value: object) -> str:
@@ -191,10 +193,40 @@ class HybridProjectionBatch:
                 donor_player_ids=pool.donor_ids,
             )
         except HybridProjectionError as error:
+            absence = constrain_live_availability(
+                None,
+                target,
+                availability,
+                cutoff=self.cutoff,
+                scoring_policy=self.scoring_policy,
+                max_age=timedelta(minutes=self.config.availability_max_age_minutes),
+            )
+            if absence is not None:
+                absence = replace(
+                    absence,
+                    model_version=self.config.model_version,
+                    input_version="hybrid-input-v1-"
+                    + _fingerprint(
+                        {
+                            "absence": absence.input_version,
+                            "history": self.history_fingerprint,
+                            "target": asdict(target),
+                            "cutoff": self.cutoff,
+                            "conditional_projection_gap": error.reason,
+                        }
+                    ),
+                    reasons=absence.reasons
+                    + (
+                        ProjectionReason("conditional_projection_gap", error.reason, applied=False),
+                    ),
+                )
             return HybridProjectionResult(
                 target,
                 self.cutoff,
-                failure=error.reason,
+                projection=absence,
+                failure=None if absence is not None else error.reason,
+                source="confirmed_absence" if absence is not None else None,
+                conditional_projection_gap=error.reason if absence is not None else None,
                 external_rejection=rejected,
                 forecast=forecast,
                 excluded_games=self.pools.excluded_game_keys,

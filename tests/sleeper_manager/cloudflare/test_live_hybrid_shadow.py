@@ -119,7 +119,7 @@ def test_live_shadow_pairs_both_rosters_and_never_replaces_active_projections() 
         assert manifest["timing"] == "on_time"
         pair = await store.load_value(manifest["pairs"][0])
         assert pair["candidate"]["projection"]["model_version"].startswith(
-            "opening-week-hybrid-v5-"
+            "opening-week-hybrid-v6-"
         )
         assert pair["candidate"]["participation"]["fallback"] == "missing_game_availability"
         assert await store.load_value(pair["candidate"]["joint_weights_artifact_id"])

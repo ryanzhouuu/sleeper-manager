@@ -89,6 +89,9 @@ An isolated local workerd test exercised real D1 reads, official PDF parsing, an
 24-player batch in 5.923 seconds using the explicitly diagnostic policy with foul
 penalties disabled. This is integration evidence, not production scoring validation,
 an enforced memory-budget measurement, or live accuracy evidence.
+A separate local full-scoring check retained 53,013 exclusions, returned zero for
+one confirmed absence with its conditional forecast gap, and preserved blockers for
+the other 23 targets. Its D1 receipt verified the runtime persistence path.
 
 Forecast receipts, raw payloads, and semantic revisions live in the separate
 `sleeper-manager-forecast-archive` D1 database. Apply every file in

@@ -70,11 +70,14 @@ revision for a batch. It fetches only the target and the union of internal/exter
 donor selections, with at most six concurrent reads, then reuses those outcomes
 across that player's games. Full attempt diagnostics remain available in `results`.
 
-Version five distinguishes explicitly confirmed game absences from generic injury
+Version six distinguishes explicitly confirmed game absences from generic injury
 designations. A fresh, matching `GameAvailability(confirmed_absence=True)` requires
 a reported `out` status and forces participation to zero even without status-tagged
 history. Generic `out` records retain the provisional bucket estimator. Wrong-game,
 future, and stale confirmations cannot override historical participation.
+When missing or unverified history blocks the conditional played-game forecast,
+a confirmed absence still supplies deterministic zero. Its result retains that
+`conditional_projection_gap`; no stat line or participation-history rate is invented.
 Live status revisions also change projection input identity when their numeric
 estimate remains provisional. Generic ESPN designations carry an explicit warning
 about unverified game applicability; they cannot force zero participation. Official
