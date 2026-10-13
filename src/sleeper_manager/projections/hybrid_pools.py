@@ -7,8 +7,7 @@ is shared across player targets at one cutoff and never reads future outcomes.
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
-from math import exp, fsum, isfinite, log
-from statistics import pstdev
+from math import exp, fsum, log
 
 from sleeper_manager.domain.nba_season import nba_season_start_year
 from sleeper_manager.domain.scoring import ScoringPolicy
@@ -17,6 +16,7 @@ from sleeper_manager.projections.hybrid_config import (
     HybridProjectionConfig,
     HybridProjectionError,
 )
+from sleeper_manager.projections.hybrid_profiles import PlayerStatProfile, StatProfilePopulation
 from sleeper_manager.projections.hybrid_types import (
     HybridHistory,
     JointGameObservation,
@@ -123,65 +123,24 @@ class HybridHistoryPools:
             for player, rows in sorted(by_player.items())
         }
         self.profiles = {player: self._profile(rows) for player, rows in self.games.items()}
-        eligible = [
-            self.profiles[player]
-            for player, rows in self.games.items()
-            if len(rows) >= config.minimum_donor_games
-        ]
-        self.scales = tuple(
-            max(pstdev([profile[k] for profile in eligible]), floor) if eligible else floor
-            for k, floor in enumerate(config.profile_scale_floors)
+        self.population = StatProfilePopulation(
+            tuple(
+                PlayerStatProfile(
+                    player, len(rows), fsum(weight for _, weight in rows), self.profiles[player]
+                )
+                for player, rows in self.games.items()
+            ),
+            config,
         )
+        self.scales = self.population.scales
 
     def pool(self, player_id: str, center: tuple[float, ...] | None = None) -> JointStatPool:
         """External lookup uses its center; internal lookup independently uses historical priors."""
         own = self.games.get(player_id, ())
         if not own and player_id in self.incomplete_players:
             raise HybridProjectionError("unverified_player_stats")
-        others = [
-            profile
-            for player, profile in self.profiles.items()
-            if player != player_id and len(self.games[player]) >= self.config.minimum_donor_games
-        ]
         own_strength = fsum(weight for _, weight in own)
-        if center is None:
-            if not others and not own:
-                raise HybridProjectionError("missing_stat_history")
-            broad = (
-                tuple(fsum(profile[k] for profile in others) / len(others) for k in range(7))
-                if others
-                else self.profiles[player_id]
-            )
-            if own:
-                profile = self.profiles[player_id]
-                center = tuple(
-                    (profile[k] * own_strength + broad[k] * self.config.donor_strength)
-                    / (own_strength + self.config.donor_strength)
-                    for k in range(7)
-                )
-            else:
-                center = broad
-        if len(center) != 7 or any(not isfinite(value) or value < 0 for value in center):
-            raise HybridProjectionError("invalid_center_dimension")
-        candidates = [
-            player
-            for player, rows in self.games.items()
-            if player != player_id and len(rows) >= self.config.minimum_donor_games
-        ]
-        donor_ids = tuple(
-            sorted(
-                candidates,
-                key=lambda player: (
-                    fsum(
-                        ((self.profiles[player][k] - center[k]) / self.scales[k]) ** 2
-                        for k in range(7)
-                    ),
-                    player,
-                ),
-            )[: self.config.donor_count]
-        )
-        if len(donor_ids) < self.config.minimum_donors:
-            donor_ids = ()
+        donor_ids = self.population.donors(player_id, center)
         own_scale = 1.0
         if own and donor_ids:
             cap = self.config.maximum_game_weight
