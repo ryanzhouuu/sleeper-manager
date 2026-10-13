@@ -12,11 +12,12 @@ dependencies = [
   "httpx>=0.28,<1",
   "pydantic>=2.10,<3",
   "pydantic-settings>=2.7,<3",
+  "pypdf>=5,<7",
   "tzdata>=2025.2",
 ]
 
 [project.optional-dependencies]
-historical = ["pyreadr>=0.4.7,<1", "pypdf>=5,<7"]
+historical = ["pyreadr>=0.4.7,<1"]
 
 [dependency-groups]
 dev = [

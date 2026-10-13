@@ -17,6 +17,11 @@ Projection history and the active runtime policy live in D1. They are not bundle
 Worker deploy. Without an active runtime policy, advisor planning stays blocked while
 forecast capture uses the default 7:00 AM America/Chicago daily schedule.
 
+Official game availability uses a Workers-native fetch adapter and the shared PDF
+parser, now included in runtime dependencies. The adapter checks recent publication
+slots directly rather than renewing an old cached designation. Missing publications,
+provider failures, parsing failures, and oversized reports remain explicit gaps.
+
 Forecast receipts, raw payloads, and semantic revisions live in the separate
 `sleeper-manager-forecast-archive` D1 database. Apply every file in
 `infra/cloudflare/forecast-migrations/` before deploying a Worker with the
