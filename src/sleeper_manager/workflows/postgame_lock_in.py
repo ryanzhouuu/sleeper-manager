@@ -28,6 +28,13 @@ from sleeper_manager.persistence.lock_in_opportunities import (
     LockInOpportunityRecord,
 )
 from sleeper_manager.workflows.lock_in_evidence import merge_lock_in_opportunity_evidence
+from sleeper_manager.workflows.lock_in_rendering import (
+    _evaluation_hash,
+    _evaluation_message,
+    _evaluation_title,
+    _evaluation_trace_json,
+    _material_idempotency_key,
+)
 from sleeper_manager.workflows.notification_loop import (
     NotificationLoop,
     RecommendationRequest,
@@ -449,108 +456,6 @@ def summary_fingerprint(summary: GameSummary) -> str:
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     return sha256(encoded).hexdigest()
-
-
-def _evaluation_hash(evaluation: LockInEvaluation) -> str:
-    """Hash canonical rounded material advice while excluding retrieval timestamps."""
-
-    payload = {
-        "kind": evaluation.kind.value,
-        "score": _rounded(evaluation.observed_score),
-        "alternative": _rounded(evaluation.alternative_expected_score),
-        "percentiles": [
-            [rank, _rounded(value)] for rank, value in evaluation.alternative_percentiles
-        ],
-        "confidence": _rounded(evaluation.confidence),
-        "reason_codes": evaluation.reason_codes,
-        "trace": evaluation.trace,
-        "slot_index": evaluation.decision.slot_index if evaluation.decision else None,
-    }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    return sha256(encoded).hexdigest()
-
-
-def _rounded(value: float | None) -> float | None:
-    """Canonicalize material numeric evidence to two fantasy-score decimals."""
-
-    return round(value, 2) if value is not None else None
-
-
-def _evaluation_trace_json(
-    evaluation: LockInEvaluation,
-    opportunity: LockInOpportunityRecord,
-) -> str:
-    """Serialize the auditable live evaluation trace for persistence and acknowledgements."""
-
-    payload: dict[str, object] = {
-        "kind": evaluation.kind.value,
-        "reason_codes": evaluation.reason_codes,
-        "trace": dict(evaluation.trace),
-        "observed_score": evaluation.observed_score,
-        "alternative_expected_score": evaluation.alternative_expected_score,
-        "alternative_percentiles": evaluation.alternative_percentiles,
-        "confidence": evaluation.confidence,
-    }
-    if evaluation.kind is LockInEvaluationKind.LOCK:
-        payload["acknowledgement"] = {
-            "schema_version": 1,
-            "slot_index": evaluation.decision.slot_index if evaluation.decision else None,
-            "slot_position": opportunity.slot_position,
-            "accepted_fantasy_score": evaluation.observed_score,
-        }
-    elif evaluation.kind is LockInEvaluationKind.PASS:
-        payload["acknowledgement"] = {"schema_version": 1}
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
-
-
-def _material_idempotency_key(
-    opportunity: LockInOpportunityRecord,
-    evaluation: LockInEvaluation,
-    evaluation_hash: str,
-) -> str:
-    """Identify one material player-game recommendation across retries and restarts."""
-
-    return ":".join(
-        (
-            opportunity.key.league_id,
-            str(opportunity.key.fantasy_week),
-            str(opportunity.key.roster_id),
-            opportunity.key.player_id,
-            opportunity.key.game_id,
-            evaluation.manager_policy_version,
-            str(opportunity.score_revision),
-            evaluation.kind.value,
-            evaluation.deadline.isoformat(),
-            evaluation_hash,
-        )
-    )
-
-
-def _evaluation_title(
-    evaluation: LockInEvaluation,
-    player_names: dict[str, str],
-) -> str:
-    """Render a compact actionable or warning title."""
-
-    player = player_names.get(evaluation.player_id, evaluation.player_id)
-    if evaluation.kind is LockInEvaluationKind.UNAVAILABLE:
-        return f"Lock-In unavailable: {player}"
-    return f"{evaluation.kind.value.title()} {player}?"
-
-
-def _evaluation_message(evaluation: LockInEvaluation) -> str:
-    """Render stable score, alternative value, confidence, and reason evidence."""
-
-    if evaluation.kind is LockInEvaluationKind.UNAVAILABLE:
-        return "Safe Lock-In advice is unavailable: " + ", ".join(evaluation.reason_codes)
-    assert evaluation.observed_score is not None
-    assert evaluation.alternative_expected_score is not None
-    assert evaluation.confidence is not None
-    return (
-        f"Observed {evaluation.observed_score:.2f}; alternative expected "
-        f"{evaluation.alternative_expected_score:.2f}; confidence "
-        f"{evaluation.confidence:.0%}. Complete the action in Sleeper, then acknowledge it."
-    )
 
 
 def _combined_result(results: list[PostgameLockInResult]) -> PostgameLockInResult:
