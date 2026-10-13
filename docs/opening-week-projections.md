@@ -58,6 +58,9 @@ designations. A fresh, matching `GameAvailability(confirmed_absence=True)` requi
 a reported `out` status and forces participation to zero even without status-tagged
 history. Generic `out` records retain the provisional bucket estimator. Wrong-game,
 future, and stale confirmations cannot override historical participation.
+`bind_official_game_availability` resolves official report entries against provider
+identities and unique schedule team/date/time matches. It preserves submitted-but-not-listed
+and missing submissions separately and rejects stale, future, or unhashed evidence.
 
 `HybridProjectionBatch` prepares one history/cutoff/season/scoring-policy combination,
 then projects multiple `LiveProjectionTarget`s. Provider identity must be explicitly
