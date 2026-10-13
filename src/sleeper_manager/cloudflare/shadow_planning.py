@@ -188,7 +188,7 @@ async def finish_hybrid_shadow_planning(
     except Exception as error:
         warnings.append(f"hybrid_shadow_persistence_failed:{type(error).__name__}")
         _log_shadow("failed", len(future), failure=f"persistence:{type(error).__name__}")
-    return replace(updated, warnings=tuple(warnings))
+    return replace(updated, decision_time=clock(), warnings=tuple(warnings))
 
 
 def _log_shadow(outcome: str, targets: int, **details: object) -> None:

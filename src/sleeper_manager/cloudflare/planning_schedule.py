@@ -1,7 +1,7 @@
 """Reconcile roster tipoff watches and preserve stable scheduled-work identities."""
 
 from dataclasses import replace
-from datetime import datetime
+from datetime import datetime, timedelta
 from hashlib import sha256
 
 from sleeper_manager.domain.nba import GameStatus, ScheduledGame
@@ -13,6 +13,8 @@ from sleeper_manager.persistence.base import (
     ScheduledWorkStatus,
 )
 from sleeper_manager.workflows.planning_inputs import LivePlanningInputs
+
+_CRON_INTERVAL = timedelta(minutes=5)
 
 
 async def _replace_future_pre_tipoff(
@@ -46,7 +48,7 @@ async def _replace_future_pre_tipoff(
                 work_id=_work_id(key),
                 dedupe_key=key,
                 kind=DueWorkKind.PRE_TIPOFF,
-                due_at=game.start_time - policy.move_lead_time,
+                due_at=game.start_time - policy.move_lead_time - _CRON_INTERVAL,
                 status=ScheduledWorkStatus.PENDING,
                 game_id=game.provider_id,
                 deadline=game.start_time,

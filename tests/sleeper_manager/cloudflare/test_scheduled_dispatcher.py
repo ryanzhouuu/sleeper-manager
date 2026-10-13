@@ -186,7 +186,7 @@ def test_daily_due_work_collects_once_and_notifies(tmp_path) -> None:  # type: i
         assert daily[0].status is ScheduledWorkStatus.COMPLETED
         later = next(item for item in pre_tipoff if item.game_id == "g2")
         assert later.status is ScheduledWorkStatus.PENDING
-        assert later.due_at == LATER_GAME_START - POLICY.move_lead_time
+        assert later.due_at == LATER_GAME_START - POLICY.move_lead_time - timedelta(minutes=5)
         postgame = await repository.list_scheduled_work(kind=DueWorkKind.POSTGAME)
         assert {item.game_id for item in postgame} == {"g1", "g2"}
 

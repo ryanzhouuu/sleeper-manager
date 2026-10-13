@@ -218,3 +218,27 @@ def test_candidate_timeout_is_a_persisted_blocker_not_a_control_failure(monkeypa
         assert pair["candidate"]["failure"] == "candidate_exception:TimeoutError"
 
     asyncio.run(exercise())
+
+
+def test_advice_cutoff_advances_after_shadow_computation() -> None:
+    async def exercise() -> None:
+        manager, opponent, _, store, policy = await setup()
+        times = iter((NOW, NOW + timedelta(minutes=1), NOW + timedelta(minutes=2)))
+
+        async def collect(profile):  # type: ignore[no-untyped-def]
+            return opponent
+
+        result = await finish_hybrid_shadow_planning(
+            manager,
+            sleeper=Sleeper(),
+            collect_opponent=collect,
+            control=_RecordingProjections(),
+            policy=policy,
+            store=store,
+            archive=None,
+            clock=lambda: next(times),
+        )
+        assert result.decision_time == NOW + timedelta(minutes=2)
+        assert all(row.snapshot.available_as_of == NOW for row in result.inputs.projections)
+
+    asyncio.run(exercise())

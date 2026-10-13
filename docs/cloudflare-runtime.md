@@ -61,6 +61,11 @@ Shared large diagnostics are referenced by content hash. Candidate computation h
 a 60-second async timeout; failures remain paired blockers. Persistence and opponent
 collection failures are logged explicitly and preserve valid manager control advice.
 Due forecast capture runs before planning so that wake's stored revision can be read.
+Pre-tipoff planning is due one five-minute Cron interval before the configured move
+deadline (15 minutes before tipoff with the default 10-minute lead). This preserves
+the movement margin instead of collecting statuses when the deadline has already
+arrived. Live collection and the final advice cutoff use completed collection time;
+shadow work cannot preserve an earlier advice time after consuming that margin.
 
 Forecast receipts, raw payloads, and semantic revisions live in the separate
 `sleeper-manager-forecast-archive` D1 database. Apply every file in
