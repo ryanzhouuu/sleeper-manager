@@ -35,7 +35,7 @@ def storage(request, tmp_path):  # type: ignore[no-untyped-def]
     return repository, sqlite3.connect(path)
 
 
-async def save_history(repository):  # type: ignore[no-untyped-def]
+async def save_history(repository, *, published_at=CUTOFF):  # type: ignore[no-untyped-def]
     data = history()
     index = build_hybrid_runtime_index(
         data, reference_time=CUTOFF, game_start=TIPOFF, scoring_policy=POLICY
@@ -57,7 +57,9 @@ async def save_history(repository):  # type: ignore[no-untyped-def]
         parts,
         census,
     )
-    await repository.publish_history(manifest)
+    await repository.publish_history(
+        manifest, published_at=published_at, clock=lambda: published_at
+    )
     return manifest, index
 
 
@@ -86,7 +88,7 @@ def test_missing_partition_prevents_publishing_selectable_history(storage) -> No
         history_manifest_version(index_id, parts), index.dataset_version, CUTOFF, index_id, parts
     )
     with pytest.raises(HybridProjectionError, match="artifact_missing"):
-        asyncio.run(repository.publish_history(manifest))
+        asyncio.run(repository.publish_history(manifest, published_at=CUTOFF))
     assert connection.execute("SELECT count(*) FROM hybrid_history_versions").fetchone()[0] == 0
 
 
@@ -106,12 +108,19 @@ def test_corrupt_partition_is_not_treated_as_no_history(storage) -> None:  # typ
 def test_shadow_run_reference_is_immutable_and_retains_failure_evidence(storage) -> None:  # type: ignore[no-untyped-def]
     repository, connection = storage
     value = {"candidate_failure": "unverified_player_stats", "control": None}
-    first = asyncio.run(repository.save_shadow_run("run", "league", CUTOFF, value))
-    assert asyncio.run(repository.save_shadow_run("run", "league", CUTOFF, value)) == first
+    first = asyncio.run(
+        repository.save_shadow_run("run", "league", CUTOFF, value, persisted_at=CUTOFF)
+    )
+    assert (
+        asyncio.run(repository.save_shadow_run("run", "league", CUTOFF, value, persisted_at=CUTOFF))
+        == first
+    )
     assert asyncio.run(repository.load_value(first)) == value
     with pytest.raises(HybridProjectionError, match="shadow_run_conflict"):
         asyncio.run(
-            repository.save_shadow_run("run", "league", CUTOFF, {"candidate_failure": None})
+            repository.save_shadow_run(
+                "run", "league", CUTOFF, {"candidate_failure": None}, persisted_at=CUTOFF
+            )
         )
     assert connection.execute("SELECT count(*) FROM hybrid_shadow_runs").fetchone()[0] == 1
 
@@ -120,3 +129,15 @@ def test_runtime_schema_matches_the_deploy_migration() -> None:
     root = Path(__file__).resolve().parents[3]
     path = root / "infra/cloudflare/migrations/0005_hybrid_runtime.sql"
     assert path.read_text().strip() == HYBRID_RUNTIME_SCHEMA.strip()
+
+
+def test_prepared_history_is_unavailable_before_its_actual_publication(storage) -> None:  # type: ignore[no-untyped-def]
+    repository, _ = storage
+    publication = CUTOFF + timedelta(minutes=1)
+    manifest, index = asyncio.run(save_history(repository, published_at=publication))
+    with pytest.raises(HybridProjectionError, match="published_after_cutoff"):
+        asyncio.run(repository.load_history(manifest.version, cutoff=CUTOFF))
+    assert asyncio.run(repository.load_history(manifest.version, cutoff=publication)) == (
+        manifest,
+        index,
+    )

@@ -1,6 +1,6 @@
 """Persist immutable hybrid history references and shadow evidence beside runtime state."""
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
@@ -32,12 +32,14 @@ CREATE TABLE IF NOT EXISTS hybrid_artifacts (
 CREATE TABLE IF NOT EXISTS hybrid_history_versions (
     version TEXT PRIMARY KEY,
     manifest_artifact_id TEXT NOT NULL REFERENCES hybrid_artifacts(artifact_id),
-    reference_time TEXT NOT NULL
+    reference_time TEXT NOT NULL,
+    published_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS hybrid_shadow_runs (
     run_id TEXT PRIMARY KEY,
     league_id TEXT NOT NULL,
     cutoff TEXT NOT NULL,
+    persisted_at TEXT NOT NULL,
     manifest_artifact_id TEXT NOT NULL REFERENCES hybrid_artifacts(artifact_id)
 );
 CREATE INDEX IF NOT EXISTS hybrid_shadow_cutoffs ON hybrid_shadow_runs(league_id, cutoff);
@@ -96,8 +98,17 @@ class HybridRuntimeRepository:
     async def load_value(self, artifact_id: str) -> object:
         return decode_hybrid_artifact(await self._artifact(artifact_id))
 
-    async def publish_history(self, manifest: HybridHistoryManifest) -> None:
+    async def publish_history(
+        self,
+        manifest: HybridHistoryManifest,
+        *,
+        published_at: datetime,
+        clock: Callable[[], datetime] | None = None,
+    ) -> datetime:
         """Verify all referenced partitions before publishing a selectable immutable version."""
+        require_aware(published_at)
+        if published_at < manifest.reference_time:
+            raise HybridProjectionError("hybrid_publication_before_reference")
         if manifest.version != history_manifest_version(
             manifest.index_artifact_id, manifest.player_artifacts, manifest.census_artifacts
         ):
@@ -119,17 +130,20 @@ class HybridRuntimeRepository:
         for artifact_id in manifest.census_artifacts:
             decode_census_partition(await self.load_value(artifact_id))
         artifact_id = await self.save_value(manifest)
+        published_at = max(published_at, (clock or (lambda: datetime.now(UTC)))())
         await self._sql._run(
-            "INSERT OR IGNORE INTO hybrid_history_versions VALUES (?, ?, ?)",
+            "INSERT OR IGNORE INTO hybrid_history_versions VALUES (?, ?, ?, ?)",
             manifest.version,
             artifact_id,
             manifest.reference_time.astimezone(UTC).isoformat(),
+            published_at.astimezone(UTC).isoformat(),
         )
         row = await self._sql._first(
             "SELECT * FROM hybrid_history_versions WHERE version = ?", manifest.version
         )
         if row is None or row["manifest_artifact_id"] != artifact_id:
             raise HybridProjectionError("hybrid_history_version_conflict")
+        return datetime.fromisoformat(row["published_at"])
 
     async def load_history(
         self,
@@ -151,6 +165,8 @@ class HybridRuntimeRepository:
             raise HybridProjectionError("hybrid_manifest_identity_mismatch")
         if manifest.reference_time > cutoff:
             raise HybridProjectionError("runtime_index_after_cutoff")
+        if datetime.fromisoformat(row["published_at"]) > cutoff:
+            raise HybridProjectionError("runtime_history_published_after_cutoff")
         if datetime.fromisoformat(row["reference_time"]) != manifest.reference_time:
             raise HybridProjectionError("hybrid_manifest_index_mismatch")
         index = decode_runtime_index(await self.load_value(manifest.index_artifact_id))
@@ -182,15 +198,21 @@ class HybridRuntimeRepository:
         league_id: str,
         cutoff: datetime,
         manifest: Mapping[str, object],
+        *,
+        persisted_at: datetime,
     ) -> str:
         """Publish complete paired evidence atomically through its final immutable reference."""
         require_aware(cutoff)
+        require_aware(persisted_at)
+        if persisted_at < cutoff:
+            raise HybridProjectionError("shadow_persistence_before_cutoff")
         artifact_id = await self.save_value(manifest)
         await self._sql._run(
-            "INSERT OR IGNORE INTO hybrid_shadow_runs VALUES (?, ?, ?, ?)",
+            "INSERT OR IGNORE INTO hybrid_shadow_runs VALUES (?, ?, ?, ?, ?)",
             run_id,
             league_id,
             cutoff.astimezone(UTC).isoformat(),
+            persisted_at.astimezone(UTC).isoformat(),
             artifact_id,
         )
         row = await self._sql._first("SELECT * FROM hybrid_shadow_runs WHERE run_id = ?", run_id)

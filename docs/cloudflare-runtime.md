@@ -39,6 +39,22 @@ from `active_projection_provider`. Existing policies default to shadow disabled 
 `direct_baseline` advice. Shadow activation requires a pinned prepared history version.
 This release rejects hybrid active-provider selection; promotion remains a separate change.
 
+Prepare or synchronize indexed hybrid history with a sanitized dry-run first:
+
+```bash
+uv run python -m sleeper_manager.cloudflare.hybrid_sync_cli \
+  --history .local/hybrid/history.json --league-fixture .local/league.json --season 2026
+```
+
+Add `--apply` to upload to the state D1 database after applying its migrations.
+Add `--enable-shadow` to update the existing runtime policy after the uploaded
+artifacts verify. This preserves manager preferences and direct-baseline history;
+it cannot promote hybrid advice. `--local-db .local/state.db --apply` writes the
+same contracts to local SQLite. Dry-run never creates a database or activates policy.
+The history reference cutoff and its actual publication time are retained separately;
+runtime reads reject a version published after the requested decision cutoff.
+Shadow runs likewise retain their decision cutoff and actual persistence time.
+
 Forecast receipts, raw payloads, and semantic revisions live in the separate
 `sleeper-manager-forecast-archive` D1 database. Apply every file in
 `infra/cloudflare/forecast-migrations/` before deploying a Worker with the
