@@ -3,6 +3,8 @@
 The Worker uses one five-minute Cron Trigger. Forecast capture exceeded the Workers
 Free plan's 10 ms CPU allowance before it could write a receipt, so this schedule
 requires the Workers Paid CPU allowance. Verify the first remote receipt after deploying.
+Worker logs and traces are enabled with query strings redacted. Shadow events contain
+run identities and failure counts; private roster evidence remains in D1 artifacts.
 
 Each wake claims due daily, pre-tipoff, postgame, or delivery-retry work. Daily and
 pre-tipoff wakes run the weekly lineup planner at most once and refresh live Lock-In
@@ -73,6 +75,20 @@ and unavailable official reports. Source hashes remain in projection/shadow diag
 Visible availability changes revise notification identity; identical refreshed warnings
 deduplicate. Recommendation traces retain `availability_notes` and a separate
 `availability_material_hash`, preserving the underlying plan's material identity.
+
+Local `run-scheduled` uses the same hybrid artifact store in `SQLITE_PATH` and reads
+external revisions from the neighboring `forecasts.db`. Its HTTP adapter supports
+the Python Workers `bytes()` response API, including official report PDFs.
+
+Validation on October 13, 2026 retained 105,409 stat observations and all 8,190 census
+opportunities. Verified report reconstruction tagged 5,825 opportunities; 2,365 remain
+applicability gaps. The league's full scoring policy yielded zero eligible hybrid stat
+profiles because technical/flagrant coverage is unverified. Synchronization preserves
+that blocker; a successful upload does not establish projection readiness.
+An isolated local workerd test exercised real D1 reads, official PDF parsing, and a
+24-player batch in 5.923 seconds using the explicitly diagnostic policy with foul
+penalties disabled. This is integration evidence, not production scoring validation,
+an enforced memory-budget measurement, or live accuracy evidence.
 
 Forecast receipts, raw payloads, and semantic revisions live in the separate
 `sleeper-manager-forecast-archive` D1 database. Apply every file in

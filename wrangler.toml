@@ -3,6 +3,13 @@ main = "src/worker.py"
 compatibility_date = "2026-07-28"
 compatibility_flags = ["python_workers"]
 
+[observability]
+enabled = true
+redact_query_string = true
+
+[observability.traces]
+enabled = true
+
 [vars]
 NTFY_BASE_URL = "https://ntfy.sh"
 OPEN_SLEEPER_URL = "https://sleeper.com"
