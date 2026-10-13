@@ -124,8 +124,14 @@ def test_official_report_reaches_collected_projections_and_retained_evidence() -
         async def report(self, cutoff):  # type: ignore[no-untyped-def]
             return report
 
+    nba = _nba()
+    first_game, second_game = nba.schedules["12"]
+    nba.schedules["12"] = (
+        first_game,
+        replace(second_game, start_time=second_game.start_time + timedelta(days=2)),
+    )
     collected = asyncio.run(
-        _collect(_nba(), _RecordingProjections(), official_availability_source=Official())
+        _collect(nba, _RecordingProjections(), official_availability_source=Official())
     )
     first = next(
         row
@@ -137,6 +143,12 @@ def test_official_report_reaches_collected_projections_and_retained_evidence() -
         player == "p1" and row.confirmed_absence for player, row in collected.game_availability
     )
     assert len(collected.projection_targets) == 4
+    later = next(
+        row
+        for row in collected.inputs.projections
+        if row.sleeper_player_id == "p1" and row.game_id == "g2"
+    )
+    assert later.snapshot.distribution.expected_value == 10
 
 
 def test_official_provider_failure_is_retained_without_breaking_control() -> None:
