@@ -34,6 +34,11 @@ only after their index, exact player outcomes, and original census partitions ve
 Shadow evidence uses the state database; captured external forecasts remain in the
 separate forecast archive. The local SQLite adapter uses the same artifact contracts.
 
+Runtime policy stores `hybrid_shadow_enabled` and `hybrid_history_version` separately
+from `active_projection_provider`. Existing policies default to shadow disabled and
+`direct_baseline` advice. Shadow activation requires a pinned prepared history version.
+This release rejects hybrid active-provider selection; promotion remains a separate change.
+
 Forecast receipts, raw payloads, and semantic revisions live in the separate
 `sleeper-manager-forecast-archive` D1 database. Apply every file in
 `infra/cloudflare/forecast-migrations/` before deploying a Worker with the

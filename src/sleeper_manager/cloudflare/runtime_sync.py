@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import tomllib
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
@@ -192,6 +192,14 @@ async def sync_cloudflare_runtime_data(
         )
     if repository is None:
         raise RuntimeSyncError("Apply requires a D1 repository")
+    stored_policy = await repository.load_runtime_policy()
+    if stored_policy is not None and policy.hybrid_history_version is None:
+        current = RuntimePolicy.from_json(stored_policy.version, stored_policy.payload_json)
+        policy = replace(
+            policy,
+            hybrid_history_version=current.hybrid_history_version,
+            hybrid_shadow_enabled=current.hybrid_shadow_enabled,
+        )
     await repository.save_projection_observations(history.records)
     loaded = await repository.load_projection_observations(history.dataset_version)
     verified_hash = observation_content_hash(loaded)

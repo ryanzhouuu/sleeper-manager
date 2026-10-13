@@ -111,8 +111,22 @@ class RuntimePolicy:
     projection_history_version: str
     mapping_overrides: Mapping[str, str]
     manager_intent: ManagerIntent
+    hybrid_history_version: str | None = None
+    hybrid_shadow_enabled: bool = False
+    active_projection_provider: Literal["direct_baseline"] = "direct_baseline"
 
     def __post_init__(self) -> None:
+        if not isinstance(self.hybrid_shadow_enabled, bool):
+            raise RuntimePolicyError("Hybrid shadow selection must be a boolean")
+        if self.hybrid_history_version is not None and (
+            not isinstance(self.hybrid_history_version, str)
+            or not self.hybrid_history_version.strip()
+        ):
+            raise RuntimePolicyError("Hybrid history version must be a non-empty string")
+        if self.hybrid_shadow_enabled and self.hybrid_history_version is None:
+            raise RuntimePolicyError("Hybrid shadow requires a pinned hybrid history version")
+        if self.active_projection_provider != "direct_baseline":
+            raise RuntimePolicyError("Hybrid advice promotion requires a separate implementation")
         for label, text_value in (
             ("Runtime policy version", self.version),
             ("Manager timezone", self.manager_timezone),
@@ -161,6 +175,9 @@ class RuntimePolicy:
             "projection_history_version",
             "mapping_overrides",
             "manager_intent",
+            "hybrid_history_version",
+            "hybrid_shadow_enabled",
+            "active_projection_provider",
         }
         extras = set(payload) - allowed
         if extras:
@@ -194,6 +211,11 @@ class RuntimePolicy:
                 projection_history_version=_required_string(payload, "projection_history_version"),
                 mapping_overrides=mapping_overrides,
                 manager_intent=manager_intent,
+                hybrid_history_version=payload.get("hybrid_history_version"),
+                hybrid_shadow_enabled=payload.get("hybrid_shadow_enabled", False),
+                active_projection_provider=payload.get(
+                    "active_projection_provider", "direct_baseline"
+                ),
             )
         except (TypeError, ValueError) as error:
             if isinstance(error, RuntimePolicyError):
@@ -211,6 +233,9 @@ class RuntimePolicy:
             "projection_history_version": self.projection_history_version,
             "mapping_overrides": dict(self.mapping_overrides),
             "manager_intent": self.manager_intent.to_json(),
+            "hybrid_history_version": self.hybrid_history_version,
+            "hybrid_shadow_enabled": self.hybrid_shadow_enabled,
+            "active_projection_provider": self.active_projection_provider,
         }
         return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 

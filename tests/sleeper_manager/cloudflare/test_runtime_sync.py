@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -11,8 +12,10 @@ from sleeper_manager.cloudflare.runtime_sync import (
     sync_cloudflare_runtime_data,
 )
 from sleeper_manager.config import load_manager_policy
+from sleeper_manager.domain.runtime_policy import RuntimePolicy
 from sleeper_manager.domain.scoring import BoxScoreLine
 from sleeper_manager.persistence.async_sqlite import AsyncSQLiteStateRepository
+from sleeper_manager.persistence.base import RuntimePolicyRecord
 from sleeper_manager.projections.direct_baseline import DirectBaselineObservation
 
 NOW = datetime(2026, 1, 7, 18, tzinfo=UTC)
@@ -130,3 +133,25 @@ mapping_overrides = { "sleeper-1" = "espn-1" }
     assert policy.manager_intent.preset == "conservative"
     assert policy.manager_intent.minimum_confidence == 0.85
     assert policy.manager_intent.version == manager_policy.version
+
+
+def test_baseline_history_sync_preserves_enabled_hybrid_shadow(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    async def exercise() -> None:
+        repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
+        await repository.initialize()
+        history = records_from_observations((_observation(),), history_version="new-control")
+        policy = runtime_policy_for_history(history)
+        current = replace(
+            policy, hybrid_history_version="hybrid-version", hybrid_shadow_enabled=True
+        )
+        await repository.save_runtime_policy(RuntimePolicyRecord("current", current.to_json(), NOW))
+        await sync_cloudflare_runtime_data(
+            history, policy=policy, repository=repository, apply=True, now=NOW
+        )
+        record = await repository.load_runtime_policy()
+        loaded = RuntimePolicy.from_json(record.version, record.payload_json)
+        assert loaded.hybrid_history_version == "hybrid-version"
+        assert loaded.hybrid_shadow_enabled
+        assert loaded.projection_history_version == "new-control"
+
+    asyncio.run(exercise())
