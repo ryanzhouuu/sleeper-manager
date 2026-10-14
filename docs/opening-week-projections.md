@@ -182,6 +182,14 @@ invalid counts, duplicate player-games, and conflicting NBA teams are rejected.
 Technical/flagrant coverage requires actual source fields; play-by-play counts are not
 automatically accepted as complete coverage.
 
+`backtesting.replay.final_foul_text.parse_final_foul_text` reads named foul assessments
+from complete official final-box layout text. It preserves team sides, technical
+subtypes, repeated assessments, flagrant severity, and summary-section presence.
+Team and unresolved bench actors remain named events rather than player penalties.
+Truncated reports, unknown sections, team contradictions, and inconsistent totals
+are rejected. Parsing alone does not resolve player identities or certify omitted
+summary sections as verified zeros; those require separate source qualification.
+
 `build_hybrid_history` in `projections.hybrid_history_adapter` joins the parsed
 sources to reviewed `GameRosterCensus` records. Use `load_final_roster_evidence`
 to verify the retained reports and pass both its censuses and source fingerprints.
