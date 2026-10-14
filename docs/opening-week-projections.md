@@ -190,6 +190,17 @@ Truncated reports, unknown sections, team contradictions, and inconsistent total
 are rejected. Parsing alone does not resolve player identities or certify omitted
 summary sections as verified zeros; those require separate source qualification.
 
+`qualify_final_game_fouls` requires a complete-summary review covering omitted
+sections, a report source version, historical named box-row identities, independent
+actor evidence, and explicit finalization timing. Every assessment must reconcile
+by name, side, clock, period, and technical subtype. Unmatched or ambiguous actors
+reject the game, including conflicts between a nonplayer witness and a box identity.
+The resulting per-player counts include reviewed zeros. `attach_hybrid_foul_history`
+adds those values and coverage to the original observations, rejects contradictions
+with already verified counts, and retains every participation/status record.
+Augmented stat evidence becomes visible only after both original and foul evidence
+finalization; retrospective timing assumptions must remain explicitly labeled.
+
 `build_hybrid_history` in `projections.hybrid_history_adapter` joins the parsed
 sources to reviewed `GameRosterCensus` records. Use `load_final_roster_evidence`
 to verify the retained reports and pass both its censuses and source fingerprints.
