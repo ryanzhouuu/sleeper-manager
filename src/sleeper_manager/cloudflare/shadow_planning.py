@@ -1,4 +1,4 @@
-"""Pair live control and hybrid projections without selecting the candidate for advice."""
+"""Pair live forecasts and select advice only through the explicit runtime policy."""
 
 import asyncio
 import json
@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import fields, replace
 from datetime import datetime
 
+from sleeper_manager.cloudflare.active_hybrid import apply_active_hybrid
 from sleeper_manager.cloudflare.providers import CloudflareSleeperClient
 from sleeper_manager.domain.league import LeagueProfile
 from sleeper_manager.domain.runtime_policy import RuntimePolicy
@@ -38,17 +39,20 @@ async def finish_hybrid_shadow_planning(
     archive: AsyncForecastArchiveRepository | None,
     clock: Callable[[], datetime],
 ) -> CollectedLiveEvidence:
-    """Finalize both roster targets at one cutoff and persist paired successes and blockers."""
+    """Use one candidate batch for selected advice and optional durable paired evaluation."""
     profile = manager.inputs.league_profile
     evidence = [manager]
     warnings = list(manager.warnings)
     try:
-        sides = parse_matchup_sides(
-            await sleeper.matchups(profile.league_id, profile.fantasy_week.week)
-        )
-        opponent_id = opponent_roster_id(sides, profile.manager_roster_id)
-        if opponent_id is not None:
-            evidence.append(await collect_opponent(replace(profile, manager_roster_id=opponent_id)))
+        if policy.hybrid_shadow_enabled:
+            sides = parse_matchup_sides(
+                await sleeper.matchups(profile.league_id, profile.fantasy_week.week)
+            )
+            opponent_id = opponent_roster_id(sides, profile.manager_roster_id)
+            if opponent_id is not None:
+                evidence.append(
+                    await collect_opponent(replace(profile, manager_roster_id=opponent_id))
+                )
     except Exception as error:
         warnings.append(f"hybrid_shadow_opponent_gap:{type(error).__name__}")
     cutoff = clock()
@@ -105,6 +109,10 @@ async def finish_hybrid_shadow_planning(
         ),
         decision_time=cutoff,
     )
+    if policy.active_projection_provider == "hybrid":
+        updated = await apply_active_hybrid(
+            updated, (), policy=policy, cutoff=cutoff, availability=availability
+        )
     future = tuple(target for target in targets if target.game_start > cutoff)
     if not future:
         return replace(updated, warnings=tuple(warnings))
@@ -139,6 +147,12 @@ async def finish_hybrid_shadow_planning(
         )
     if archive is None:
         warnings.append("hybrid_forecast_archive_missing")
+    if policy.active_projection_provider == "hybrid":
+        updated = await apply_active_hybrid(
+            updated, attempts, policy=policy, cutoff=cutoff, availability=availability
+        )
+    if not policy.hybrid_shadow_enabled:
+        return replace(updated, decision_time=clock(), warnings=tuple(warnings))
     try:
         control_by_key = {(row.sleeper_player_id, row.game_id): row for row in controls}
         pairs = []
@@ -174,6 +188,7 @@ async def finish_hybrid_shadow_planning(
             "league_id": profile.league_id,
             "cutoff": cutoff,
             "control_history_version": policy.projection_history_version,
+            "active_projection_provider": policy.active_projection_provider,
             "hybrid_history_version": policy.hybrid_history_version,
             "model_version": candidate.config.model_version,
             "scoring_policy_version": profile.scoring.version,

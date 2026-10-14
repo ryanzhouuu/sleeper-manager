@@ -32,12 +32,14 @@ class D1ProjectionHistory:
         *,
         history_version: str,
         loaded_at: datetime,
+        allow_empty: bool = False,
     ) -> D1ProjectionHistory:
+        """Allow an empty diagnostic control only when another provider supplies advice."""
         records = await repository.load_projection_observations(
             history_version,
             before=loaded_at,
         )
-        if not records:
+        if not records and not allow_empty:
             raise ProjectionHistoryError("Projection history version has no observations")
         observations = tuple(
             DirectBaselineObservation(

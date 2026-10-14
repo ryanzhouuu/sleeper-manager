@@ -106,8 +106,8 @@ archive by cutoff. `project_batch` accepts all targets on both rosters and optio
 availability keyed by `(sleeper_player_id, game_id)`. It prepares each cutoff/season
 once and loads one revision for all requested players. An empty archive uses internal
 fallback; archive corruption propagates as an error. Its single-target `project`
-method conforms to the existing live projection boundary, but active advice still
-uses the current provider. Shadow/replay consumers should retain the batch results.
+method conforms to the existing live projection boundary. Runtime policy selects
+the active advice provider separately; shadow/replay consumers retain batch results.
 `read_player_forecasts_async` uses the same selection rules against D1 and loads
 the revision once for all requested players. An empty archive returns no reads;
 corruption remains an integrity error rather than ordinary missing evidence.
@@ -245,7 +245,7 @@ execution; any failed entry blocks that candidate. Bundle coverage and unrelated
 input checks remain intact, and standalone diagnostics still require embedded
 projections. Run the control surface with the same policies for a comparison.
 The scheduled runtime integration is configured separately as described in
-`cloudflare-runtime.md`; hybrid promotion remains disabled.
+`cloudflare-runtime.md`; selecting hybrid advice requires explicit pinned runtime policy.
 
 To attach historical status buckets without changing the resolved census, run:
 

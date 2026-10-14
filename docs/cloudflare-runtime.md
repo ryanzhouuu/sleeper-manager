@@ -41,7 +41,11 @@ separate forecast archive. The local SQLite adapter uses the same artifact contr
 Runtime policy stores `hybrid_shadow_enabled` and `hybrid_history_version` separately
 from `active_projection_provider`. Existing policies default to shadow disabled and
 `direct_baseline` advice. Shadow activation requires a pinned prepared history version.
-This release rejects hybrid active-provider selection; promotion remains a separate change.
+`active_projection_provider` explicitly selects `direct_baseline` or `hybrid` advice.
+Hybrid advice also requires a pinned history version; it can run with shadow evaluation
+enabled or disabled. An empty baseline history is allowed only as a diagnostic control
+when hybrid supplies advice. Selected hybrid failures remain missing projections and
+never silently substitute baseline advice. Existing policies retain baseline defaults.
 
 Prepare or synchronize indexed hybrid history with a sanitized dry-run first:
 
@@ -53,7 +57,7 @@ uv run python -m sleeper_manager.cloudflare.hybrid_sync_cli \
 Add `--apply` to upload to the state D1 database after applying its migrations.
 Add `--enable-shadow` to update the existing runtime policy after the uploaded
 artifacts verify. This preserves manager preferences and direct-baseline history;
-it cannot promote hybrid advice. `--local-db .local/state.db --apply` writes the
+it preserves the explicit active-provider selection. `--local-db .local/state.db --apply` writes the
 same contracts to local SQLite. Dry-run never creates a database or activates policy.
 The history reference cutoff and its actual publication time are retained separately;
 runtime reads reject a version published after the requested decision cutoff.

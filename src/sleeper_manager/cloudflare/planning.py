@@ -77,6 +77,7 @@ async def collect_cloudflare_planning_inputs(
     shadow_repository: HybridRuntimeRepository | None = None,
     forecast_archive: AsyncForecastArchiveRepository | None = None,
 ) -> CloudflarePlanningAssembly:
+    """Select advice explicitly while sharing live collection with optional paired evaluation."""
     if scheduled_at.tzinfo is None:
         raise CloudflarePlanningConfigurationError("Scheduled time must be timezone-aware")
     league_id = _required_env(env, "SLEEPER_LEAGUE_ID")
@@ -96,6 +97,7 @@ async def collect_cloudflare_planning_inputs(
         repository,
         history_version=policy.projection_history_version,
         loaded_at=history_loaded_at,
+        allow_empty=policy.active_projection_provider == "hybrid",
     )
     nba = AsyncCachedNBAProvider(
         CloudflareESPNProvider(fetcher, clock=tick),
@@ -121,17 +123,23 @@ async def collect_cloudflare_planning_inputs(
             ),
             runtime_policy_version=policy.manager_intent.version,
             move_lead_time=policy.move_lead_time,
-            projection_history_version=history.history_version,
+            projection_history_version=(
+                policy.hybrid_history_version
+                if policy.active_projection_provider == "hybrid"
+                else history.history_version
+            ),
             projection_history_retrieved_at=history.loaded_at,
             acknowledgement_source=repository,
             mapping_overrides=policy.mapping_overrides,
             official_availability_source=CloudflareOfficialAvailability(fetcher, clock=tick),
             clock=tick,
-            skip_projections=policy.hybrid_shadow_enabled,
+            skip_projections=(
+                policy.hybrid_shadow_enabled or policy.active_projection_provider == "hybrid"
+            ),
         )
 
     evidence = await collect(profile)
-    if policy.hybrid_shadow_enabled:
+    if policy.hybrid_shadow_enabled or policy.active_projection_provider == "hybrid":
         binding = getattr(env, "sleeper_manager_state", None)
         store = shadow_repository or (
             D1HybridRuntimeRepository(binding) if binding is not None else None

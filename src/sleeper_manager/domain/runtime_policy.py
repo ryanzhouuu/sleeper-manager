@@ -113,7 +113,7 @@ class RuntimePolicy:
     manager_intent: ManagerIntent
     hybrid_history_version: str | None = None
     hybrid_shadow_enabled: bool = False
-    active_projection_provider: Literal["direct_baseline"] = "direct_baseline"
+    active_projection_provider: Literal["direct_baseline", "hybrid"] = "direct_baseline"
 
     def __post_init__(self) -> None:
         if not isinstance(self.hybrid_shadow_enabled, bool):
@@ -125,8 +125,10 @@ class RuntimePolicy:
             raise RuntimePolicyError("Hybrid history version must be a non-empty string")
         if self.hybrid_shadow_enabled and self.hybrid_history_version is None:
             raise RuntimePolicyError("Hybrid shadow requires a pinned hybrid history version")
-        if self.active_projection_provider != "direct_baseline":
-            raise RuntimePolicyError("Hybrid advice promotion requires a separate implementation")
+        if self.active_projection_provider not in ("direct_baseline", "hybrid"):
+            raise RuntimePolicyError("Unknown active projection provider")
+        if self.active_projection_provider == "hybrid" and self.hybrid_history_version is None:
+            raise RuntimePolicyError("Hybrid advice requires a pinned hybrid history version")
         for label, text_value in (
             ("Runtime policy version", self.version),
             ("Manager timezone", self.manager_timezone),
