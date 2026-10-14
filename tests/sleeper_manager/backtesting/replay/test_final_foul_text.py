@@ -60,6 +60,32 @@ def test_omitted_sections_remain_distinct_from_explicit_zero_summaries() -> None
     assert zero.sections == ("flagrant",)
 
 
+def test_historical_technical_categories_share_counts_without_becoming_duplicate_sections() -> None:
+    """Older final reports list administrative categories under separate headings."""
+    parsed = parse_final_foul_text(
+        BOX.format(
+            summary="""Technical fouls - Individual
+Visitors (1): Example 1:00 1st
+HOSTS (0): NONE
+Technical fouls - Defensive Three Seconds
+Visitors (0): NONE
+HOSTS (1): Sample 2:00 2nd
+Technical fouls - Delay
+Visitors (1): Team 3:00 3rd
+HOSTS (0): NONE
+Technical fouls - Excess Timeout
+Visitors (1): Team 4:00 4th
+HOSTS (0): NONE
+Technical fouls - Bench
+Visitors (0): NONE
+HOSTS (1): Coach 5:00 4th"""
+        )
+    )
+    assert len(parsed.events) == 5
+    assert all(row.field == "technical_fouls" for row in parsed.events)
+    assert parsed.sections == ("individual", "non_unsportsmanlike")
+
+
 def test_wrapped_names_repeated_assessments_and_overtime() -> None:
     """Repeated assessments at the same clock retain their multiplicity."""
     parsed = parse_final_foul_text(

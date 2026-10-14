@@ -189,6 +189,8 @@ Team and unresolved bench actors remain named events rather than player penaltie
 Truncated reports, unknown sections, team contradictions, and inconsistent totals
 are rejected. Parsing alone does not resolve player identities or certify omitted
 summary sections as verified zeros; those require separate source qualification.
+Older separate defensive-three-seconds, delay, excess-timeout, and bench headings
+are recognized without treating distinct administrative sections as duplicates.
 
 `qualify_final_game_fouls` requires a complete-summary review covering omitted
 sections, a report source version, historical named box-row identities, independent

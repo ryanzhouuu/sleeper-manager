@@ -17,6 +17,10 @@ FoulKind = Literal["individual", "non_unsportsmanlike", "flagrant"]
 _HEADINGS: dict[str, FoulKind] = {
     "Technical fouls - Individual": "individual",
     "Technical fouls - Non-Unsportsmanlike": "non_unsportsmanlike",
+    "Technical fouls - Defensive Three Seconds": "non_unsportsmanlike",
+    "Technical fouls - Delay": "non_unsportsmanlike",
+    "Technical fouls - Excess Timeout": "non_unsportsmanlike",
+    "Technical fouls - Bench": "individual",
     "Flagrant Fouls": "flagrant",
 }
 _SECTION = re.compile(
@@ -75,14 +79,17 @@ def parse_final_foul_text(text: str) -> FinalFoulText:
     headings = tuple(_SECTION.finditer(summary))
     events: list[FinalFoulEvent] = []
     sections: list[FoulKind] = []
+    seen_titles: set[str] = set()
     for index, heading in enumerate(headings):
         title = heading.group(1).strip()
         if title.startswith(("Ejections", "MEMO:", "Copyright")):
             continue
         kind = _HEADINGS.get(title)
-        if kind is None or kind in sections:
+        if kind is None or title in seen_titles:
             raise ValueError("Unknown or duplicate final foul section")
-        sections.append(kind)
+        seen_titles.add(title)
+        if kind not in sections:
+            sections.append(kind)
         end = headings[index + 1].start() if index + 1 < len(headings) else len(summary)
         body = summary[heading.end() : end]
         sides = tuple(_TEAM.finditer(body))
