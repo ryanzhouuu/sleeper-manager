@@ -13,6 +13,7 @@ from sleeper_manager.projections.hybrid_foul_history import (
     FoulPlayerIdentity,
     attach_hybrid_foul_history,
     qualify_final_game_fouls,
+    qualify_final_player_fouls,
 )
 from sleeper_manager.projections.hybrid_types import (
     HybridHistory,
@@ -197,3 +198,100 @@ def test_reject_conflicting_verified_fouls_duplicate_evidence_and_wrong_games() 
         attach_hybrid_foul_history(
             original, (replace(qualify(), game_start=START + timedelta(minutes=1)),)
         )
+
+
+def qualify_player(summary: str, actors: tuple[FoulActorEvidence, ...]):  # type: ignore[no-untyped-def]
+    """Keep unrelated unresolved source actors explicit in player-scoped qualification."""
+    return qualify_final_player_fouls(
+        parse_final_foul_text(TEXT.format(summary=summary)),
+        PLAYERS[0],
+        game_id="game",
+        game_start=START,
+        finalized_at=FINAL,
+        players=PLAYERS,
+        actors=actors,
+        report_source_version="retained-report-sha256",
+        complete_summary_review="complete-summary-v1",
+    )
+
+
+def test_player_zero_can_be_verified_without_resolving_a_different_named_actor() -> None:
+    """An uncharged target's zero is not an inferred count for the unresolved actor."""
+    summary = "Technical fouls - Individual\nVisitors (1): Coach 1:00 1st\nHosts (0): NONE"
+    unknown = actor("", None)
+    with pytest.raises(HybridProjectionError):
+        qualify(summary, (unknown,))
+    scoped = qualify_player(summary, (unknown,))
+    assert scoped.player_counts == (("1", 0, 0),)
+    updated = attach_hybrid_foul_history(history(), (scoped,))
+    assert updated.observations[0].line.technical_fouls == 0
+    assert updated.observations[1] == history().observations[1]
+
+
+def test_player_positive_still_requires_attributed_events_and_matching_counts() -> None:
+    """A missing identity or contradictory target event cannot become a zero or penalty."""
+    summary = "Technical fouls - Individual\nVisitors (1): Example 1:00 1st\nHosts (0): NONE"
+    assert qualify_player(summary, (actor(),)).player_counts == (("1", 1, 0),)
+    for witnesses in ((actor("", None),), (actor(clock="2:00"),), (actor(), actor())):
+        with pytest.raises(HybridProjectionError):
+            qualify_player(summary, witnesses)
+    with pytest.raises(HybridProjectionError, match="foul_source_count_mismatch"):
+        qualify_player("", (actor(),))
+    with pytest.raises(HybridProjectionError, match="foul_actor_identity_mismatch"):
+        qualify_player("", (actor(player=None),))
+
+
+def test_unresolved_initial_and_compound_surname_are_not_treated_as_unrelated() -> None:
+    """Unsupported abbreviations stay ambiguous even when an exact name match fails."""
+    summary = "Technical fouls - Individual\nVisitors (1): A. Example 1:00 1st\nHosts (0): NONE"
+    with pytest.raises(HybridProjectionError, match="unresolved_foul_actor"):
+        qualify_player(summary, (actor("", None),))
+
+    target = replace(PLAYERS[0], full_name="Alex Example Smith")
+    report = parse_final_foul_text(
+        TEXT.replace("Alex Example", target.full_name).format(
+            summary="Technical fouls - Individual\nVisitors (1): Example 1:00 1st\nHosts (0): NONE"
+        )
+    )
+    with pytest.raises(HybridProjectionError, match="unresolved_foul_actor"):
+        qualify_final_player_fouls(
+            report,
+            target,
+            game_id="game",
+            game_start=START,
+            finalized_at=FINAL,
+            players=(target, PLAYERS[1]),
+            actors=(actor("", None),),
+            report_source_version="report-sha256",
+            complete_summary_review="complete-summary-v1",
+        )
+
+
+def test_same_surname_is_disambiguated_only_by_independent_actor_identity() -> None:
+    """A teammate's assessment must not penalize the requested player."""
+    from sleeper_manager.backtesting.replay.final_roster_text import FinalRosterRow
+
+    report = parse_final_foul_text(
+        TEXT.format(
+            summary="Technical fouls - Individual\nVisitors (1): Example 1:00 1st\nHosts (0): NONE"
+        )
+    )
+    report = replace(
+        report,
+        roster=replace(
+            report.roster, rows=report.roster.rows + (FinalRosterRow("Casey Example", 0, True),)
+        ),
+    )
+    players = PLAYERS + (FoulPlayerIdentity("3", "Casey Example", 0),)
+    result = qualify_final_player_fouls(
+        report,
+        PLAYERS[0],
+        game_id="game",
+        game_start=START,
+        finalized_at=FINAL,
+        players=players,
+        actors=(actor("Casey Example", "3"),),
+        report_source_version="report-sha256",
+        complete_summary_review="complete-summary-v1",
+    )
+    assert result.player_counts == (("1", 0, 0),)

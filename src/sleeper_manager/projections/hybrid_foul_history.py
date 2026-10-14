@@ -29,7 +29,7 @@ class FoulPlayerIdentity:
 
 @dataclass(frozen=True, slots=True)
 class FoulActorEvidence:
-    """One independently attributed assessment; None identifies a verified nonplayer."""
+    """Retain attributed or unresolved assessments; a missing ID never charges a player."""
 
     full_name: str
     player_id: str | None
@@ -196,6 +196,120 @@ def attach_hybrid_foul_history(
         ),
         tuple(rows),
         history.opportunities,
+    )
+
+
+def qualify_final_player_fouls(
+    report: FinalFoulText,
+    target: FoulPlayerIdentity,
+    *,
+    game_id: str,
+    game_start: datetime,
+    finalized_at: datetime,
+    players: Sequence[FoulPlayerIdentity],
+    actors: Sequence[FoulActorEvidence],
+    report_source_version: str,
+    complete_summary_review: str,
+) -> QualifiedGameFouls:
+    """Qualify one named played row without assigning unrelated unresolved assessments.
+
+    Potential surname/initial collisions require independently attributed events.
+    Every known target assessment must agree with the official summary; unrelated
+    missing actors cannot invalidate a reviewed zero for a different named player.
+    """
+    require_aware(game_start)
+    require_aware(finalized_at)
+    if not all((game_id.strip(), report_source_version.strip(), complete_summary_review.strip())):
+        raise HybridProjectionError("missing_foul_coverage_review")
+    if finalized_at < game_start:
+        raise HybridProjectionError("invalid_foul_finalization")
+    by_player = {row.player_id: row for row in players}
+    if (
+        len(by_player) != len(players)
+        or by_player.get(target.player_id) != target
+        or any(
+            not row.player_id.strip() or not row.full_name.strip() or row.side not in (0, 1)
+            for row in players
+        )
+    ):
+        raise HybridProjectionError("invalid_foul_player_identity")
+    name = normalize_player_name(target.full_name)
+    if not name or target.side not in (0, 1) or not target.player_id.strip():
+        raise HybridProjectionError("invalid_foul_player_identity")
+    if (
+        sum(
+            row.side == target.side and normalize_player_name(row.full_name) == name
+            for row in players
+        )
+        != 1
+    ):
+        raise HybridProjectionError("unresolved_foul_box_identity")
+    named_rows = [
+        row
+        for row in report.roster.rows
+        if row.side == target.side and normalize_player_name(row.name) == name
+    ]
+    if len(named_rows) != 1 or not named_rows[0].did_play:
+        raise HybridProjectionError("unresolved_foul_box_identity")
+    if any(not actor.source_version.strip() for actor in actors):
+        raise HybridProjectionError("missing_foul_actor_source")
+    remaining = list(actors)
+    counts: Counter[str] = Counter()
+    for event in report.events:
+        short = normalize_player_name(event.name)
+        if event.side != target.side or not set(short.split()).intersection(name.split()):
+            continue
+        matches = [
+            index
+            for index, actor in enumerate(remaining)
+            if (actor.side, actor.kind, actor.clock, actor.period)
+            == (event.side, event.kind, event.clock, event.period)
+            and _matches_name(event.name, actor.full_name)
+        ]
+        identities = {(remaining[index].player_id, remaining[index].full_name) for index in matches}
+        if not matches or len(identities) != 1:
+            raise HybridProjectionError("unresolved_foul_actor")
+        actor = remaining.pop(matches[0])
+        actor_name = normalize_player_name(actor.full_name)
+        if actor.player_id == target.player_id:
+            if actor_name != name:
+                raise HybridProjectionError("foul_actor_identity_mismatch")
+            counts[event.field] += 1
+        elif actor_name == name:
+            raise HybridProjectionError("foul_actor_identity_mismatch")
+        elif actor.player_id in by_player:
+            other = by_player[actor.player_id]
+            if other.side != actor.side or normalize_player_name(other.full_name) != actor_name:
+                raise HybridProjectionError("foul_actor_identity_mismatch")
+    secondary: Counter[str] = Counter()
+    for actor in actors:
+        if (
+            actor.side in (target.side, -1)
+            and normalize_player_name(actor.full_name) == name
+            and actor.player_id != target.player_id
+        ):
+            raise HybridProjectionError("foul_actor_identity_mismatch")
+        if actor.player_id != target.player_id:
+            continue
+        if actor.side != target.side or normalize_player_name(actor.full_name) != name:
+            raise HybridProjectionError("foul_actor_identity_mismatch")
+        secondary["flagrant_fouls" if actor.kind == "flagrant" else "technical_fouls"] += 1
+    if any(counts[field] != secondary[field] for field in FOUL_FIELDS):
+        raise HybridProjectionError("foul_source_count_mismatch")
+    values = ((target.player_id, counts["technical_fouls"], counts["flagrant_fouls"]),)
+    return QualifiedGameFouls(
+        game_id,
+        game_start,
+        finalized_at,
+        values,
+        history_evidence_version(
+            "official-final-player-fouls-v1",
+            report_source_version,
+            complete_summary_review,
+            target,
+            tuple(sorted(actors, key=repr)),
+            values,
+        ),
     )
 
 

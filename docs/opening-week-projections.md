@@ -202,6 +202,10 @@ adds those values and coverage to the original observations, rejects contradicti
 with already verified counts, and retains every participation/status record.
 Augmented stat evidence becomes visible only after both original and foul evidence
 finalization; retrospective timing assumptions must remain explicitly labeled.
+`qualify_final_player_fouls` can qualify a specific named played row when an unrelated
+actor remains unresolved. Possible surname/initial collisions still require attributed
+events, and known target assessments must reconcile by identity, side, clock, and count.
+Only the requested player's counts gain coverage; unrelated actors retain their gaps.
 
 `build_hybrid_history` in `projections.hybrid_history_adapter` joins the parsed
 sources to reviewed `GameRosterCensus` records. Use `load_final_roster_evidence`
