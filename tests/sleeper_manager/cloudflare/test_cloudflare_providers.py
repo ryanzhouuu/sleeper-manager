@@ -157,5 +157,5 @@ def test_espn_team_routes_translate_rejected_abbreviations() -> None:
     provider = CloudflareESPNProvider(schedule_fetch, clock=lambda: NOW)
     asyncio.run(provider.team_schedule("UTA", 2026))
     assert schedule_fetch.urls == [
-        "https://site.web.api.espn.com/apis/site/v2/sports/basketball/nba/teams/utah/schedule?season=2026"
+        "https://site.web.api.espn.com/apis/site/v2/sports/basketball/nba/teams/utah/schedule?season=2026&seasontype=2"
     ]

@@ -230,7 +230,8 @@ class _Nba:
     async def team_schedule(
         self, team_id: str, season: int
     ) -> ProviderResult[tuple[ScheduledGame, ...]]:
-        del team_id, season
+        del team_id
+        assert season == 2027
         scheduled = ScheduledGame(
             provider_id="game-1",
             start_time=TIPOFF,

@@ -19,6 +19,7 @@ from sleeper_manager.domain.nba import (
     ProviderResult,
     ScheduledGame,
 )
+from sleeper_manager.domain.nba_season import espn_season_end_year
 from sleeper_manager.domain.planning import (
     AcknowledgedDecisionEvidence,
 )
@@ -415,7 +416,7 @@ async def _injury_availability(
 
 def _season_year(profile: LeagueProfile) -> int:
     try:
-        return int(profile.season)
+        return espn_season_end_year(profile.season)
     except ValueError as error:
         raise PlanningCollectionError(
             f"League season {profile.season!r} is not a valid year"

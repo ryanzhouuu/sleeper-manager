@@ -2,8 +2,19 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from sleeper_manager.domain.nba_season import nba_season_start_year
+from sleeper_manager.domain.nba_season import espn_season_end_year, nba_season_start_year
 from sleeper_manager.domain.statistics import weighted_mean
+
+
+@pytest.mark.parametrize(("season", "expected"), (("2025", 2026), ("2026", 2027)))
+def test_espn_schedule_season_uses_end_year(season: str, expected: int) -> None:
+    """The league label does not change when the calendar reaches January."""
+    assert espn_season_end_year(season) == expected
+
+
+def test_espn_schedule_season_rejects_invalid_league_label() -> None:
+    with pytest.raises(ValueError):
+        espn_season_end_year("unknown")
 
 
 @pytest.mark.parametrize(

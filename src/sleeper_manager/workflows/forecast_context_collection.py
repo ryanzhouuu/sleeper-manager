@@ -22,6 +22,7 @@ from sleeper_manager.domain.forecast_context import (
 )
 from sleeper_manager.domain.league import LeagueProfile
 from sleeper_manager.domain.nba import DataQualityState, ProviderPlayer, ScheduledGame
+from sleeper_manager.domain.nba_season import espn_season_end_year
 from sleeper_manager.domain.scheduling import eastern_fantasy_week
 from sleeper_manager.integrations.nba.identity import (
     PlayerIdentityMapper,
@@ -404,7 +405,7 @@ async def _games(
                 )
             )
     try:
-        season_year = int(profile.season)
+        season_year = espn_season_end_year(profile.season)
     except ValueError:
         gaps.append(
             ForecastContextGap(

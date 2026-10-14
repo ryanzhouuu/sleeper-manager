@@ -178,9 +178,10 @@ class CloudflareESPNProvider:
     async def team_schedule(
         self, team_id: str, season: int
     ) -> ProviderResult[tuple[ScheduledGame, ...]]:
+        """Read the regular-season slate for an ESPN season end year."""
         endpoint_id = espn_team_endpoint_id(team_id)
         payload = await self._client.object(
-            self._url(f"/teams/{endpoint_id}/schedule", season=season)
+            self._url(f"/teams/{endpoint_id}/schedule", season=season, seasontype=2)
         )
         return parse_team_schedule(payload, retrieved_at=self._tick())
 

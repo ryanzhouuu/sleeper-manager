@@ -19,6 +19,10 @@ Projection history and the active runtime policy live in D1. They are not bundle
 Worker deploy. Without an active runtime policy, advisor planning stays blocked while
 forecast capture uses the default 7:00 AM America/Chicago daily schedule.
 
+NBA team schedules use ESPN's end-year label (`2027` for Sleeper season `2026`)
+and explicitly request the regular season. This also applies to capture-context
+and pre-tipoff reads during preseason, when ESPN otherwise returns a preseason slate.
+
 Official game availability uses a Workers-native fetch adapter and the shared PDF
 parser, now included in runtime dependencies. The adapter checks recent publication
 slots directly rather than renewing an old cached designation. Missing publications,

@@ -21,6 +21,7 @@ from sleeper_manager.domain.nba import (
     ProviderResult,
     ScheduledGame,
 )
+from sleeper_manager.domain.nba_season import espn_season_end_year
 from sleeper_manager.domain.scheduling import manager_local_day, manager_local_day_window
 from sleeper_manager.integrations.nba.identity import (
     PlayerIdentityMapper,
@@ -211,7 +212,7 @@ async def resolve_relevant_tipoffs(
         identities = tuple(
             parse_sleeper_player_identity(player_id, catalog[player_id]) for player_id in player_ids
         )
-        season_year = int(season)
+        season_year = espn_season_end_year(season)
     except (ValueError, TypeError) as error:
         raise ForecastTipoffError("Forecast roster identity is incomplete") from error
     abbreviations = sorted({identity.team for identity in identities if identity.team})

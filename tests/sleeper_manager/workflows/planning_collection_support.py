@@ -156,7 +156,7 @@ class _FakeNBA:
     async def team_schedule(
         self, team_id: str, season: int
     ) -> ProviderResult[tuple[ScheduledGame, ...]]:
-        assert season == 2026
+        assert season == 2027
         self.requested_schedule_teams.append(team_id)
         if team_id in self.schedule_failures:
             raise RuntimeError("schedule endpoint down")

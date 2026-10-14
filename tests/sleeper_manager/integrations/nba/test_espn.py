@@ -1,10 +1,13 @@
+import asyncio
 import json
 from datetime import UTC, datetime
 
+import httpx
 import pytest
 
 from sleeper_manager.domain.nba import AvailabilityStatus, GameStatus
 from sleeper_manager.integrations.nba.espn import (
+    ESPNClient,
     ESPNSchemaError,
     parse_game_summary,
     parse_injuries,
@@ -16,6 +19,26 @@ from tests.paths import FIXTURES_DIR
 
 FIXTURES = FIXTURES_DIR / "espn"
 RETRIEVED_AT = datetime(2026, 8, 4, 4, tzinfo=UTC)
+
+
+def test_client_requests_regular_season_even_during_preseason() -> None:
+    """An omitted phase returns the preseason slate in October."""
+    requests: list[httpx.Request] = []
+
+    def respond(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"events": []})
+
+    async def read() -> None:
+        async with httpx.AsyncClient(
+            base_url="https://espn.test", transport=httpx.MockTransport(respond)
+        ) as client:
+            result = await ESPNClient(client=client).team_schedule("DEN", 2027)
+            assert result.records == ()
+
+    asyncio.run(read())
+    assert requests[0].url.path == "/teams/DEN/schedule"
+    assert dict(requests[0].url.params) == {"season": "2027", "seasontype": "2"}
 
 
 def fixture(name: str) -> dict[str, object]:

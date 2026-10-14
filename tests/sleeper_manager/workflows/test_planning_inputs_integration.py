@@ -80,7 +80,7 @@ class _FixtureNBAProvider:
         )
 
     async def team_schedule(self, team_id: str, season: int):
-        assert season == 2026
+        assert season == 2027
         return parse_team_schedule(
             _load(PLANNING_FIXTURES / "espn_team_schedule.json"),
             retrieved_at=RETRIEVED_AT,
