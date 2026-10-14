@@ -29,6 +29,7 @@ from sleeper_manager.notifications.factory import build_notification_dispatcher
 from sleeper_manager.persistence.async_sqlite import AsyncSQLiteStateRepository
 from sleeper_manager.persistence.d1 import D1StateRepository
 from sleeper_manager.persistence.forecast_sqlite import AsyncSQLiteForecastArchiveRepository
+from sleeper_manager.persistence.hybrid_runtime import D1HybridRuntimeRepository
 from sleeper_manager.persistence.hybrid_sqlite import SQLiteHybridRuntimeRepository
 from sleeper_manager.workflows.forecast_collection import capture_scheduled_forecast
 from sleeper_manager.workflows.notification_loop import (
@@ -171,6 +172,9 @@ async def _sync_cloudflare_runtime_data(
     wrangler_config: Path,
     settings: Settings,
 ) -> int:
+    """Activate manager selections only after their compact and pinned histories verify."""
+    from sleeper_manager.backtesting.experiments.data import scoring_policy_from_league_fixture
+
     now = datetime.now(UTC)
     try:
         history = compact_history_from_workspace(
@@ -178,7 +182,8 @@ async def _sync_cloudflare_runtime_data(
             league_fixture=league_fixture,
             now=now,
         )
-        policy = runtime_policy_for_history(history, policy_path=settings.manager_policy_path)
+        manager_policy = settings.load_manager_policy()
+        policy = runtime_policy_for_history(history, manager_policy=manager_policy)
         repository = None
         if apply:
             account_id = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "").strip()
@@ -190,20 +195,22 @@ async def _sync_cloudflare_runtime_data(
                 )
                 return 2
             async with httpx.AsyncClient() as client:
-                repository = D1StateRepository(
-                    RemoteD1(
-                        account_id,
-                        d1_database_id(wrangler_config),
-                        api_token,
-                        client,
-                    )
+                database = RemoteD1(
+                    account_id,
+                    d1_database_id(wrangler_config),
+                    api_token,
+                    client,
                 )
+                repository = D1StateRepository(database)
                 report = await sync_cloudflare_runtime_data(
                     history,
                     policy=policy,
                     repository=repository,
                     apply=True,
                     now=now,
+                    hybrid_store=D1HybridRuntimeRepository(database),
+                    scoring_policy=scoring_policy_from_league_fixture(league_fixture),
+                    preserve_projection_selection=manager_policy.projections is None,
                 )
         else:
             report = await sync_cloudflare_runtime_data(

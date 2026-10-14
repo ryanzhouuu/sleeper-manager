@@ -11,7 +11,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from sleeper_manager.domain.runtime_policy import ManagerIntent
@@ -47,17 +47,37 @@ class PlayerPolicy(BaseModel):
     mapping_overrides: dict[str, str] = Field(default_factory=dict)
 
 
+class ProjectionPolicy(BaseModel):
+    """Keep advice selection independent of evaluation and require explicit hybrid pinning."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+
+    active_provider: Literal["direct_baseline", "hybrid"] = "direct_baseline"
+    shadow_enabled: bool = Field(default=False, strict=True)
+    hybrid_history_version: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def require_hybrid_history(self) -> "ProjectionPolicy":
+        """Do not infer a history version from publication order or model eligibility."""
+        if (
+            self.active_provider == "hybrid" or self.shadow_enabled
+        ) and not self.hybrid_history_version:
+            raise ValueError("Hybrid advice or shadow requires hybrid_history_version")
+        return self
+
+
 class ManagerPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     decision: DecisionPolicy = Field(default_factory=DecisionPolicy)
     notifications: NotificationPolicy = Field(default_factory=NotificationPolicy)
     players: PlayerPolicy = Field(default_factory=PlayerPolicy)
+    projections: ProjectionPolicy | None = None
 
     @property
     def version(self) -> str:
         """Stable 16-hex digest of the canonical JSON payload."""
-        payload = self.model_dump(mode="json")
+        payload = self.model_dump(mode="json", exclude_none=True)
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         return sha256(encoded).hexdigest()[:16]
 
@@ -122,6 +142,10 @@ def load_manager_policy(path: Path) -> ManagerPolicy:
         "notifications": notification_values,
         "players": player_values,
     }
+    if "projections" in raw:
+        if not isinstance(raw["projections"], dict):
+            raise ValueError("The [projections] policy section must be a TOML table")
+        resolved["projections"] = raw["projections"]
     return ManagerPolicy.model_validate(resolved)
 
 

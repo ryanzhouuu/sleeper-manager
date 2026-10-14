@@ -8,13 +8,20 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
+from sleeper_manager.cloudflare.policy_sync import (
+    select_runtime_policy,
+    verify_hybrid_policy,
+    version_runtime_policy,
+)
 from sleeper_manager.config import ManagerPolicy, load_manager_policy
 from sleeper_manager.domain.runtime_policy import RuntimePolicy, default_runtime_policy
+from sleeper_manager.domain.scoring import ScoringPolicy
 from sleeper_manager.persistence.base import (
     AsyncRuntimeStateRepository,
     ProjectionObservationRecord,
     RuntimePolicyRecord,
 )
+from sleeper_manager.persistence.hybrid_runtime import HybridRuntimeRepository
 from sleeper_manager.projections.direct_baseline import (
     DirectBaselineObservation,
     compact_direct_baseline_observations,
@@ -155,21 +162,8 @@ def runtime_policy_for_history(
     if loaded is None and policy_path is not None:
         loaded = load_manager_policy(policy_path)
     manager_policy = loaded if loaded is not None else ManagerPolicy()
-    manager_intent = manager_policy.to_manager_intent()
-    overrides = dict(manager_policy.players.mapping_overrides)
     base = default_runtime_policy(history_version=history.dataset_version)
-    return RuntimePolicy(
-        version=base.version,
-        manager_timezone=base.manager_timezone,
-        daily_plan_time=base.daily_plan_time,
-        move_lead_time=base.move_lead_time,
-        sleeper_max_age=base.sleeper_max_age,
-        availability_max_age=base.availability_max_age,
-        team_data_max_age=base.team_data_max_age,
-        projection_history_version=base.projection_history_version,
-        mapping_overrides=overrides,
-        manager_intent=manager_intent,
-    )
+    return select_runtime_policy(base, manager_policy)
 
 
 async def sync_cloudflare_runtime_data(
@@ -179,7 +173,11 @@ async def sync_cloudflare_runtime_data(
     repository: AsyncRuntimeStateRepository | None,
     apply: bool,
     now: datetime,
+    hybrid_store: HybridRuntimeRepository | None = None,
+    scoring_policy: ScoringPolicy | None = None,
+    preserve_projection_selection: bool = True,
 ) -> RuntimeSyncReport:
+    """Verify compact history and changed hybrid selections before activating policy last."""
     if now.tzinfo is None:
         raise RuntimeSyncError("Sync timestamp must be timezone-aware")
     if not apply:
@@ -193,12 +191,22 @@ async def sync_cloudflare_runtime_data(
     if repository is None:
         raise RuntimeSyncError("Apply requires a D1 repository")
     stored_policy = await repository.load_runtime_policy()
-    if stored_policy is not None and policy.hybrid_history_version is None:
+    if (
+        stored_policy is not None
+        and preserve_projection_selection
+        and policy.hybrid_history_version is None
+    ):
         current = RuntimePolicy.from_json(stored_policy.version, stored_policy.payload_json)
         policy = replace(
             policy,
             hybrid_history_version=current.hybrid_history_version,
             hybrid_shadow_enabled=current.hybrid_shadow_enabled,
+            active_projection_provider=current.active_projection_provider,
+        )
+        policy = version_runtime_policy(policy)
+    else:
+        await verify_hybrid_policy(
+            policy, store=hybrid_store, scoring_policy=scoring_policy, now=now
         )
     await repository.save_projection_observations(history.records)
     loaded = await repository.load_projection_observations(history.dataset_version)

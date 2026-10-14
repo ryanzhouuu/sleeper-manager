@@ -10,3 +10,9 @@ urgent_actions_override_quiet_hours = true
 
 [players]
 mapping_overrides = {}
+
+[projections]
+active_provider = "direct_baseline"
+shadow_enabled = false
+# Required for hybrid advice or shadow; use a verified published history version.
+# hybrid_history_version = "hybrid-runtime-v1-..."

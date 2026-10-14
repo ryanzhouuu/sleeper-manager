@@ -144,6 +144,35 @@ Live Lock-In evaluation consumes the resolved minimum-confidence threshold. Oper
 such as freshness windows and the pinned projection-history version remain runtime defaults
 unless changed in code.
 
+Configure advice and evaluation separately in that TOML file:
+
+```toml
+[projections]
+active_provider = "hybrid" # or "direct_baseline"
+shadow_enabled = true
+hybrid_history_version = "hybrid-runtime-v1-<verified-content-hash>"
+```
+
+Hybrid advice or shadow requires the explicit published version. The initial history
+sync verifies newly selected hybrid artifacts, model, season, full-scoring policy, and
+nonempty eligible profiles before activating policy. An omitted `[projections]` table
+preserves an existing selection; an explicit table replaces it, including disabling shadow.
+
+After initialization, change only the policy without rebuilding history or redeploying:
+
+```bash
+uv run python -m sleeper_manager.cloudflare.policy_sync_cli \
+  --league-fixture .local/league.json
+```
+
+This dry-run reads D1 and verifies the selected evidence. Add `--apply` to activate
+the verified selection; `--policy` selects a different TOML file. Use a retained league
+payload with current `scoring_settings`; a mismatch blocks hybrid activation.
+Remote access uses the same Cloudflare account/API-token environment variables as
+the history sync. `--local-db .local/state.db` targets an already initialized local
+runtime. Neither mode deploys code or rebuilds history. Runtime metadata verification
+does not establish predictive calibration; run forecast/replay checks before activation.
+
 Postgame watches start two hours after tipoff and retry every five minutes until the
 opportunity is acknowledged, expired, or otherwise closed. Lock and Pass notifications
 include Locked, Passed, and Open Sleeper actions. Unavailable warnings include Open Sleeper
