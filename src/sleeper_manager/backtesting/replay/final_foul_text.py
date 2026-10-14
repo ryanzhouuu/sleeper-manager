@@ -58,8 +58,11 @@ class FinalFoulText:
     sections: tuple[FoulKind, ...]
 
 
-def parse_final_foul_text(text: str) -> FinalFoulText:
+def parse_final_foul_text(
+    text: str, *, expected_teams: tuple[str, str] | None = None
+) -> FinalFoulText:
     """Reject truncated, unsupported, or count-inconsistent final reports."""
+    text = _bind_neutral_teams(text, expected_teams)
     if (
         re.search(
             r"Copyright \(c\) \d{4}(?:-\d{4})? NBA Properties, INC\. All Rights Reserved", text
@@ -75,6 +78,10 @@ def parse_final_foul_text(text: str) -> FinalFoulText:
     )
     if len(teams) != 2 or {row.side for row in roster.rows} != {0, 1}:
         raise ValueError("Missing final foul report teams or roster")
+    if expected_teams is not None and tuple(map(_team_name, teams)) != tuple(
+        map(_team_name, expected_teams)
+    ):
+        raise ValueError("Final foul report team mismatch")
     summary = text.split("SCORE BY", 1)[1]
     headings = tuple(_SECTION.finditer(summary))
     events: list[FinalFoulEvent] = []
@@ -111,6 +118,24 @@ def parse_final_foul_text(text: str) -> FinalFoulText:
             team_only = title in ("Technical fouls - Delay", "Technical fouls - Excess Timeout")
             events.extend(_event(part, side, kind, team_only=team_only) for part in parts)
     return FinalFoulText((teams[0], teams[1]), roster, tuple(events), tuple(sections))
+
+
+def _team_name(value: str) -> str:
+    return " ".join(value.casefold().split())
+
+
+def _bind_neutral_teams(text: str, expected: tuple[str, str] | None) -> str:
+    """Bind unlabelled cup headers only to independently supplied away/home identities."""
+    if expected is None or "VISITOR:" in text or "HOME:" in text:
+        return text
+    headers = tuple(re.finditer(r"^\s*([^\n()]+?)\s*\(\d+-\d+\)\s*$", text, re.MULTILINE))
+    if len(headers) != 2 or tuple(_team_name(h.group(1)) for h in headers) != tuple(
+        map(_team_name, expected)
+    ):
+        raise ValueError("Unresolved neutral-site final foul teams")
+    for prefix, header in reversed(tuple(zip(("VISITOR:", "HOME:"), headers, strict=True))):
+        text = text[: header.start()] + prefix + " " + text[header.start() :].lstrip()
+    return text
 
 
 def _event(value: str, side: int, kind: FoulKind, *, team_only: bool = False) -> FinalFoulEvent:

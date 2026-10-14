@@ -206,6 +206,8 @@ finalization; retrospective timing assumptions must remain explicitly labeled.
 actor remains unresolved. Possible surname/initial collisions still require attributed
 events, and known target assessments must reconcile by identity, side, clock, and count.
 Only the requested player's counts gain coverage; unrelated actors retain their gaps.
+Neutral-site cup reports require independently supplied away/home team names through
+`parse_final_foul_text(..., expected_teams=...)`; unlabelled header order alone is insufficient.
 
 `build_hybrid_history` in `projections.hybrid_history_adapter` joins the parsed
 sources to reviewed `GameRosterCensus` records. Use `load_final_roster_evidence`

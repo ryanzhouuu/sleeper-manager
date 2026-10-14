@@ -16,6 +16,34 @@ Copyright (c) 2025-2026 NBA Properties, INC. All Rights Reserved
 """
 
 
+def test_neutral_site_headers_require_independent_team_order() -> None:
+    """Unlabelled cup teams cannot acquire a side from report ordering alone."""
+    neutral = BOX.format(summary="").replace("VISITOR: ", "").replace("HOME: ", "")
+    with pytest.raises(ValueError, match="Unsupported"):
+        parse_final_foul_text(neutral)
+    parsed = parse_final_foul_text(neutral, expected_teams=("Example Visitors", "Sample Hosts"))
+    assert parsed.teams == ("Example Visitors", "SAMPLE HOSTS")
+    assert [(row.name, row.side) for row in parsed.roster.rows] == [
+        ("Alex Example", 0),
+        ("Bailey Sample", 1),
+    ]
+    for teams in (("Sample Hosts", "Example Visitors"), ("Unknown Visitors", "Sample Hosts")):
+        with pytest.raises(ValueError, match="Unresolved neutral-site"):
+            parse_final_foul_text(neutral, expected_teams=teams)
+    with pytest.raises(ValueError):
+        parse_final_foul_text(
+            neutral.replace("SAMPLE HOSTS (0-1)", ""),
+            expected_teams=("Example Visitors", "Sample Hosts"),
+        )
+
+
+def test_expected_teams_also_validate_labelled_report_identity() -> None:
+    with pytest.raises(ValueError, match="team mismatch"):
+        parse_final_foul_text(
+            BOX.format(summary=""), expected_teams=("Unknown Visitors", "Sample Hosts")
+        )
+
+
 def test_preserve_players_coaches_team_events_and_double_technicals() -> None:
     """Neither team totals nor unresolved bench names become player counts."""
     parsed = parse_final_foul_text(
