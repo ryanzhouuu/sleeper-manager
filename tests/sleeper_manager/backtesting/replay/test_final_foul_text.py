@@ -68,14 +68,14 @@ def test_historical_technical_categories_share_counts_without_becoming_duplicate
 Visitors (1): Example 1:00 1st
 HOSTS (0): NONE
 Technical fouls - Defensive Three Seconds
-Visitors (0): NONE
-HOSTS (1): Sample 2:00 2nd
+Visitors (0) : NONE
+HOSTS (1) : Sample 2:00 2nd
 Technical fouls - Delay
-Visitors (1): Team 3:00 3rd
-HOSTS (0): NONE
+Visitors (1) : 3:00 3rd
+HOSTS (0) : NONE
 Technical fouls - Excess Timeout
-Visitors (1): Team 4:00 4th
-HOSTS (0): NONE
+Visitors (1) : 4:00 4th
+HOSTS (0) : NONE
 Technical fouls - Bench
 Visitors (0): NONE
 HOSTS (1): Coach 5:00 4th"""
@@ -84,6 +84,7 @@ HOSTS (1): Coach 5:00 4th"""
     assert len(parsed.events) == 5
     assert all(row.field == "technical_fouls" for row in parsed.events)
     assert parsed.sections == ("individual", "non_unsportsmanlike")
+    assert [row.name for row in parsed.events[2:4]] == ["Team", "Team"]
 
 
 def test_wrapped_names_repeated_assessments_and_overtime() -> None:

@@ -28,7 +28,7 @@ _SECTION = re.compile(
     r"Copyright[^\n]*)\s*$",
     re.MULTILINE,
 )
-_TEAM = re.compile(r"^\s*([^\n()]+?)\s*\((\d+)\):\s*", re.MULTILINE)
+_TEAM = re.compile(r"^\s*([^\n()]+?)\s*\((\d+)\)\s*:\s*", re.MULTILINE)
 _CLOCK = r"(\d{1,2}:[0-5]\d)\s+((?:1st|2nd|3rd|4th)(?:\s+OT)?)"
 
 
@@ -108,12 +108,15 @@ def parse_final_foul_text(text: str) -> FinalFoulText:
             parts = entries.split(" , ")
             if len(parts) != count:
                 raise ValueError("Final foul summary count mismatch")
-            events.extend(_event(part, side, kind) for part in parts)
+            team_only = title in ("Technical fouls - Delay", "Technical fouls - Excess Timeout")
+            events.extend(_event(part, side, kind, team_only=team_only) for part in parts)
     return FinalFoulText((teams[0], teams[1]), roster, tuple(events), tuple(sections))
 
 
-def _event(value: str, side: int, kind: FoulKind) -> FinalFoulEvent:
+def _event(value: str, side: int, kind: FoulKind, *, team_only: bool = False) -> FinalFoulEvent:
     """Count flagrant assessments once, preserving the severity separately."""
+    if team_only and re.fullmatch(_CLOCK, value):
+        value = "Team " + value
     pattern = (
         rf"{_CLOCK}\s+(.+?)-FLG([12])"
         if kind == "flagrant"
