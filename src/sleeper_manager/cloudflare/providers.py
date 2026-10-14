@@ -23,6 +23,11 @@ from sleeper_manager.integrations.nba.espn import (
 )
 from sleeper_manager.integrations.nba.mapping import espn_team_endpoint_id
 
+_ESPN_BASES = (
+    "https://site.api.espn.com/apis/site/v2/sports/basketball/nba",
+    "https://site.web.api.espn.com/apis/site/v2/sports/basketball/nba",
+)
+
 
 class CloudflareProviderError(RuntimeError):
     pass
@@ -54,8 +59,8 @@ class _CloudflareJSONClient:
         self._provider = provider
         self._timeout = timeout.total_seconds()
 
-    async def object(self, url: str) -> dict[str, Any]:
-        payload = await self._request(url)
+    async def object(self, url: str, *, fallback_url: str | None = None) -> dict[str, Any]:
+        payload = await self._request(url, fallback_url=fallback_url)
         if not isinstance(payload, dict):
             raise ProviderPayloadError(f"{self._provider} returned a non-object payload for {url}")
         return payload
@@ -68,29 +73,30 @@ class _CloudflareJSONClient:
             )
         return payload
 
-    async def _request(self, url: str) -> Any:
-        for attempt in range(2):
+    async def _request(self, url: str, *, fallback_url: str | None = None) -> Any:
+        """Spend at most two attempts, switching hosts only for transport failures."""
+        for attempt, resource in enumerate((url, fallback_url or url)):
             try:
-                response = await asyncio.wait_for(self._fetch(url), timeout=self._timeout)
+                response = await asyncio.wait_for(self._fetch(resource), timeout=self._timeout)
             except Exception as error:
                 if attempt == 0:
                     continue
                 raise CloudflareProviderError(
-                    f"{self._provider} request failed for {url}"
+                    f"{self._provider} request failed for {resource}"
                 ) from error
             status = int(response.status)
-            if status == 429 or status >= 500:
+            if status == 429 or status >= 500 or (status == 403 and fallback_url is not None):
                 if attempt == 0:
                     continue
-                raise ProviderHTTPError(self._provider, status, url)
+                raise ProviderHTTPError(self._provider, status, resource)
             if status < 200 or status >= 300:
-                raise ProviderHTTPError(self._provider, status, url)
+                raise ProviderHTTPError(self._provider, status, resource)
             try:
                 payload = response.json()
                 return await payload if inspect.isawaitable(payload) else payload
             except Exception as error:
                 raise ProviderPayloadError(
-                    f"{self._provider} returned invalid JSON for {url}"
+                    f"{self._provider} returned invalid JSON for {resource}"
                 ) from error
         raise AssertionError("Provider retry loop did not terminate")
 
@@ -144,11 +150,16 @@ class CloudflareESPNProvider:
         self,
         fetcher: Any,
         *,
-        base_url: str = "https://site.web.api.espn.com/apis/site/v2/sports/basketball/nba",
+        base_url: str = _ESPN_BASES[0],
         timeout: timedelta = timedelta(seconds=15),
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
+        self._fallback_base = (
+            next((base for base in _ESPN_BASES if base != self._base_url), None)
+            if self._base_url in _ESPN_BASES
+            else None
+        )
         self._client = _CloudflareJSONClient(fetcher, provider="ESPN", timeout=timeout)
         self._clock = clock or (lambda: datetime.now(UTC))
 
@@ -156,23 +167,31 @@ class CloudflareESPNProvider:
         url = f"{self._base_url}{path}"
         return f"{url}?{urlencode(params)}" if params else url
 
-    async def scoreboard(self, game_date: date) -> ProviderResult[tuple[ScheduledGame, ...]]:
-        payload = await self._client.object(
-            self._url("/scoreboard", dates=game_date.strftime("%Y%m%d"), limit=100)
+    async def _object(self, path: str, **params: str | int) -> dict[str, Any]:
+        """Keep paths and parameters identical on the two fixed public ESPN hosts."""
+        url = self._url(path, **params)
+        alternate = (
+            self._fallback_base + url[len(self._base_url) :]
+            if self._fallback_base is not None
+            else None
         )
+        return await self._client.object(url, fallback_url=alternate)
+
+    async def scoreboard(self, game_date: date) -> ProviderResult[tuple[ScheduledGame, ...]]:
+        payload = await self._object("/scoreboard", dates=game_date.strftime("%Y%m%d"), limit=100)
         return parse_scoreboard(payload, retrieved_at=self._tick())
 
     async def game_summary(self, game_id: str) -> ProviderResult[GameSummary]:
-        payload = await self._client.object(self._url("/summary", event=game_id))
+        payload = await self._object("/summary", event=game_id)
         return parse_game_summary(payload, retrieved_at=self._tick())
 
     async def injuries(self) -> ProviderResult[tuple[PlayerAvailability, ...]]:
-        payload = await self._client.object(self._url("/injuries"))
+        payload = await self._object("/injuries")
         return parse_injuries(payload, retrieved_at=self._tick())
 
     async def team_roster(self, team_id: str) -> ProviderResult[tuple[ProviderPlayer, ...]]:
         endpoint_id = espn_team_endpoint_id(team_id)
-        payload = await self._client.object(self._url(f"/teams/{endpoint_id}/roster"))
+        payload = await self._object(f"/teams/{endpoint_id}/roster")
         return parse_team_roster(payload, team_id=team_id, retrieved_at=self._tick())
 
     async def team_schedule(
@@ -180,9 +199,7 @@ class CloudflareESPNProvider:
     ) -> ProviderResult[tuple[ScheduledGame, ...]]:
         """Read the regular-season slate for an ESPN season end year."""
         endpoint_id = espn_team_endpoint_id(team_id)
-        payload = await self._client.object(
-            self._url(f"/teams/{endpoint_id}/schedule", season=season, seasontype=2)
-        )
+        payload = await self._object(f"/teams/{endpoint_id}/schedule", season=season, seasontype=2)
         return parse_team_schedule(payload, retrieved_at=self._tick())
 
     def _tick(self) -> datetime:

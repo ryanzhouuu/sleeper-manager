@@ -150,12 +150,68 @@ def test_espn_team_routes_translate_rejected_abbreviations() -> None:
     provider = CloudflareESPNProvider(roster_fetch, clock=lambda: NOW)
     asyncio.run(provider.team_roster("NOP"))
     assert roster_fetch.urls == [
-        "https://site.web.api.espn.com/apis/site/v2/sports/basketball/nba/teams/no/roster"
+        "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/no/roster"
     ]
 
     schedule_fetch = SequenceFetch(Response(200, {"events": []}))
     provider = CloudflareESPNProvider(schedule_fetch, clock=lambda: NOW)
     asyncio.run(provider.team_schedule("UTA", 2026))
     assert schedule_fetch.urls == [
-        "https://site.web.api.espn.com/apis/site/v2/sports/basketball/nba/teams/utah/schedule?season=2026&seasontype=2"
+        "https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/utah/schedule?season=2026&seasontype=2"
     ]
+
+
+@pytest.mark.parametrize("failure", (403, 429, 503, OSError("network down")))
+def test_espn_switches_hosts_within_the_two_attempt_budget(failure: int | Exception) -> None:
+    """An alternate host can recover a denied or unavailable public endpoint."""
+    fetch = SequenceFetch(
+        Response(failure) if isinstance(failure, int) else failure,
+        Response(200, {"events": []}),
+    )
+    result = asyncio.run(CloudflareESPNProvider(fetch).team_schedule("DEN", 2027))
+    assert result.records == ()
+    assert fetch.urls == [
+        f"https://{host}/apis/site/v2/sports/basketball/nba/teams/DEN/schedule?season=2027&seasontype=2"
+        for host in ("site.api.espn.com", "site.web.api.espn.com")
+    ]
+
+
+def test_espn_both_hosts_unavailable_is_an_explicit_error() -> None:
+    fetch = SequenceFetch(Response(403), Response(503), Response(200, {"events": []}))
+    with pytest.raises(ProviderHTTPError) as captured:
+        asyncio.run(CloudflareESPNProvider(fetch).team_schedule("DEN", 2027))
+    assert captured.value.status == 503
+    assert "site.web.api.espn.com" in captured.value.resource
+    assert len(fetch.urls) == 2
+
+
+def test_espn_timeout_uses_the_alternate_without_extra_retries() -> None:
+    urls: list[str] = []
+
+    async def fetch(url: str) -> Response:
+        urls.append(url)
+        if len(urls) == 1:
+            await asyncio.sleep(0.05)
+        return Response(200, {"events": []})
+
+    provider = CloudflareESPNProvider(fetch, timeout=timedelta(milliseconds=1))
+    assert asyncio.run(provider.team_schedule("DEN", 2027)).records == ()
+    assert len(urls) == 2
+    assert "site.web.api.espn.com" in urls[1]
+
+
+@pytest.mark.parametrize("failure", (Response(404), Response(200, invalid_json=True)))
+def test_espn_does_not_hide_missing_resources_or_invalid_json(failure: Response) -> None:
+    fetch = SequenceFetch(failure, Response(200, {"events": []}))
+    with pytest.raises(CloudflareProviderError):
+        asyncio.run(CloudflareESPNProvider(fetch).team_schedule("DEN", 2027))
+    assert len(fetch.urls) == 1
+
+
+def test_custom_espn_base_does_not_fall_back_to_public_hosts() -> None:
+    fetch = SequenceFetch(Response(403), Response(200, {"events": []}))
+    with pytest.raises(ProviderHTTPError):
+        asyncio.run(
+            CloudflareESPNProvider(fetch, base_url="https://espn.test").team_schedule("DEN", 2027)
+        )
+    assert fetch.urls == ["https://espn.test/teams/DEN/schedule?season=2027&seasontype=2"]

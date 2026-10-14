@@ -22,6 +22,9 @@ forecast capture uses the default 7:00 AM America/Chicago daily schedule.
 NBA team schedules use ESPN's end-year label (`2027` for Sleeper season `2026`)
 and explicitly request the regular season. This also applies to capture-context
 and pre-tipoff reads during preseason, when ESPN otherwise returns a preseason slate.
+Workers try the primary public ESPN host, then its alternate after a transport error,
+403, 429, or server error. Each endpoint gets at most two requests total. Missing
+resources, invalid JSON, and schema drift fail explicitly; custom base URLs stay isolated.
 
 Official game availability uses a Workers-native fetch adapter and the shared PDF
 parser, now included in runtime dependencies. The adapter checks recent publication
