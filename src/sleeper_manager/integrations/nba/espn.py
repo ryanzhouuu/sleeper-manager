@@ -23,6 +23,7 @@ from sleeper_manager.domain.nba import (
     quality_for_records,
 )
 from sleeper_manager.domain.scoring import BoxScoreLine
+from sleeper_manager.integrations.nba.espn_injury_identity import resolve_injury_player_id
 from sleeper_manager.integrations.nba.mapping import espn_team_endpoint_id
 from sleeper_manager.integrations.nba.schemas import (
     ESPNGameSummaryPayload,
@@ -364,6 +365,7 @@ def _availability_status(value: Any) -> AvailabilityStatus:
 def parse_injuries(
     payload: Mapping[str, Any], *, retrieved_at: datetime
 ) -> ProviderResult[tuple[PlayerAvailability, ...]]:
+    """Require unambiguous athlete IDs, including ESPN's profile-link-only feed format."""
     validated = _validate(ESPNInjuriesPayload, payload, "injuries")
     injury_entries: list[Mapping[str, Any]] = []
     for entry in validated.injuries:
@@ -374,9 +376,11 @@ def parse_injuries(
             injury_entries.append(entry)
     result: list[PlayerAvailability] = []
     for injury in injury_entries:
-        athlete = injury.get("athlete", injury)
-        athlete_mapping = _as_mapping(athlete, "injury.athlete")
-        player_id = _required_string(athlete_mapping.get("id"), "injury.athlete.id")
+        athlete_mapping = _as_mapping(injury.get("athlete"), "injury.athlete")
+        try:
+            player_id = resolve_injury_player_id(athlete_mapping)
+        except ValueError as error:
+            raise ESPNSchemaError(str(error)) from error
         details = injury.get("details")
         detail_mapping = details if isinstance(details, Mapping) else {}
         detail = _optional_string(

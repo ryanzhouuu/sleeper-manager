@@ -126,7 +126,10 @@ def test_unknown_reason_codes_fall_back_to_readable_text() -> None:
 
     rendered = render_weekly_plan(plan)
 
-    assert "Notes: NBA schedule data may be stale; mystery reason." in rendered.message
+    assert (
+        "Notes: NBA provider data is unavailable or may be stale; mystery reason."
+        in rendered.message
+    )
 
 
 def test_blocked_plans_avoid_imperatives() -> None:
@@ -172,7 +175,7 @@ def test_degraded_plans_surface_warnings_and_confidence() -> None:
     rendered = render_weekly_plan(plan)
 
     assert rendered.title == "Lineup check degraded"
-    assert "Notes: NBA schedule data may be stale." in rendered.message
+    assert "Notes: NBA provider data is unavailable or may be stale." in rendered.message
     assert "Confidence: low." in rendered.message
 
 
@@ -188,7 +191,7 @@ def test_degraded_plans_with_moves_keep_their_instructions() -> None:
     sections = rendered.message.split("\n\n")
     assert sections[0] == "Start Alice in UTIL."
     assert sections[-1] == "Complete before Mon 6:50 AM CST."
-    assert "Notes: NBA schedule data may be stale." in rendered.message
+    assert "Notes: NBA provider data is unavailable or may be stale." in rendered.message
 
 
 def test_schedule_reasons_explain_why_the_change_matters() -> None:

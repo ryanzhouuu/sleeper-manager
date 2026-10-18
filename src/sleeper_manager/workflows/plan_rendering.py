@@ -40,7 +40,7 @@ _REASON_PHRASES = {
     PlanningReasonCode.MISSING_MEMBERSHIP: "roster membership is missing",
     PlanningReasonCode.AMBIGUOUS_ELIGIBILITY: "slot eligibility is uncertain",
     PlanningReasonCode.STALE_SLEEPER_STATE: "Sleeper state may be stale",
-    PlanningReasonCode.STALE_NBA_STATE: "NBA schedule data may be stale",
+    PlanningReasonCode.STALE_NBA_STATE: "NBA provider data is unavailable or may be stale",
     PlanningReasonCode.ACKNOWLEDGEMENT_CONFLICT: "acknowledged decisions conflict",
     PlanningReasonCode.AMBIGUOUS_EVENT_ORDER: "event ordering is ambiguous",
     PlanningReasonCode.DEADLINE_ELAPSED: "the lineup deadline has passed",
