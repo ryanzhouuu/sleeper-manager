@@ -16,7 +16,11 @@ from sleeper_manager.domain.projection import (
 from sleeper_manager.domain.scoring import ScoringPolicy, calculate_fantasy_points
 from sleeper_manager.projections.hybrid_config import HybridProjectionConfig, HybridProjectionError
 from sleeper_manager.projections.hybrid_external import qualify_external_center
-from sleeper_manager.projections.hybrid_fitting import fit_joint_weights, weight_support
+from sleeper_manager.projections.hybrid_fitting import (
+    JointWeightFit,
+    fit_joint_weights,
+    weight_support,
+)
 from sleeper_manager.projections.hybrid_participation import (
     HybridParticipation,
     ParticipationEstimate,
@@ -81,6 +85,7 @@ class HybridProjectionBatch:
         self.season = nba_season_start_year(game_start)
         self.scoring_policy = scoring_policy
         self.config = config or HybridProjectionConfig()
+        self._fits: dict[tuple[str, tuple[float, ...]], JointWeightFit] = {}
         self.pools = HybridHistoryPools(
             history,
             cutoff=cutoff,
@@ -125,6 +130,7 @@ class HybridProjectionBatch:
         prepared.scoring_policy, prepared.config = scoring_policy, config
         prepared.pools, prepared.participation = pools, participation
         prepared.history_fingerprint = history_fingerprint
+        prepared._fits = {}
         return prepared
 
     def project(
@@ -167,12 +173,17 @@ class HybridProjectionBatch:
         if external.values is not None:
             try:
                 pool = self.pools.pool(target.provider_player_id, external.values)
-                fit = fit_joint_weights(
-                    tuple(row.core_stats for row in pool.samples),
-                    pool.weights,
-                    external.values,
-                    self.config,
-                )
+                # Fixed preparation makes the conditional fit independent of game availability.
+                fit_key = target.provider_player_id, external.values
+                fit = self._fits.get(fit_key)
+                if fit is None:
+                    fit = fit_joint_weights(
+                        tuple(row.core_stats for row in pool.samples),
+                        pool.weights,
+                        external.values,
+                        self.config,
+                    )
+                    self._fits[fit_key] = fit
                 rejected = fit.failure or weight_support(fit.weights, self.config)
                 if rejected is None:
                     weights = fit.weights
