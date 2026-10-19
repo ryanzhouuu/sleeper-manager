@@ -19,6 +19,7 @@ from sleeper_manager.cloudflare.planning import (
     CloudflarePlanningAssembly,
     collect_cloudflare_planning_inputs,
 )
+from sleeper_manager.cloudflare.planning_watchdog import notify_delayed_daily_planning
 from sleeper_manager.cloudflare.providers import (
     CloudflareESPNProvider,
     CloudflareSleeperClient,
@@ -29,6 +30,7 @@ from sleeper_manager.cloudflare.scheduler_types import (
     ScheduledRunStatus,
     ScheduledRunSummary,
 )
+from sleeper_manager.cloudflare.stage_logging import timed_stage
 from sleeper_manager.domain.runtime_policy import RuntimePolicy
 from sleeper_manager.integrations.nba.cached_provider import AsyncCachedNBAProvider
 from sleeper_manager.notifications.dispatcher import NotificationDispatcher
@@ -117,30 +119,46 @@ async def run_scheduled(
         policy: RuntimePolicy,
         scheduled_at: datetime,
     ) -> CloudflarePlanningAssembly:
-        return await collect_cloudflare_planning_inputs(
-            env,
-            fetcher,
-            repository=repository,
-            policy=policy,
-            scheduled_at=scheduled_at,
-        )
+        with timed_stage("planning_collection", correlation_id=correlation):
+            return await collect_cloudflare_planning_inputs(
+                env,
+                fetcher,
+                repository=repository,
+                policy=policy,
+                scheduled_at=scheduled_at,
+            )
 
-    await _capture_forecast(env, fetcher, repository, now)
-    summary = await dispatch_due_work(
+    notifications = NotificationLoop(
         repository,
-        notifications=NotificationLoop(
-            repository,
-            dispatcher,
-            acknowledgement_base_url=acknowledgement_base_url,
-            clock=lambda: now,
-            acknowledgement_kinds=LOCK_IN_ACKNOWLEDGEMENT_KINDS,
-        ),
-        collect=collect,
-        scheduled_at=now,
-        correlation_id=correlation,
-        open_sleeper_url=_value(env, "OPEN_SLEEPER_URL", "https://sleeper.com"),
-        fetch_game_summary=CloudflareESPNProvider(fetcher, clock=lambda: now).game_summary,
+        dispatcher,
+        acknowledgement_base_url=acknowledgement_base_url,
+        clock=lambda: now,
+        acknowledgement_kinds=LOCK_IN_ACKNOWLEDGEMENT_KINDS,
     )
+    open_sleeper_url = _value(env, "OPEN_SLEEPER_URL", "https://sleeper.com")
+    try:
+        with timed_stage("planning_watchdog", correlation_id=correlation):
+            await notify_delayed_daily_planning(
+                repository,
+                notifications,
+                league_id=_value(env, "SLEEPER_LEAGUE_ID"),
+                scheduled_at=now,
+                open_sleeper_url=open_sleeper_url,
+            )
+    except Exception as error:
+        print(f"Planning watchdog failed: {type(error).__name__}", file=sys.stderr)
+    with timed_stage("forecast_capture", correlation_id=correlation):
+        await _capture_forecast(env, fetcher, repository, now)
+    with timed_stage("planning_and_delivery", correlation_id=correlation):
+        summary = await dispatch_due_work(
+            repository,
+            notifications=notifications,
+            collect=collect,
+            scheduled_at=now,
+            correlation_id=correlation,
+            open_sleeper_url=open_sleeper_url,
+            fetch_game_summary=CloudflareESPNProvider(fetcher, clock=lambda: now).game_summary,
+        )
     return summary.as_dict()
 
 

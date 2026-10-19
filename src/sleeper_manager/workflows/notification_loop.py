@@ -19,9 +19,8 @@ from sleeper_manager.persistence.base import (
 from sleeper_manager.persistence.tokens import generate_action_token, hash_action_token
 from sleeper_manager.workflows.plan_rendering import WEEKLY_LINEUP_DECISION_TYPE
 
-# Frozen product decision: lineup notifications never carry acknowledgement actions,
-# regardless of caller configuration.
-_UNACKNOWLEDGEABLE_KINDS = frozenset({WEEKLY_LINEUP_DECISION_TYPE})
+DAILY_PLAN_DELAYED_KIND = "daily_plan_delayed"
+_UNACKNOWLEDGEABLE_KINDS = frozenset({WEEKLY_LINEUP_DECISION_TYPE, DAILY_PLAN_DELAYED_KIND})
 
 
 class Clock(Protocol):

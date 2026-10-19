@@ -5,6 +5,18 @@ Free plan's 10 ms CPU allowance before it could write a receipt, so this schedul
 requires the Workers Paid CPU allowance. Verify the first remote receipt after deploying.
 Worker logs and traces are enabled with query strings redacted. Shadow events contain
 run identities and failure counts; private roster evidence remains in D1 artifacts.
+Scheduled stage events log entry and completion for forecast capture, planning collection,
+and planning with delivery. Durations are wall time; use Cloudflare invocation metrics
+for CPU time. A stage entry without completion can identify interrupted work even when
+termination prevents a final summary.
+Before forecast capture or collection, the watchdog checks today's unfinished daily
+work. After two attempts, an expired running lease or a due retry triggers a
+`Daily plan delayed` notification through the configured destinations. Delivery is
+deduplicated per league and manager-local day; unsuccessful delivery can retry.
+Active leases, completed work, and prior-day jobs stay quiet. These operational
+records use decision type `daily_plan_delayed`, fantasy week `0`, and player `system`
+to keep them separate from weekly advice. They offer Open Sleeper without Lock or
+Pass acknowledgement actions. Watchdog failures are logged without blocking planning.
 
 Each wake claims due daily, pre-tipoff, postgame, or delivery-retry work. Daily and
 pre-tipoff wakes run the weekly lineup planner at most once and refresh live Lock-In
