@@ -15,6 +15,7 @@ from sleeper_manager.projections.hybrid_config import HybridProjectionConfig, Hy
 from sleeper_manager.projections.hybrid_external import qualify_external_center
 from sleeper_manager.projections.hybrid_model import HybridProjectionBatch, HybridProjectionResult
 from sleeper_manager.projections.hybrid_participation import HybridParticipation
+from sleeper_manager.projections.hybrid_partition_cache import HybridPartitionCache
 from sleeper_manager.projections.hybrid_runtime_codec import HybridHistoryManifest
 from sleeper_manager.projections.hybrid_runtime_index import HybridRuntimeIndex, IndexedHistoryPools
 from sleeper_manager.projections.hybrid_types import (
@@ -38,7 +39,7 @@ class HybridHistoryReader(Protocol):
 
 
 class HybridRuntimeProjectionProvider:
-    """Retain every attempt while bounding raw history to a target and two donor selections."""
+    """Retain every attempt with bounded batch reuse of selected player and donor outcomes."""
 
     def __init__(
         self,
@@ -109,6 +110,7 @@ class HybridRuntimeProjectionProvider:
         for target in targets:
             groups[target.provider_player_id, target.sleeper_player_id].append(target)
         results = {}
+        partitions = HybridPartitionCache()
         for (player, sleeper_id), group in groups.items():
             needed = {player} if player is not None else set()
             if player is not None:
@@ -124,7 +126,9 @@ class HybridRuntimeProjectionProvider:
                         needed.update(population.donors(player, center))
                     except HybridProjectionError:
                         pass
-            observations = await self._load_partitions(manifest, tuple(sorted(needed)))
+            observations = await self._load_partitions(
+                manifest, tuple(sorted(needed)), cache=partitions
+            )
             pools = IndexedHistoryPools(
                 index,
                 population,
@@ -164,11 +168,16 @@ class HybridRuntimeProjectionProvider:
         self,
         manifest: HybridHistoryManifest,
         players: tuple[str, ...],
+        *,
+        cache: HybridPartitionCache,
     ) -> dict[str, tuple[JointGameObservation, ...]]:
         """Bound D1 read concurrency and wait for every read before propagating a failure."""
-        observations = {}
-        for offset in range(0, len(players), 6):
-            group = players[offset : offset + 6]
+        observations = {
+            player: cached for player in players if (cached := cache.get(player)) is not None
+        }
+        missing = tuple(player for player in players if player not in observations)
+        for offset in range(0, len(missing), 6):
+            group = missing[offset : offset + 6]
             rows = await asyncio.gather(
                 *(self.history.load_player_games(manifest, player) for player in group),
                 return_exceptions=True,
@@ -177,4 +186,5 @@ class HybridRuntimeProjectionProvider:
                 if isinstance(result, BaseException):
                     raise result
                 observations[player] = result
+                cache.remember(player, result)
         return observations
