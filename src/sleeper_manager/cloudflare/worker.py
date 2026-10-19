@@ -1,14 +1,15 @@
-"""Cloudflare Worker fetch and Cron entrypoint.
+"""Cloudflare Worker fetch, Cron, and planning queue entrypoints.
 
 `fetch` serves `/health` and `/ack` only. `scheduled` runs one due-work wake
-and prints the JSON summary. Bindings and secrets come from the Worker env.
+and prints the JSON summary. The queue consumer executes durable due work.
+Bindings and secrets come from the Worker env.
 """
 
 import json
 from urllib.parse import parse_qs, urlparse
 
 from sleeper_manager.cloudflare.routes import acknowledge
-from sleeper_manager.cloudflare.runtime import run_scheduled
+from sleeper_manager.cloudflare.runtime import run_queued_planning, run_scheduled
 from sleeper_manager.persistence.d1 import D1StateRepository
 
 try:
@@ -49,3 +50,11 @@ class Default(_WorkerEntrypoint):  # type: ignore[misc]
         del env, ctx
         result = await run_scheduled(self.env, fetch, controller=controller)
         print(json.dumps(result, sort_keys=True))
+
+    async def queue(self, batch, env=None, ctx=None):  # type: ignore[no-untyped-def]
+        """Acknowledge each signal only after its durable work attempt returns."""
+        del env, ctx
+        for message in batch.messages:
+            result = await run_queued_planning(self.env, fetch, message.body)
+            print(json.dumps(result, sort_keys=True))
+            message.ack()

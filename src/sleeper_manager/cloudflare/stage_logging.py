@@ -8,7 +8,7 @@ from time import perf_counter
 
 @contextmanager
 def timed_stage(name: str, *, correlation_id: str | None = None) -> Iterator[None]:
-    """Measure wall time, not CPU; exception events expose only the exception type."""
+    """Measure wall time; Workers clocks can stay fixed during synchronous computation."""
     fields = {"event": "scheduled_stage", "stage": name}
     if correlation_id is not None:
         fields["correlation_id"] = correlation_id

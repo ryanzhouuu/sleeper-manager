@@ -39,6 +39,7 @@ async def finish_hybrid_shadow_planning(
     store: HybridRuntimeRepository | None,
     archive: AsyncForecastArchiveRepository | None,
     clock: Callable[[], datetime],
+    candidate_timeout_seconds: float | None = None,
 ) -> CollectedLiveEvidence:
     """Use one candidate batch for selected advice and optional durable paired evaluation."""
     profile = manager.inputs.league_profile
@@ -136,7 +137,11 @@ async def finish_hybrid_shadow_planning(
                     decision_time=cutoff,
                     availability=availability,
                 ),
-                timeout=SHADOW_TIMEOUT_SECONDS,
+                timeout=(
+                    SHADOW_TIMEOUT_SECONDS
+                    if candidate_timeout_seconds is None
+                    else candidate_timeout_seconds
+                ),
             )
     except Exception as error:
         failure = (

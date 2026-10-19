@@ -4,6 +4,7 @@
 notification destinations are missing instead of raising.
 """
 
+import asyncio
 import sys
 from datetime import UTC, datetime
 from typing import Any
@@ -19,6 +20,7 @@ from sleeper_manager.cloudflare.planning import (
     CloudflarePlanningAssembly,
     collect_cloudflare_planning_inputs,
 )
+from sleeper_manager.cloudflare.planning_queue import PlanningWake
 from sleeper_manager.cloudflare.planning_watchdog import notify_delayed_daily_planning
 from sleeper_manager.cloudflare.providers import (
     CloudflareESPNProvider,
@@ -81,10 +83,12 @@ async def run_scheduled(
     controller: Any = None,
     scheduled_at: datetime | None = None,
     correlation_id: str | None = None,
+    planning_only: bool = False,
 ) -> dict[str, Any]:
     """Run one Worker wake against D1.
 
-    Prefer `scheduled_at`, then the Cron controller, then UTC now.
+    Prefer `scheduled_at`, then the Cron controller, then UTC now. Queue consumers
+    skip capture and enqueueing; they claim work using their actual execution time.
     """
     now = scheduled_at or scheduled_at_from_controller(controller) or datetime.now(UTC)
     correlation = correlation_id or uuid4().hex
@@ -126,6 +130,7 @@ async def run_scheduled(
                 repository=repository,
                 policy=policy,
                 scheduled_at=scheduled_at,
+                hybrid_timeout_seconds=600 if planning_only else None,
             )
 
     notifications = NotificationLoop(
@@ -136,19 +141,30 @@ async def run_scheduled(
         acknowledgement_kinds=LOCK_IN_ACKNOWLEDGEMENT_KINDS,
     )
     open_sleeper_url = _value(env, "OPEN_SLEEPER_URL", "https://sleeper.com")
-    try:
-        with timed_stage("planning_watchdog", correlation_id=correlation):
-            await notify_delayed_daily_planning(
-                repository,
-                notifications,
-                league_id=_value(env, "SLEEPER_LEAGUE_ID"),
+    if not planning_only:
+        try:
+            with timed_stage("planning_watchdog", correlation_id=correlation):
+                await notify_delayed_daily_planning(
+                    repository,
+                    notifications,
+                    league_id=_value(env, "SLEEPER_LEAGUE_ID"),
+                    scheduled_at=now,
+                    open_sleeper_url=open_sleeper_url,
+                )
+        except Exception as error:
+            print(f"Planning watchdog failed: {type(error).__name__}", file=sys.stderr)
+        with timed_stage("forecast_capture", correlation_id=correlation):
+            await _capture_forecast(env, fetcher, repository, now)
+        queue = getattr(env, "PLANNING_QUEUE", None)
+        if queue is not None:
+            with timed_stage("planning_enqueue", correlation_id=correlation):
+                await queue.send(PlanningWake(now).to_body(), contentType="text")
+            return ScheduledRunSummary(
+                correlation_id=correlation,
                 scheduled_at=now,
-                open_sleeper_url=open_sleeper_url,
-            )
-    except Exception as error:
-        print(f"Planning watchdog failed: {type(error).__name__}", file=sys.stderr)
-    with timed_stage("forecast_capture", correlation_id=correlation):
-        await _capture_forecast(env, fetcher, repository, now)
+                status=ScheduledRunStatus.QUEUED,
+                claimed_count=0,
+            ).as_dict()
     with timed_stage("planning_and_delivery", correlation_id=correlation):
         summary = await dispatch_due_work(
             repository,
@@ -160,6 +176,27 @@ async def run_scheduled(
             fetch_game_summary=CloudflareESPNProvider(fetcher, clock=lambda: now).game_summary,
         )
     return summary.as_dict()
+
+
+async def run_queued_planning(
+    env: Any,
+    fetcher: Any,
+    body: object,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Discard invalid/stale signals; retain D1 as the source of due work and retries."""
+    executed_at = now or datetime.now(UTC)
+    try:
+        wake = PlanningWake.from_body(body)
+    except ValueError:
+        return {"status": "no_action", "detail": "invalid_planning_wake"}
+    if not wake.is_current(executed_at):
+        return {"status": "no_action", "detail": "stale_planning_wake"}
+    return await asyncio.wait_for(
+        run_scheduled(env, fetcher, scheduled_at=executed_at, planning_only=True),
+        timeout=12 * 60,
+    )
 
 
 async def _capture_forecast(

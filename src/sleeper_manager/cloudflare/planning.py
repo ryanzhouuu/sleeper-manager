@@ -77,6 +77,7 @@ async def collect_cloudflare_planning_inputs(
     clock: Callable[[], datetime] | None = None,
     shadow_repository: HybridRuntimeRepository | None = None,
     forecast_archive: AsyncForecastArchiveRepository | None = None,
+    hybrid_timeout_seconds: float | None = None,
 ) -> CloudflarePlanningAssembly:
     """Select advice explicitly while sharing live collection with optional paired evaluation."""
     if scheduled_at.tzinfo is None:
@@ -161,6 +162,7 @@ async def collect_cloudflare_planning_inputs(
             store=store,
             archive=archive,
             clock=tick,
+            candidate_timeout_seconds=hybrid_timeout_seconds,
         )
     catalog = catalog_source.catalog or {}
     player_names = {

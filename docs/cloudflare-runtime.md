@@ -1,13 +1,27 @@
 # Cloudflare runtime
 
-The Worker uses one five-minute Cron Trigger. Forecast capture exceeded the Workers
+The Worker uses one five-minute Cron Trigger and the `sleeper-manager-planning` queue.
+Cron runs the delay watchdog and forecast capture, then publishes a small text wake
+signal through `PLANNING_QUEUE`. The consumer claims due work from D1 using its actual
+execution time, resolves current policy and evidence, and runs planning and delivery.
+The consumer permits one message and one invocation at a time, with a configured
+300,000 ms CPU budget. It has a twelve-minute async execution timeout, below the
+fifteen-minute D1 work lease. Duplicate signals cannot bypass work or delivery claims;
+invalid signals and signals older than ten minutes are discarded. Cron republishes
+every five minutes, so lost or exhausted transport retries do not erase durable work.
+An enqueue failure leaves work unclaimed. Without a queue binding, local commands
+retain inline execution.
+
+Forecast capture exceeded the Workers
 Free plan's 10 ms CPU allowance before it could write a receipt, so this schedule
 requires the Workers Paid CPU allowance. Verify the first remote receipt after deploying.
 Worker logs and traces are enabled with query strings redacted. Shadow events contain
 run identities and failure counts; private roster evidence remains in D1 artifacts.
 Scheduled stage events log entry and completion for forecast capture, planning collection,
 and planning with delivery. Durations are wall time; use Cloudflare invocation metrics
-for CPU time. A stage entry without completion can identify interrupted work even when
+for CPU time. Workers clocks may remain fixed during synchronous computation, so a
+zero-duration projection stage does not establish negligible CPU usage. A stage entry
+without completion can identify interrupted work even when
 termination prevents a final summary.
 Collection also reports league synchronization, baseline history loading, manager and
 opponent evidence, baseline projection, candidate projection, and shadow persistence.
@@ -23,7 +37,7 @@ records use decision type `daily_plan_delayed`, fantasy week `0`, and player `sy
 to keep them separate from weekly advice. They offer Open Sleeper without Lock or
 Pass acknowledgement actions. Watchdog failures are logged without blocking planning.
 
-Each wake claims due daily, pre-tipoff, postgame, or delivery-retry work. Daily and
+Each planning consumer claims due daily, pre-tipoff, postgame, or delivery-retry work. Daily and
 pre-tipoff wakes run the weekly lineup planner at most once and refresh live Lock-In
 opportunity rows.
 Postgame wakes fetch ESPN game summaries directly, stabilize finals, and may send
@@ -95,7 +109,8 @@ When shadow is enabled, the runtime resolves the opponent and batches both roste
 at one cutoff. Durable records pair control snapshots with candidate attempts,
 including source/fallback evidence, participation, donor weights, and exclusions.
 Shared large diagnostics are referenced by content hash. Candidate computation has
-a 60-second async timeout; failures remain paired blockers. Persistence and opponent
+a ten-minute async timeout in queued execution (60 seconds for inline execution);
+failures remain paired blockers. Persistence and opponent
 collection failures are logged explicitly and preserve valid manager control advice.
 Due forecast capture runs before planning so that wake's stored revision can be read.
 Pre-tipoff planning is due one five-minute Cron interval before the configured move

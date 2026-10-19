@@ -3,6 +3,21 @@ main = "src/worker.py"
 compatibility_date = "2026-07-28"
 compatibility_flags = ["python_workers"]
 
+[limits]
+cpu_ms = 300000
+
+[[queues.producers]]
+binding = "PLANNING_QUEUE"
+queue = "sleeper-manager-planning"
+
+[[queues.consumers]]
+queue = "sleeper-manager-planning"
+max_batch_size = 1
+max_batch_timeout = 0
+max_concurrency = 1
+max_retries = 3
+retry_delay = 60
+
 [observability]
 enabled = true
 redact_query_string = true

@@ -10,6 +10,7 @@ type DueWork = ScheduledWorkRecord
 
 
 class ScheduledRunStatus(StrEnum):
+    QUEUED = "queued"
     SUCCESS = "success"
     NO_ACTION = "no_action"
     BLOCKED = "blocked"
