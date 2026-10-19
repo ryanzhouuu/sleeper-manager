@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol, cast
@@ -21,6 +22,8 @@ from sleeper_manager.projections.direct_baseline import (
     ProjectionBaselineError,
     compact_direct_baseline_observations,
 )
+from sleeper_manager.projections.direct_batch import project_direct_batch
+from sleeper_manager.projections.hybrid_types import GameAvailability
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,6 +83,26 @@ class DirectBaselineProjectionProvider:
     def model_version(self) -> str:
         return self._baseline.config.model_version
 
+    async def project_live_batch(
+        self,
+        targets: tuple[LiveProjectionTarget, ...],
+        *,
+        scoring_policy: ScoringPolicy,
+        decision_time: datetime,
+        availability: Mapping[tuple[str, str], GameAvailability],
+    ) -> tuple[ProjectionSnapshot | None, ...]:
+        """Share validated history indexes; the planning boundary applies game availability."""
+        del availability
+        if decision_time.tzinfo is None:
+            raise ProjectionHistoryError("Live projections require timezone-aware decisions")
+        return project_direct_batch(
+            targets,
+            history_provider=self._history_provider,
+            baseline=self._baseline,
+            scoring_policy=scoring_policy,
+            decision_time=decision_time,
+        )
+
     def project(
         self,
         target: LiveProjectionTarget,
@@ -87,6 +110,7 @@ class DirectBaselineProjectionProvider:
         scoring_policy: ScoringPolicy,
         decision_time: datetime,
     ) -> ProjectionSnapshot | None:
+        """Preserve pregame provenance; a target season without warmup yields no snapshot."""
         if decision_time.tzinfo is None:
             raise ProjectionHistoryError("Live projections require timezone-aware decisions")
         if decision_time > target.game_start:

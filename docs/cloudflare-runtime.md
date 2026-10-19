@@ -38,6 +38,11 @@ including when the direct baseline has insufficient history. Questionable, doubt
 and probable designations retain provisional estimates and warning evidence.
 Collection can defer projection until both rosters have been read; async batch
 providers receive all targets together instead of one call per player-game.
+The direct baseline shares validated history and its index within a batch while
+retaining each game's cutoff filtering and input identity. Hybrid fitting reuses
+identical conditional weights within fixed preparation; availability and participation
+remain game-specific. Decoded hybrid outcomes use a batch-local LRU capped at 8,192
+retained rows and 64 partitions, in addition to the active player's required history.
 
 State migration `0005_hybrid_runtime.sql` adds immutable compressed artifacts,
 prepared history versions, and shadow run references. History manifests are published

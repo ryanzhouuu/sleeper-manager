@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from datetime import datetime
 from typing import Any
 
@@ -24,6 +25,9 @@ class D1ProjectionHistory:
     history_version: str
     loaded_at: datetime
     observations: tuple[DirectBaselineObservation, ...]
+    _prepared: tuple[datetime, HistoricalFeatureSlice] | None = dataclass_field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     @classmethod
     async def load_version(
@@ -58,8 +62,11 @@ class D1ProjectionHistory:
         return cls(history_version, loaded_at, observations)
 
     def load(self, target: LiveProjectionTarget, *, before: datetime) -> HistoricalFeatureSlice:
+        """Reuse one validated slice; each changed cutoff is filtered independently."""
         del target
-        return HistoricalFeatureSlice(
+        if self._prepared is not None and self._prepared[0] == before:
+            return self._prepared[1]
+        prepared = HistoricalFeatureSlice(
             dataset_version=self.history_version,
             feature_schema_version="direct-baseline-observation-v1",
             source_versions=(
@@ -77,6 +84,8 @@ class D1ProjectionHistory:
                 and observation.outcome_finalized_at <= before
             ),
         )
+        object.__setattr__(self, "_prepared", (before, prepared))
+        return prepared
 
 
 def _box_score(payload_json: str) -> BoxScoreLine:
