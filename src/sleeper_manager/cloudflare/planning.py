@@ -13,6 +13,7 @@ from sleeper_manager.cloudflare.providers import (
     CloudflareSleeperClient,
 )
 from sleeper_manager.cloudflare.shadow_planning import finish_hybrid_shadow_planning
+from sleeper_manager.cloudflare.stage_logging import timed_stage
 from sleeper_manager.domain.league import LeagueProfile
 from sleeper_manager.domain.runtime_policy import RuntimePolicy
 from sleeper_manager.domain.scheduling import eastern_fantasy_week
@@ -84,21 +85,23 @@ async def collect_cloudflare_planning_inputs(
     user_id = _required_env(env, "SLEEPER_USER_ID")
     tick = clock or (lambda: datetime.now(UTC))
     sleeper = CloudflareSleeperClient(fetcher)
-    profile = (
-        await LeagueSynchronizationService(sleeper, clock=tick).sync(
-            league_id=league_id,
-            user_id=user_id,
-        )
-    ).profile
+    with timed_stage("league_sync"):
+        profile = (
+            await LeagueSynchronizationService(sleeper, clock=tick).sync(
+                league_id=league_id,
+                user_id=user_id,
+            )
+        ).profile
     week = eastern_fantasy_week(scheduled_at)
     week_window = FantasyWeekWindow(profile.fantasy_week.week, week.starts_at, week.ends_at)
     history_loaded_at = tick()
-    history = await D1ProjectionHistory.load_version(
-        repository,
-        history_version=policy.projection_history_version,
-        loaded_at=history_loaded_at,
-        allow_empty=policy.active_projection_provider == "hybrid",
-    )
+    with timed_stage("baseline_history_load"):
+        history = await D1ProjectionHistory.load_version(
+            repository,
+            history_version=policy.projection_history_version,
+            loaded_at=history_loaded_at,
+            allow_empty=policy.active_projection_provider == "hybrid",
+        )
     nba = AsyncCachedNBAProvider(
         CloudflareESPNProvider(fetcher, clock=tick),
         repository,
@@ -138,7 +141,8 @@ async def collect_cloudflare_planning_inputs(
             ),
         )
 
-    evidence = await collect(profile)
+    with timed_stage("manager_evidence"):
+        evidence = await collect(profile)
     if policy.hybrid_shadow_enabled or policy.active_projection_provider == "hybrid":
         binding = getattr(env, "sleeper_manager_state", None)
         store = shadow_repository or (

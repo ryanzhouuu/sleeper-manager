@@ -9,6 +9,11 @@ Scheduled stage events log entry and completion for forecast capture, planning c
 and planning with delivery. Durations are wall time; use Cloudflare invocation metrics
 for CPU time. A stage entry without completion can identify interrupted work even when
 termination prevents a final summary.
+Collection also reports league synchronization, baseline history loading, manager and
+opponent evidence, baseline projection, candidate projection, and shadow persistence.
+Candidate stages separate index loading, population preparation, forecast reads, and
+each player's partition loading, pool preparation, and projection. Repeated stage pairs
+show batch progress without logging player identities or private provider payloads.
 Before forecast capture or collection, the watchdog checks today's unfinished daily
 work. After two attempts, an expired running lease or a due retry triggers a
 `Daily plan delayed` notification through the configured destinations. Delivery is

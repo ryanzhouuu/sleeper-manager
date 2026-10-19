@@ -2,7 +2,8 @@
 
 import asyncio
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from contextlib import AbstractContextManager, nullcontext
 from datetime import datetime
 from typing import Protocol
 
@@ -48,10 +49,12 @@ class HybridRuntimeProjectionProvider:
         *,
         archive: AsyncForecastArchiveRepository | None = None,
         config: HybridProjectionConfig | None = None,
+        stage: Callable[[str], AbstractContextManager[None]] | None = None,
     ) -> None:
         self.history, self.history_version, self.archive = history, history_version, archive
         self.config = config or HybridProjectionConfig()
         self.results: tuple[HybridProjectionResult, ...] = ()
+        self._stage = stage or (lambda _: nullcontext())
 
     async def project_live_batch(
         self,
@@ -85,27 +88,30 @@ class HybridRuntimeProjectionProvider:
             raise HybridProjectionError("duplicate_projection_target")
         if not targets:
             return ()
-        manifest, index = await self.history.load_history(
-            self.history_version, cutoff=decision_time
-        )
+        with self._stage("hybrid_history_load"):
+            manifest, index = await self.history.load_history(
+                self.history_version, cutoff=decision_time
+            )
         if scoring_policy.version != index.scoring_policy_version:
             raise HybridProjectionError("runtime_index_scoring_mismatch")
-        population = index.population(decision_time, self.config)
-        participation = HybridParticipation.from_counts(
-            dict(index.participation), cutoff=decision_time, config=self.config
-        )
+        with self._stage("hybrid_population_prepare"):
+            population = index.population(decision_time, self.config)
+            participation = HybridParticipation.from_counts(
+                dict(index.participation), cutoff=decision_time, config=self.config
+            )
         reads = {}
         if self.archive is not None and self.config.use_external:
             source = season_forecast_source(str(index.season), "regular")
-            reads = {
-                row.player_id: row
-                for row in await read_player_forecasts_async(
-                    self.archive,
-                    source,
-                    tuple(sorted({target.sleeper_player_id for target in targets})),
-                    decision_time,
-                )
-            }
+            with self._stage("hybrid_forecast_read"):
+                reads = {
+                    row.player_id: row
+                    for row in await read_player_forecasts_async(
+                        self.archive,
+                        source,
+                        tuple(sorted({target.sleeper_player_id for target in targets})),
+                        decision_time,
+                    )
+                }
         groups: dict[tuple[str | None, str], list[LiveProjectionTarget]] = defaultdict(list)
         for target in targets:
             groups[target.provider_player_id, target.sleeper_player_id].append(target)
@@ -126,42 +132,45 @@ class HybridRuntimeProjectionProvider:
                         needed.update(population.donors(player, center))
                     except HybridProjectionError:
                         pass
-            observations = await self._load_partitions(
-                manifest, tuple(sorted(needed)), cache=partitions
-            )
-            pools = IndexedHistoryPools(
-                index,
-                population,
-                observations,
-                cutoff=decision_time,
-                scoring_policy=scoring_policy,
-                config=self.config,
-            )
-            prepared = HybridProjectionBatch.from_prepared(
-                cutoff=decision_time,
-                season=index.season,
-                scoring_policy=scoring_policy,
-                config=self.config,
-                pools=pools,
-                participation=participation,
-                history_fingerprint=index.history_fingerprint,
-            )
-            for target in group:
-                key = target.sleeper_player_id, target.game_id
-                results[key] = (
-                    HybridProjectionResult(
-                        target,
-                        decision_time,
-                        failure="runtime_index_season_mismatch",
-                        history_fingerprint=index.history_fingerprint,
-                    )
-                    if nba_season_start_year(target.game_start) != index.season
-                    else prepared.project(
-                        target,
-                        forecast=reads.get(sleeper_id),
-                        availability=(availability or {}).get(key),
-                    )
+            with self._stage("hybrid_partitions_load"):
+                observations = await self._load_partitions(
+                    manifest, tuple(sorted(needed)), cache=partitions
                 )
+            with self._stage("hybrid_pool_prepare"):
+                pools = IndexedHistoryPools(
+                    index,
+                    population,
+                    observations,
+                    cutoff=decision_time,
+                    scoring_policy=scoring_policy,
+                    config=self.config,
+                )
+                prepared = HybridProjectionBatch.from_prepared(
+                    cutoff=decision_time,
+                    season=index.season,
+                    scoring_policy=scoring_policy,
+                    config=self.config,
+                    pools=pools,
+                    participation=participation,
+                    history_fingerprint=index.history_fingerprint,
+                )
+            with self._stage("hybrid_player_project"):
+                for target in group:
+                    key = target.sleeper_player_id, target.game_id
+                    results[key] = (
+                        HybridProjectionResult(
+                            target,
+                            decision_time,
+                            failure="runtime_index_season_mismatch",
+                            history_fingerprint=index.history_fingerprint,
+                        )
+                        if nba_season_start_year(target.game_start) != index.season
+                        else prepared.project(
+                            target,
+                            forecast=reads.get(sleeper_id),
+                            availability=(availability or {}).get(key),
+                        )
+                    )
         return tuple(results[key] for key in keys)
 
     async def _load_partitions(
