@@ -36,6 +36,10 @@ Active leases, completed work, and prior-day jobs stay quiet. These operational
 records use decision type `daily_plan_delayed`, fantasy week `0`, and player `system`
 to keep them separate from weekly advice. They offer Open Sleeper without Lock or
 Pass acknowledgement actions. Watchdog failures are logged without blocking planning.
+Failed ntfy deliveries retain the HTTP status, a numeric provider error code from a
+small JSON response, and numeric `Retry-After` guidance when present. Response text,
+topics, and payloads are omitted. Diagnostic parsing failures preserve the original
+HTTP failure; recording retry guidance does not change the scheduled retry policy.
 
 Each planning consumer claims due daily, pre-tipoff, postgame, or delivery-retry work. Daily and
 pre-tipoff wakes run the weekly lineup planner at most once and refresh live Lock-In

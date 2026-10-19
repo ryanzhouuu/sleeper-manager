@@ -1,3 +1,6 @@
+"""Deliver Worker notifications and retain bounded, non-sensitive provider failure details."""
+
+import asyncio
 import json
 from typing import Any
 
@@ -44,7 +47,48 @@ class CloudflareNtfySender:
             headers=headers,
         )
         if not bool(response.ok):
-            raise RuntimeError(f"ntfy returned HTTP {response.status}")
+            raise await _ntfy_failure(response)
+
+
+async def _ntfy_failure(response: Any) -> RuntimeError:
+    """Keep numeric error codes and retry delays; provider text may contain private topics."""
+    details = [f"ntfy returned HTTP {response.status}"]
+    headers = getattr(response, "headers", None)
+    if headers is None:
+        return RuntimeError(" ".join(details))
+    retry = _bounded_integer(headers.get("retry-after"), maximum=604800)
+    if retry is not None:
+        details.append(f"retry_after_seconds={retry}")
+    media_type = str(headers.get("content-type") or "").split(";", 1)[0].strip().lower()
+    if media_type == "text/html":
+        details.append("response_type=html")
+    elif media_type == "application/json":
+        details.append("response_type=json")
+        length = _bounded_integer(headers.get("content-length"), maximum=8192)
+        if length is not None:
+            try:
+                content = await asyncio.wait_for(response.bytes(), timeout=3)
+                if isinstance(content, bytes) and len(content) <= 8192:
+                    payload = json.loads(content)
+                    code = payload.get("code") if isinstance(payload, dict) else None
+                    if type(code) is int and 10000 <= code <= 59999:
+                        details.append(f"ntfy_code={code}")
+            except Exception:
+                pass
+    return RuntimeError(" ".join(details))
+
+
+def _bounded_integer(value: object, *, maximum: int) -> int | None:
+    """Accept only short ASCII decimal headers before converting untrusted values."""
+    if (
+        not isinstance(value, str)
+        or not 1 <= len(value) <= 9
+        or not value.isascii()
+        or not value.isdecimal()
+    ):
+        return None
+    parsed = int(value)
+    return parsed if parsed <= maximum else None
 
 
 class CloudflareDiscordSender:
