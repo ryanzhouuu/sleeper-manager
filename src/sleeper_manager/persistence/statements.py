@@ -399,6 +399,14 @@ WHERE league_id = ? AND fantasy_week = ? AND decision_type = ? AND status = ?
 ORDER BY created_at ASC, recommendation_id ASC
 """
 
+LATEST_CURRENT_RECOMMENDATION_SQL = f"""
+SELECT {RECOMMENDATION_COLUMNS}
+FROM recommendations
+WHERE league_id = ? AND fantasy_week = ? AND decision_type = ? AND status != ?
+ORDER BY created_at DESC, recommendation_id DESC
+LIMIT 1
+"""
+
 INSERT_DELIVERY_ATTEMPT_SQL = """
 INSERT INTO delivery_attempts (
     delivery_id, recommendation_id, provider, attempt_number,

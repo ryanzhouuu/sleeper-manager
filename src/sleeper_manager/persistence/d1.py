@@ -76,6 +76,7 @@ from sleeper_manager.persistence.statements import (
     INSERT_OR_IGNORE_ACTION_TOKEN_SQL,
     INSERT_RECOMMENDATION_SQL,
     IS_LOCKED_SQL,
+    LATEST_CURRENT_RECOMMENDATION_SQL,
     LIST_PENDING_RECOMMENDATIONS_SQL,
     LIST_SCHEDULED_WORK_SQL,
     LOAD_ACTION_TOKEN_ID_SQL,
@@ -389,6 +390,25 @@ class D1StateRepository(D1LockInOpportunityMixin, AsyncRuntimeStateRepository):
             else:
                 raise AcknowledgementQueryError("unexpected D1 result envelope")
         return tuple(records)
+
+    async def latest_current_recommendation(
+        self,
+        league_id: str,
+        fantasy_week: int,
+        *,
+        decision_type: str,
+    ) -> RecommendationRecord | None:
+        """Return the newest matching row that has not been superseded."""
+        row = await self._first(
+            LATEST_CURRENT_RECOMMENDATION_SQL,
+            league_id,
+            fantasy_week,
+            decision_type,
+            RecommendationStatus.SUPERSEDED.value,
+        )
+        if row is None:
+            return None
+        return recommendation_from_mapping(row)
 
     async def supersede_recommendation(self, recommendation_id: str, now: datetime) -> bool:
         del now

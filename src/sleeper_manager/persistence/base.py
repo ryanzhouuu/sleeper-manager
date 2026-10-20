@@ -298,6 +298,16 @@ class StateRepository(Protocol):
         decision_type: str,
     ) -> tuple[RecommendationRecord, ...]: ...
 
+    def latest_current_recommendation(
+        self,
+        league_id: str,
+        fantasy_week: int,
+        *,
+        decision_type: str,
+    ) -> RecommendationRecord | None:
+        """Return the newest matching row that has not been superseded."""
+        ...
+
     def supersede_recommendation(self, recommendation_id: str, now: datetime) -> bool: ...
 
 
@@ -373,6 +383,16 @@ class AsyncStateRepository(Protocol):
         *,
         decision_type: str,
     ) -> tuple[RecommendationRecord, ...]: ...
+
+    async def latest_current_recommendation(
+        self,
+        league_id: str,
+        fantasy_week: int,
+        *,
+        decision_type: str,
+    ) -> RecommendationRecord | None:
+        """Return the newest matching row that has not been superseded."""
+        ...
 
     async def supersede_recommendation(self, recommendation_id: str, now: datetime) -> bool: ...
 

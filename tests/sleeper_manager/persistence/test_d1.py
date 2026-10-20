@@ -15,6 +15,7 @@ from sleeper_manager.persistence.base import (
     LeagueSnapshotRecord,
     ProjectionObservationRecord,
     RecommendationRecord,
+    RecommendationStatus,
     RuntimePolicyRecord,
     ScheduledWorkRecord,
     ScheduledWorkStatus,
@@ -359,3 +360,34 @@ def test_d1_runtime_state_matches_sqlite_contracts() -> None:
 
     asyncio.run(exercise())
     assert database.connection.execute("SELECT COUNT(*) FROM scheduled_work").fetchone()[0] == 2
+
+
+def test_d1_latest_current_recommendation_skips_newer_superseded_row() -> None:
+    _, repository = make_repository()
+    current = recommendation()
+    current = replace(
+        current,
+        recommendation_id="current",
+        idempotency_key="current",
+        decision_type="weekly_lineup",
+        title="Lineup is set",
+        created_at=NOW,
+    )
+    newer = replace(
+        current,
+        recommendation_id="newer",
+        idempotency_key="newer",
+        status=RecommendationStatus.SUPERSEDED,
+        title="Lineup move required",
+        created_at=NOW + timedelta(minutes=5),
+    )
+    asyncio.run(repository.create_recommendation(current))
+    asyncio.run(repository.create_recommendation(newer))
+
+    found = asyncio.run(
+        repository.latest_current_recommendation("league-1", 1, decision_type="weekly_lineup")
+    )
+
+    assert found is not None
+    assert found.recommendation_id == "current"
+    assert found.title == "Lineup is set"
