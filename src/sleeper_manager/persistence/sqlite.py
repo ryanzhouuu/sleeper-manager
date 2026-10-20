@@ -72,6 +72,7 @@ from sleeper_manager.persistence.statements import (
     INSERT_DELIVERY_ATTEMPT_SQL,
     INSERT_RECOMMENDATION_SQL,
     IS_LOCKED_SQL,
+    LATEST_CURRENT_RECOMMENDATION_SQL,
     LIST_PENDING_RECOMMENDATIONS_SQL,
     LIST_SCHEDULED_WORK_SQL,
     LOAD_ACTION_TOKEN_SQL,
@@ -408,6 +409,31 @@ class SQLiteStateRepository(SQLiteLockInOpportunityMixin):
             for row in rows
             if (mapped := _mapping(row)) is not None
         )
+
+    def latest_current_recommendation(
+        self,
+        league_id: str,
+        fantasy_week: int,
+        *,
+        decision_type: str,
+    ) -> RecommendationRecord | None:
+        """Return the newest matching row that has not been superseded."""
+        with self._connect() as connection:
+            row = connection.execute(
+                LATEST_CURRENT_RECOMMENDATION_SQL,
+                (
+                    league_id,
+                    fantasy_week,
+                    decision_type,
+                    RecommendationStatus.SUPERSEDED.value,
+                ),
+            ).fetchone()
+        if row is None:
+            return None
+        mapped = _mapping(row)
+        if mapped is None:
+            return None
+        return recommendation_from_mapping(mapped)
 
     def supersede_recommendation(self, recommendation_id: str, now: datetime) -> bool:
         del now

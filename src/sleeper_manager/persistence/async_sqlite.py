@@ -117,6 +117,20 @@ class AsyncSQLiteStateRepository(AsyncRuntimeStateRepository):
             decision_type=decision_type,
         )
 
+    async def latest_current_recommendation(
+        self,
+        league_id: str,
+        fantasy_week: int,
+        *,
+        decision_type: str,
+    ) -> RecommendationRecord | None:
+        """Return the newest matching row that has not been superseded."""
+        return self._repository.latest_current_recommendation(
+            league_id,
+            fantasy_week,
+            decision_type=decision_type,
+        )
+
     async def supersede_recommendation(self, recommendation_id: str, now: datetime) -> bool:
         return self._repository.supersede_recommendation(recommendation_id, now)
 

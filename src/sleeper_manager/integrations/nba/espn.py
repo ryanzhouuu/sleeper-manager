@@ -136,6 +136,16 @@ def _team_id(value: Any) -> str | None:
     return _optional_string(value)
 
 
+def _team_abbreviation(value: Any) -> str | None:
+    """Read a non-empty abbreviation from an ESPN team object."""
+    if not isinstance(value, Mapping):
+        return None
+    abbreviation = value.get("abbreviation")
+    if not isinstance(abbreviation, str) or not abbreviation.strip():
+        return None
+    return abbreviation.strip()
+
+
 def _status(value: Any) -> tuple[GameStatus, str | None]:
     status = _as_mapping(value, "status")
     status_type = status.get("type", status)
@@ -216,15 +226,20 @@ def _parse_game(payload: Mapping[str, Any], retrieved_at: datetime) -> Scheduled
         raise ESPNSchemaError(f"ESPN game {game_id!r} is missing competitors")
     home_team_id: str | None = None
     away_team_id: str | None = None
+    home_abbreviation: str | None = None
+    away_abbreviation: str | None = None
     for competitor in competitors:
         competitor_mapping = _as_mapping(competitor, "competitor")
-        team_id = _team_id(competitor_mapping.get("team")) or _team_id(competitor_mapping.get("id"))
+        team = competitor_mapping.get("team")
+        team_id = _team_id(team) or _team_id(competitor_mapping.get("id"))
         if team_id is None:
             raise ESPNSchemaError(f"ESPN game {game_id!r} has a competitor without a team ID")
         if competitor_mapping.get("homeAway") == "home":
             home_team_id = team_id
+            home_abbreviation = _team_abbreviation(team)
         elif competitor_mapping.get("homeAway") == "away":
             away_team_id = team_id
+            away_abbreviation = _team_abbreviation(team)
     if home_team_id is None or away_team_id is None:
         raise ESPNSchemaError(f"ESPN game {game_id!r} does not identify home and away teams")
     timestamp = payload.get("date") or competition.get("date")
@@ -238,6 +253,8 @@ def _parse_game(payload: Mapping[str, Any], retrieved_at: datetime) -> Scheduled
         away_team_id=away_team_id,
         status_detail=status_detail,
         source=_source(game_id, retrieved_at),
+        home_abbreviation=home_abbreviation,
+        away_abbreviation=away_abbreviation,
     )
 
 
