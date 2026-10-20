@@ -308,6 +308,8 @@ def build_live_team_week_state(
             decision_time=decision_time,
             starter_slots=starter_slots,
             roster_player_ids=tuple(dict.fromkeys(roster_player_ids)),
+            bench_capacity=sum(slot.position == "BN" for slot in profile.roster_slots),
+            reserve_player_ids=roster.reserve_ids if roster is not None else (),
             observed_starters=observed,
             opportunities=tuple(opportunities),
             fixed_slots=fixed_slots,

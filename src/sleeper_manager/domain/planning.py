@@ -330,6 +330,8 @@ class PlanDistributionSummary:
 
 @dataclass(frozen=True, slots=True)
 class TeamWeekState:
+    """Observed roster evidence; unknown bench capacity never implies a vacancy."""
+
     league_id: str
     season: str
     week: int
@@ -351,6 +353,8 @@ class TeamWeekState:
     exclusions: tuple[PlanningReasonCode, ...] = ()
     warnings: tuple[PlanningReasonCode, ...] = ()
     blocking_reasons: tuple[PlanningReasonCode, ...] = ()
+    bench_capacity: int | None = None
+    reserve_player_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _require_text(self.league_id, "League ID")
@@ -373,6 +377,11 @@ class TeamWeekState:
         _require_unique(self.roster_player_ids, "roster players")
         slot_by_index = {slot.index: slot for slot in self.starter_slots}
         roster_players = set(self.roster_player_ids)
+        if self.bench_capacity is not None and self.bench_capacity < 0:
+            raise PlanningStateError("Bench capacity must be non-negative")
+        _require_unique(self.reserve_player_ids, "reserve players")
+        if not set(self.reserve_player_ids) <= roster_players:
+            raise PlanningStateError("A reserve player is not on the current roster")
 
         observed_slots: set[int] = set()
         observed_players: set[str] = set()
@@ -386,6 +395,8 @@ class TeamWeekState:
                 raise PlanningStateError("Observed assignment references an unknown slot")
             if observed.player_id not in roster_players:
                 raise PlanningStateError("Observed starter is not on the current roster")
+            if observed.player_id in self.reserve_player_ids:
+                raise PlanningStateError("A reserve player cannot occupy a starting slot")
             if not observed.eligible_positions:
                 if PlanningReasonCode.AMBIGUOUS_ELIGIBILITY not in self.blocking_reasons:
                     raise PlanningStateError("Unknown observed eligibility must block planning")

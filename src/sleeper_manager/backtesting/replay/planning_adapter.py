@@ -179,6 +179,18 @@ def team_week_state_from_replay(
             decision_time=decision_time,
             starter_slots=starter_slots,
             roster_player_ids=roster_ids,
+            bench_capacity=(
+                sum(slot.position == "BN" for slot in league_profile.roster_slots)
+                if league_profile is not None
+                else None
+            ),
+            reserve_player_ids=tuple(
+                player_id
+                for roster in (league_profile.rosters if league_profile is not None else ())
+                if roster.roster_id == config.roster_id
+                for player_id in roster.reserve_ids
+                if player_id in roster_ids
+            ),
             observed_starters=observed,
             opportunities=tuple(opportunities),
             fixed_slots=fixed_slots,
