@@ -50,5 +50,11 @@ uv run --extra historical sleeper-manager sync-cloudflare-runtime-data --apply
 See `docs/cloudflare-runtime.md` for dry-run behavior, required environment variables,
 forecast archive checks, and the local `run-scheduled` command.
 
+## HTTP
+
+`GET /health` returns `{"status": "ok"}`. `GET /ack` consumes a notification action
+token. `GET /home` returns the public roster, matchup, games, and weekly recommendation
+document. `/home` does not accept credentials and its body omits ids, tokens, and secrets.
+
 Python Workers require the `python_workers` compatibility flag and are currently
 in beta. Use `uvx --from workers-py pywrangler dev` for local Worker development.
