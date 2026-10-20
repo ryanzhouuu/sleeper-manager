@@ -85,6 +85,10 @@ Official game absences constrain active projections; uncertain or unverified sta
 evidence is explained in lineup and Lock-In messages. Existing policies use direct-baseline
 advice; hybrid advice requires an explicit selection and pinned history.
 
+Notifications group named availability warnings by status and game time, and count
+players with missing reports or unverified availability. Full player/game warnings
+remain in the stored recommendation trace.
+
 `run-scheduled` writes forecast evidence to `forecasts.db` beside `SQLITE_PATH`
 (`.local/forecasts.db` by default). That write does not change the planning
 exit status or lineup and Lock-In advice.

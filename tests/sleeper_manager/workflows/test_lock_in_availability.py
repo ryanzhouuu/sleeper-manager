@@ -86,7 +86,8 @@ def test_future_confirmed_absence_changes_pass_to_lock_and_is_visible(tmp_path) 
         trace = json.loads(after.trace_json)
         assert trace["kind"] == "lock"
         assert trace["availability_notes"]
-        assert any("Out for this game" in message.message for message in sender.messages)
+        assert any("• Out: Ann" in message.message for message in sender.messages)
+        assert "Out for this game" in trace["availability_notes"][0]
         assert all("private" not in message.message for message in sender.messages)
 
     asyncio.run(exercise())

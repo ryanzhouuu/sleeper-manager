@@ -34,6 +34,7 @@ from sleeper_manager.workflows.availability_advice import (
     availability_material_hash,
     state_availability_notes,
 )
+from sleeper_manager.workflows.availability_rendering import state_availability_summary
 from sleeper_manager.workflows.lock_in_evidence import merge_lock_in_opportunity_evidence
 from sleeper_manager.workflows.lock_in_rendering import (
     _evaluation_hash,
@@ -248,6 +249,9 @@ async def _evaluate_opportunity(
     notes = state_availability_notes(
         state, player_names=player_names, local_timezone=ZoneInfo(runtime_policy.manager_timezone)
     )
+    availability = state_availability_summary(
+        state, player_names=player_names, local_timezone=ZoneInfo(runtime_policy.manager_timezone)
+    )
     evaluation_hash = availability_material_hash(_evaluation_hash(evaluation), notes)
     trace_json = append_availability_trace(
         _evaluation_trace_json(evaluation, opportunity), notes, evaluation_hash
@@ -302,7 +306,7 @@ async def _evaluate_opportunity(
         game_id=opportunity.key.game_id,
         decision_type=decision_type,
         title=_evaluation_title(evaluation, player_names),
-        message=append_availability_message(_evaluation_message(evaluation), notes),
+        message=append_availability_message(_evaluation_message(evaluation), availability),
         deadline=opportunity.action_deadline,
         policy_version=runtime_policy.manager_intent.version,
         open_sleeper_url=open_sleeper_url,
