@@ -13,12 +13,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import ValidationError
 
-from sleeper_manager.cloudflare.home_cache import (
-    decode_identities,
-    decode_schedule,
-    read_home_cache,
-    write_home_cache,
-)
+from sleeper_manager.cloudflare.home_cache import decode_schedule, read_home_cache, write_home_cache
 from sleeper_manager.cloudflare.home_document import (
     GameRow,
     HomeIdentity,
@@ -28,13 +23,22 @@ from sleeper_manager.cloudflare.home_document import (
     avatar_image_url,
     label_team_games,
 )
+from sleeper_manager.cloudflare.home_identities import (
+    fill_espn_ids,
+    load_player_identities,
+    remember_identities,
+)
 from sleeper_manager.cloudflare.home_roster import matchup_sides, roster_rows
 from sleeper_manager.cloudflare.providers import CloudflareProviderError
 from sleeper_manager.cloudflare.routes import RouteResponse
-from sleeper_manager.domain.nba import DataQualityState, ProviderResult, ScheduledGame
+from sleeper_manager.domain.nba import (
+    DataQualityState,
+    ProviderPlayer,
+    ProviderResult,
+    ScheduledGame,
+)
 from sleeper_manager.domain.nba_season import espn_season_end_year
 from sleeper_manager.domain.scheduling import eastern_fantasy_week, manager_local_day
-from sleeper_manager.integrations.nba.identity import parse_sleeper_player_identity
 from sleeper_manager.integrations.nba.mapping import normalize_team
 from sleeper_manager.integrations.sleeper.schemas import (
     SleeperLeaguePayload,
@@ -70,6 +74,8 @@ class HomeSchedule(Protocol):
     async def team_schedule(
         self, team_id: str, season: int
     ) -> ProviderResult[tuple[ScheduledGame, ...]]: ...
+
+    async def team_roster(self, team_id: str) -> ProviderResult[tuple[ProviderPlayer, ...]]: ...
 
 
 async def build_home(
@@ -113,9 +119,14 @@ async def build_home(
     if matchup is None:
         return _league_unavailable()
     manager_side, opponent_side = matchup
-    identities = await _identities(sleeper, repository, timezone_name=timezone_name, now=now)
-    if identities is None:
+    loaded_identities = await load_player_identities(
+        sleeper, repository, timezone_name=timezone_name, now=now
+    )
+    if loaded_identities is None:
         return _league_unavailable()
+    identities, from_cache = loaded_identities
+    if not from_cache and await fill_espn_ids(espn, identities, manager_roster.players):
+        await remember_identities(repository, identities, timezone_name=timezone_name, now=now)
     rows = roster_rows(
         league.roster_positions,
         manager_roster.starters,
@@ -270,13 +281,13 @@ async def _matchup(
         if side.matchup_id == mine[0].matchup_id and side.roster_id != manager_roster.roster_id
     )
     if len(opponents) != 1:
-        return None
+        return manager_side, None
     opponent_roster = next(
         (roster for roster in rosters if roster.roster_id == opponents[0].roster_id),
         None,
     )
     if opponent_roster is None or opponent_roster.owner_id is None:
-        return None
+        return manager_side, HomeSide(name=None, score=opponents[0].points, image_url=None)
     opponent_user = next(
         (user for user in users if user.user_id == opponent_roster.owner_id),
         None,
@@ -286,56 +297,6 @@ async def _matchup(
         score=opponents[0].points,
         image_url=avatar_image_url(_user_avatar(raw_users, opponent_roster.owner_id)),
     )
-
-
-async def _identities(
-    sleeper: HomeSleeper,
-    repository: AsyncRuntimeStateRepository,
-    *,
-    timezone_name: str,
-    now: datetime,
-) -> dict[str, HomeIdentity] | None:
-    local_day = manager_local_day(now, timezone_name=timezone_name)
-    key = f"home-players:{local_day.isoformat()}"
-    cached = decode_identities(await read_home_cache(repository, key, now))
-    if cached is not None:
-        return cached
-    try:
-        payload = await sleeper.players(active=True)
-    except (CloudflareProviderError, TypeError, ValueError):
-        return None
-    if not isinstance(payload, Mapping):
-        return None
-    identities: dict[str, HomeIdentity] = {}
-    for sleeper_id, raw in payload.items():
-        if not isinstance(raw, Mapping):
-            continue
-        try:
-            parsed = parse_sleeper_player_identity(str(sleeper_id), raw)
-        except ValueError:
-            continue
-        identities[str(sleeper_id)] = HomeIdentity(
-            sleeper_id=str(sleeper_id),
-            name=parsed.full_name,
-            nba_team=parsed.team,
-            espn_id=parsed.espn_id,
-        )
-    await write_home_cache(
-        repository,
-        key,
-        {
-            identity.sleeper_id: {
-                "name": identity.name,
-                "nba_team": identity.nba_team,
-                "espn_id": identity.espn_id,
-            }
-            for identity in identities.values()
-        },
-        resource="player-catalog",
-        timezone_name=timezone_name,
-        now=now,
-    )
-    return identities
 
 
 async def _games(
@@ -401,7 +362,7 @@ async def _team_games(
         return cached
     try:
         result = await espn.team_schedule(team, season_year)
-    except (CloudflareProviderError, TypeError, ValueError):
+    except Exception:
         return None
     if result.quality.state is DataQualityState.ERROR:
         return None

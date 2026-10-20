@@ -7,11 +7,13 @@ from sleeper_manager.domain.nba import (
     DataQualityReport,
     DataQualityState,
     GameStatus,
+    ProviderPlayer,
     ProviderResult,
     ScheduledGame,
     SourceMetadata,
     quality_for_records,
 )
+from sleeper_manager.integrations.nba.espn import ESPNSchemaError
 from sleeper_manager.persistence.async_sqlite import AsyncSQLiteStateRepository
 from sleeper_manager.persistence.base import RecommendationRecord
 
@@ -24,6 +26,7 @@ class FakeSleeper:
         self.matchup_calls = 0
         self.player_calls = 0
         self.fail_players = False
+        self.opponent_owner: str | None = "user-2"
         self.manager_players = ["known", "missing"]
         self.manager_starters = ["known"]
         self.state_payload: dict[str, object] = {
@@ -82,7 +85,7 @@ class FakeSleeper:
             },
             {
                 "roster_id": 2,
-                "owner_id": "user-2",
+                "owner_id": self.opponent_owner,
                 "players": ["other"],
                 "starters": ["other"],
                 "reserve": [],
@@ -108,15 +111,21 @@ class FakeSleeper:
 class FakeSchedule:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.roster_calls: list[str] = []
         self.fail_teams: set[str] = set()
         self.error_teams: set[str] = set()
         self.starts = (TIPOFF,)
+        self.schedule_error: BaseException | None = None
+        self.roster_error: BaseException | None = None
+        self.roster_players: tuple[ProviderPlayer, ...] = ()
 
     async def team_schedule(
         self, team_id: str, season: int
     ) -> ProviderResult[tuple[ScheduledGame, ...]]:
         self.calls.append(team_id)
         assert season == 2027
+        if self.schedule_error is not None:
+            raise self.schedule_error
         if team_id in self.fail_teams:
             raise CloudflareProviderError(f"{team_id} down")
         games = tuple(
@@ -148,6 +157,20 @@ class FakeSchedule:
             quality=quality_for_records(
                 resource="team_schedule",
                 records=games,
+                retrieved_at=NOW,
+                expires_at=NOW + timedelta(hours=1),
+            ),
+        )
+
+    async def team_roster(self, team_id: str) -> ProviderResult[tuple[ProviderPlayer, ...]]:
+        self.roster_calls.append(team_id)
+        if self.roster_error is not None:
+            raise self.roster_error
+        return ProviderResult(
+            records=self.roster_players,
+            quality=quality_for_records(
+                resource="team_roster",
+                records=self.roster_players,
                 retrieved_at=NOW,
                 expires_at=NOW + timedelta(hours=1),
             ),
@@ -331,4 +354,65 @@ def test_build_home_error_quality_makes_games_unavailable(tmp_path) -> None:  # 
     document = _build(FakeSleeper(), schedule, _repository(tmp_path)).payload
 
     assert document["games"] == {"status": "unavailable", "items": []}
+    assert document["roster"][0]["name"] == "Known Player"
+
+
+def test_build_home_resolves_missing_sleeper_espn_id(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    sleeper = FakeSleeper()
+    sleeper.catalog["known"] = {"full_name": "Known Player", "team": "NOP", "espn_id": None}
+    schedule = FakeSchedule()
+    schedule.roster_players = (
+        ProviderPlayer(
+            provider_id="3934672",
+            full_name="Known Player",
+            team_id="no",
+            team_abbreviation="NO",
+            active=True,
+            source=SourceMetadata(provider="espn", provider_id="3934672", retrieved_at=NOW),
+        ),
+    )
+
+    document = _build(sleeper, schedule, _repository(tmp_path)).payload
+
+    assert document["roster"][0]["image_url"] == (
+        "https://a.espncdn.com/i/headshots/nba/players/full/3934672.png"
+    )
+    assert schedule.roster_calls == ["NOP"]
+
+
+def test_build_home_does_not_cache_unresolved_headshots(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    sleeper = FakeSleeper()
+    sleeper.catalog["known"] = {"full_name": "Known Player", "team": "NOP", "espn_id": None}
+    schedule = FakeSchedule()
+    schedule.roster_error = ESPNSchemaError("roster schema")
+    repository = _repository(tmp_path)
+
+    first = _build(sleeper, schedule, repository).payload
+    second = _build(sleeper, schedule, repository).payload
+
+    assert first["roster"][0]["image_url"] is None
+    assert second["roster"][0]["name"] == "Known Player"
+    assert schedule.roster_calls == ["NOP", "NOP"]
+
+
+def test_build_home_schema_error_keeps_the_roster(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    schedule = FakeSchedule()
+    schedule.schedule_error = ESPNSchemaError("schedule schema")
+
+    response = _build(FakeSleeper(), schedule, _repository(tmp_path))
+
+    assert response.status_code == 200
+    assert response.payload["games"] == {"status": "unavailable", "items": []}
+    assert response.payload["roster"][0]["name"] == "Known Player"
+
+
+def test_build_home_keeps_manager_when_opponent_owner_is_missing(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    sleeper = FakeSleeper()
+    sleeper.opponent_owner = None
+
+    document = _build(sleeper, FakeSchedule(), _repository(tmp_path)).payload
+
+    assert document["matchup"]["manager"]["score"] is None
+    assert document["matchup"]["opponent"]["name"] is None
+    assert document["matchup"]["opponent"]["score"] == 9.0
     assert document["roster"][0]["name"] == "Known Player"
