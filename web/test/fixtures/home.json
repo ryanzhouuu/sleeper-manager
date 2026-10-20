@@ -1,0 +1,77 @@
+{
+  "league": { "name": "Lock In", "week": 3, "timezone": "America/Chicago" },
+  "matchup": {
+    "manager": {
+      "name": "Home Team",
+      "score": 142.6,
+      "image_url": "https://sleepercdn.com/avatars/thumbs/abc"
+    },
+    "opponent": { "name": "Away Team", "score": 128.1, "image_url": null }
+  },
+  "roster": [
+    {
+      "slot": "PG",
+      "name": "Jalen Brunson",
+      "nba_team": "NYK",
+      "image_url": "https://a.espncdn.com/i/headshots/nba/players/full/3934672.png",
+      "team_image_url": "https://a.espncdn.com/i/teamlogos/nba/500/nyk.png"
+    },
+    {
+      "slot": "UTIL",
+      "name": null,
+      "nba_team": null,
+      "image_url": null,
+      "team_image_url": null
+    },
+    {
+      "slot": "BN",
+      "name": "Jayson Tatum",
+      "nba_team": "BOS",
+      "image_url": "https://a.espncdn.com/i/headshots/nba/players/full/4065648.png",
+      "team_image_url": "https://a.espncdn.com/i/teamlogos/nba/500/bos.png"
+    },
+    {
+      "slot": "IR",
+      "name": "Joel Embiid",
+      "nba_team": "PHI",
+      "image_url": "https://a.espncdn.com/i/headshots/nba/players/full/3059318.png",
+      "team_image_url": "https://a.espncdn.com/i/teamlogos/nba/500/phi.png"
+    }
+  ],
+  "games": {
+    "status": "ready",
+    "items": [
+      {
+        "start": "2026-10-22T04:30:00+00:00",
+        "player_name": "Jayson Tatum",
+        "player_image_url": "https://a.espncdn.com/i/headshots/nba/players/full/4065648.png",
+        "opponent": "LAL",
+        "opponent_image_url": "https://a.espncdn.com/i/teamlogos/nba/500/lal.png",
+        "home": true
+      },
+      {
+        "start": "2026-10-21T23:00:00+00:00",
+        "player_name": "Jalen Brunson",
+        "player_image_url": "https://a.espncdn.com/i/headshots/nba/players/full/3934672.png",
+        "opponent": "BOS",
+        "opponent_image_url": "https://a.espncdn.com/i/teamlogos/nba/500/bos.png",
+        "home": false
+      },
+      {
+        "start": "2026-10-23T00:00:00+00:00",
+        "player_name": "Jalen Brunson",
+        "player_image_url": "https://a.espncdn.com/i/headshots/nba/players/full/3934672.png",
+        "opponent": "MIA",
+        "opponent_image_url": "https://a.espncdn.com/i/teamlogos/nba/500/mia.png",
+        "home": true
+      }
+    ]
+  },
+  "recommendation": {
+    "status": "ready",
+    "plan_status": "action_required",
+    "title": "Lineup move required",
+    "message": "Start Jayson Tatum in UTIL.\n\nExpected weekly total: 612.4 pts (+18.2 pts).\n\nNotes: Joel Embiid is out.\nConfidence: high.\n\nComplete before Wed Oct 21, 6:00 PM CDT.",
+    "deadline": "2026-10-21T23:00:00+00:00"
+  }
+}
