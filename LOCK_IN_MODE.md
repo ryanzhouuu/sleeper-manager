@@ -55,6 +55,15 @@ An active starter must not be treated as locked, but a lineup update must not si
 - Keep accepted Lock-In slots immovable.
 - Treat a target lineup as complete state: applying a partial target must not implicitly bench omitted active starters.
 - Validate generated moves against these states before recommending or replaying them.
+- Represent player swaps as one atomic action, including starter-to-bench substitutions.
+  Both players must fit their resulting positions. Longer rotations must consist of
+  legal swaps or moves into real vacancies; do not assume a temporary bench vacancy.
+  Validate accepted locks and active-starter preservation at every intermediate step.
+
+Weekly lineup decision traces use schema version 2. Each entry in `moves` includes
+`kind` (`move` or `swap`) and `swap_player_id` (null for a one-player move). For a
+swap, the named players exchange `source_slot_index` and `target_slot_index`;
+null denotes the bench. The entire exchange takes effect in one action.
 
 ### Adding a free agent or waiver player
 

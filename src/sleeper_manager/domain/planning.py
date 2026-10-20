@@ -619,7 +619,7 @@ class WeeklyPlan:
 
     def _material_components(self) -> tuple[object, ...]:
         return (
-            "weekly-plan-material-v1",
+            "weekly-plan-material-v2",
             self.league_id,
             self.season,
             self.week,
@@ -630,6 +630,7 @@ class WeeklyPlan:
                     move.player_id,
                     move.source_slot_index,
                     move.target_slot_index,
+                    move.swap_player_id,
                     move.deadline.isoformat(),
                 )
                 for move in self.moves

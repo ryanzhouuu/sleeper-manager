@@ -1,3 +1,5 @@
+"""Render validated weekly actions for notifications and versioned decision traces."""
+
 import json
 import re
 from collections.abc import Iterable, Mapping
@@ -117,7 +119,10 @@ def _imperative(
         name = _player_name(move.player_id, player_names)
         source = labels.get(move.source_slot_index) if move.source_slot_index is not None else None
         target = labels.get(move.target_slot_index) if move.target_slot_index is not None else None
-        if source is None and target is not None:
+        if move.swap_player_id is not None:
+            other = _player_name(move.swap_player_id, player_names)
+            phrases.append(f"Swap {name} ({source or 'bench'}) and {other} ({target or 'bench'}).")
+        elif source is None and target is not None:
             phrases.append(f"Start {name} in {target}.")
         elif source is not None and target is None:
             phrases.append(f"Move {name} to the bench.")
@@ -247,7 +252,7 @@ def serialize_weekly_plan_trace(
     trigger: Literal["daily", "pre_tipoff"] | None = None,
 ) -> str:
     payload: dict[str, object] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": WEEKLY_LINEUP_DECISION_TYPE,
         "plan_id": plan.plan_id,
         "material_hash": plan.material_hash,
@@ -282,7 +287,9 @@ def serialize_weekly_plan_trace(
         ],
         "moves": [
             {
+                "kind": "swap" if move.swap_player_id is not None else "move",
                 "player_id": move.player_id,
+                "swap_player_id": move.swap_player_id,
                 "source_slot_index": move.source_slot_index,
                 "target_slot_index": move.target_slot_index,
                 "deadline": move.deadline.isoformat(),

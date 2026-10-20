@@ -57,7 +57,7 @@ def test_serialize_weekly_plan_trace_is_stable_json() -> None:
     second = json.loads(serialize_weekly_plan_trace(plan, trigger="daily"))
 
     assert first == second
-    assert first["schema_version"] == 1
+    assert first["schema_version"] == 2
     assert first["kind"] == "weekly_lineup"
     assert first["trigger"] == "daily"
     assert first["plan_id"] == plan.plan_id
@@ -65,7 +65,9 @@ def test_serialize_weekly_plan_trace_is_stable_json() -> None:
     assert first["status"] == "action_required"
     assert first["moves"] == [
         {
+            "kind": "move",
             "player_id": "p2",
+            "swap_player_id": None,
             "source_slot_index": None,
             "target_slot_index": 1,
             "deadline": DEADLINE.isoformat(),
