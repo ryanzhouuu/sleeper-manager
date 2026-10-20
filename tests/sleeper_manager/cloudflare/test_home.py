@@ -335,12 +335,14 @@ def test_build_home_copies_recommendation_text(tmp_path) -> None:  # type: ignor
                 deadline=TIPOFF,
                 policy_version="policy",
                 created_at=NOW,
+                trace_json='{"kind": "weekly_lineup", "status": "action_required"}',
             )
         )
     )
 
     recommendation = _build(FakeSleeper(), FakeSchedule(), repository).payload["recommendation"]
 
+    assert recommendation["plan_status"] == "action_required"
     assert recommendation["title"] == "Lineup move required"
     assert recommendation["message"] == "Move Known Player."
     assert recommendation["deadline"] == TIPOFF.isoformat()

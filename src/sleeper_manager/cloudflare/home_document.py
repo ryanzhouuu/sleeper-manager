@@ -3,12 +3,14 @@
 Callers pass already loaded league, schedule, and recommendation data.
 """
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 
 from sleeper_manager.domain.nba import GameStatus, ScheduledGame
+from sleeper_manager.domain.planning import PlanStatus
 from sleeper_manager.domain.scheduling import TimeWindow
 from sleeper_manager.integrations.nba.mapping import espn_team_endpoint_id, normalize_team
 
@@ -86,6 +88,21 @@ def avatar_image_url(avatar: str | None) -> str | None:
     return f"https://sleepercdn.com/avatars/thumbs/{avatar.strip()}"
 
 
+def plan_status_from_trace(trace_json: str) -> str | None:
+    """Weekly plan status recorded in a recommendation trace, or None when unreadable."""
+    try:
+        payload = json.loads(trace_json)
+    except json.JSONDecodeError:
+        return None
+    status = payload.get("status") if isinstance(payload, dict) else None
+    if not isinstance(status, str):
+        return None
+    try:
+        return PlanStatus(status).value
+    except ValueError:
+        return None
+
+
 def label_team_games(
     queried_team: str,
     games: Sequence[ScheduledGame],
@@ -125,6 +142,7 @@ def assemble_home(
     games_status: Literal["ready", "empty", "unavailable"],
     games: Sequence[GameRow],
     recommendation_status: Literal["ready", "empty", "unavailable"],
+    recommendation_plan_status: str | None = None,
     recommendation_title: str | None = None,
     recommendation_message: str | None = None,
     recommendation_deadline: datetime | None = None,
@@ -137,6 +155,7 @@ def assemble_home(
     if recommendation_status == "ready":
         recommendation: dict[str, Any] = {
             "status": "ready",
+            "plan_status": recommendation_plan_status,
             "title": recommendation_title,
             "message": recommendation_message,
             "deadline": (

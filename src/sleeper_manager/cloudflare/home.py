@@ -22,6 +22,7 @@ from sleeper_manager.cloudflare.home_document import (
     assemble_home,
     avatar_image_url,
     label_team_games,
+    plan_status_from_trace,
 )
 from sleeper_manager.cloudflare.home_identities import (
     fill_espn_ids,
@@ -158,9 +159,10 @@ async def build_home(
             games_status=games_status,
             games=games,
             recommendation_status=recommendation[0],
-            recommendation_title=recommendation[1],
-            recommendation_message=recommendation[2],
-            recommendation_deadline=recommendation[3],
+            recommendation_plan_status=recommendation[1],
+            recommendation_title=recommendation[2],
+            recommendation_message=recommendation[3],
+            recommendation_deadline=recommendation[4],
         ),
     )
 
@@ -389,7 +391,7 @@ async def _recommendation(
     repository: AsyncRuntimeStateRepository,
     league_id: str,
     week: int,
-) -> tuple[_SectionStatus, str | None, str | None, datetime | None]:
+) -> tuple[_SectionStatus, str | None, str | None, str | None, datetime | None]:
     try:
         record = await repository.latest_current_recommendation(
             league_id,
@@ -397,7 +399,13 @@ async def _recommendation(
             decision_type=_WEEKLY_LINEUP,
         )
     except Exception:
-        return "unavailable", None, None, None
+        return "unavailable", None, None, None, None
     if record is None:
-        return "empty", None, None, None
-    return "ready", record.title, record.message, record.deadline
+        return "empty", None, None, None, None
+    return (
+        "ready",
+        plan_status_from_trace(record.trace_json),
+        record.title,
+        record.message,
+        record.deadline,
+    )
