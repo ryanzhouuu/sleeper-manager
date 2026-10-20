@@ -57,6 +57,8 @@ Settings load from environment variables or `.env`.
 
 Notification commands need `NTFY_TOPIC` or `DISCORD_WEBHOOK_URL`. Interactive
 notifications also need `ACKNOWLEDGEMENT_BASE_URL`.
+The checked-in Worker configuration requires Discord; store its webhook URL as a
+Cloudflare secret as described in [Cloudflare deployment](infra/cloudflare/README.md).
 
 ## Commands
 

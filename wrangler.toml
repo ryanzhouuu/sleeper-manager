@@ -30,6 +30,9 @@ NTFY_BASE_URL = "https://ntfy.sh"
 OPEN_SLEEPER_URL = "https://sleeper.com"
 ACKNOWLEDGEMENT_BASE_URL = "https://sleeper-manager.ryanzhouuu.workers.dev/ack"
 
+[secrets]
+required = ["DISCORD_WEBHOOK_URL", "SLEEPER_LEAGUE_ID", "SLEEPER_USER_ID"]
+
 [triggers]
 crons = ["*/5 * * * *"]
 

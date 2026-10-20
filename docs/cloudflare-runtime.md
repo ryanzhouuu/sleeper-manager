@@ -230,11 +230,15 @@ stat correction refreshes the locked score without sending another action.
 `--apply` requires `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` in the environment. Do
 not print those values; Wrangler secrets stay in the Worker environment:
 
-- `NTFY_TOPIC`
-- `NTFY_ACCESS_TOKEN` (optional)
-- `DISCORD_WEBHOOK_URL` (optional)
+- `DISCORD_WEBHOOK_URL`
 - `SLEEPER_LEAGUE_ID`
 - `SLEEPER_USER_ID`
+
+The production Wrangler configuration declares these secret names as required.
+Their values remain encrypted in Cloudflare and must never be added to `[vars]`.
+For Discord-only delivery, leave `NTFY_TOPIC` unset. Configuring it selects ntfy as
+primary and Discord as fallback; `NTFY_ACCESS_TOKEN` is optional for that setup.
+Discord notifications contain the advice and clickable action links.
 
 Apply D1 migrations before the first sync if either database is new.
 

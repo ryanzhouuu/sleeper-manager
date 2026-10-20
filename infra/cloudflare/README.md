@@ -18,11 +18,18 @@ Copy the returned database ID to `wrangler.toml`. Set the Worker URL in
 
 Store these as Worker secrets rather than committing them:
 
-- `NTFY_TOPIC`
-- `NTFY_ACCESS_TOKEN` (optional)
-- `DISCORD_WEBHOOK_URL` (optional)
+- `DISCORD_WEBHOOK_URL`
 - `SLEEPER_LEAGUE_ID`
 - `SLEEPER_USER_ID`
+
+The checked-in configuration requires these secret names; their values remain in
+Cloudflare. Create a Discord channel webhook and save its URL as an encrypted
+`DISCORD_WEBHOOK_URL` secret. Dashboard reminders to synchronize Wrangler configuration
+do not require copying secret values into `[vars]`.
+
+Keep `NTFY_TOPIC` unset for Discord-only delivery. If it is configured, ntfy takes
+priority and Discord becomes the fallback. `NTFY_ACCESS_TOKEN` is optional for ntfy.
+Local commands still accept either destination independently of the Worker configuration.
 
 Apply both schemas and deploy capture only:
 
