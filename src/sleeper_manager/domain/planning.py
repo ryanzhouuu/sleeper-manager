@@ -1,3 +1,5 @@
+"""Point-in-time planning evidence and complete weekly lineup contracts."""
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -7,12 +9,14 @@ from enum import StrEnum
 from hashlib import sha256
 from math import isfinite
 
+from sleeper_manager.domain._planning_validation import (
+    PlanningStateError,
+    _require_aware,
+    _require_text,
+)
 from sleeper_manager.domain.eligibility import eligible_for_slot
+from sleeper_manager.domain.lineup_moves import LineupMove, apply_lineup_moves
 from sleeper_manager.domain.projection import ProjectionSnapshot
-
-
-class PlanningStateError(ValueError):
-    pass
 
 
 class PlanningGameStatus(StrEnum):
@@ -303,28 +307,6 @@ class PlannedAssignment:
 
 
 @dataclass(frozen=True, slots=True)
-class LineupMove:
-    player_id: str
-    source_slot_index: int | None
-    target_slot_index: int | None
-    deadline: datetime
-
-    def __post_init__(self) -> None:
-        _require_text(self.player_id, "Lineup move player ID")
-        if self.source_slot_index is None and self.target_slot_index is None:
-            raise PlanningStateError("A lineup move must change a slot or the bench")
-        if self.source_slot_index == self.target_slot_index:
-            raise PlanningStateError("A lineup move cannot reference the same slot twice")
-        for label, index in (
-            ("Lineup move source", self.source_slot_index),
-            ("Lineup move target", self.target_slot_index),
-        ):
-            if index is not None and index < 0:
-                raise PlanningStateError(f"{label} slot indices must be non-negative")
-        _require_aware(self.deadline, "Lineup move deadline")
-
-
-@dataclass(frozen=True, slots=True)
 class PlanDistributionSummary:
     scenario_count: int
     seed: int
@@ -596,18 +578,7 @@ class WeeklyPlan:
                     "Observed and desired assignments disagree on a slot position"
                 )
 
-        simulated = dict(observed_players)
-        for move in self.moves:
-            if move.source_slot_index is not None:
-                if simulated.get(move.source_slot_index) != move.player_id:
-                    raise PlanningStateError("A lineup move source does not hold its player")
-                simulated[move.source_slot_index] = None
-            elif move.player_id in set(simulated.values()):
-                raise PlanningStateError("A bench-source move requires a benched player")
-            if move.target_slot_index is not None:
-                if simulated.get(move.target_slot_index) is not None:
-                    raise PlanningStateError("A lineup move targets an occupied slot")
-                simulated[move.target_slot_index] = move.player_id
+        simulated = apply_lineup_moves(self.moves, observed_players)
         if simulated != desired_players:
             raise PlanningStateError("Lineup moves do not produce the desired assignment")
 
@@ -709,11 +680,6 @@ class WeeklyPlan:
         )
 
 
-def _require_aware(value: datetime, label: str) -> None:
-    if value.tzinfo is None:
-        raise PlanningStateError(f"{label} must be timezone-aware")
-
-
 def _assignment_player_map(
     assignments: tuple[PlannedAssignment, ...],
 ) -> dict[int, str | None]:
@@ -736,11 +702,6 @@ def _passed_sort_key(passed: PassedOpportunity) -> tuple[str, str]:
 
 def _format_optional(value: float | None) -> str | None:
     return None if value is None else repr(round(value, 6))
-
-
-def _require_text(value: str, label: str) -> None:
-    if not value.strip():
-        raise PlanningStateError(f"{label} must be non-empty")
 
 
 def _require_unique(values: Iterable[str] | Iterable[int], label: str) -> None:
