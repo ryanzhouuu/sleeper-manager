@@ -59,6 +59,13 @@ An active starter must not be treated as locked, but a lineup update must not si
   Both players must fit their resulting positions. Longer rotations must consist of
   legal swaps or moves into real vacancies; do not assume a temporary bench vacancy.
   Validate accepted locks and active-starter preservation at every intermediate step.
+- A retained starter with a completed, unpassed game cannot be temporarily benched
+  during a rotation, because that would forfeit the score's Lock-In eligibility.
+- Bench-only moves require a verified vacancy. If historical inputs lack bench
+  capacity, planning may reuse space vacated during the sequence but cannot add
+  a bench occupant beyond the observed count. IR players are excluded from swaps.
+- Move search checks at most 10,000 distinct lineup states per candidate. A
+  candidate that exceeds that limit is excluded without emitting instructions.
 
 Weekly lineup decision traces use schema version 2. Each entry in `moves` includes
 `kind` (`move` or `swap`) and `swap_player_id` (null for a one-player move). For a

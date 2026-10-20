@@ -1,7 +1,6 @@
 """Characterization contracts for decomposing the weekly planner safely.
 
-These tests pin the import boundary and cyclic move ordering that must survive
-the planned extraction of models, assignment evaluation, and move planning.
+These tests pin the import boundary and executable cyclic move ordering.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -125,8 +124,8 @@ def test_weekly_plan_public_exports_remain_stable() -> None:
     )
 
 
-def test_weekly_plan_orders_a_three_way_rotation_through_the_bench() -> None:
-    """Pin the safe move sequence when every desired target begins occupied."""
+def test_weekly_plan_orders_a_three_way_rotation_as_two_swaps() -> None:
+    """Reach occupied target slots without creating a temporary bench occupant."""
     plan = weekly_plan.build_weekly_plan(_cyclic_state())
 
     assert plan.desired_assignments == (
@@ -135,12 +134,11 @@ def test_weekly_plan_orders_a_three_way_rotation_through_the_bench() -> None:
         PlannedAssignment(2, "UTIL", "a"),
     )
     assert [
-        (move.player_id, move.source_slot_index, move.target_slot_index) for move in plan.moves
+        (move.player_id, move.source_slot_index, move.target_slot_index, move.swap_player_id)
+        for move in plan.moves
     ] == [
-        ("a", 0, None),
-        ("b", 1, 0),
-        ("c", 2, 1),
-        ("a", None, 2),
+        ("b", 1, 0, "a"),
+        ("c", 2, 1, "a"),
     ]
     assert all(
         move.deadline == NOW + timedelta(hours=1) - weekly_plan.DEFAULT_MOVE_LEAD_TIME

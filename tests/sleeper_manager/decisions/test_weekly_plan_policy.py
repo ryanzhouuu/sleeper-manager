@@ -318,6 +318,7 @@ def test_fixed_slots_and_passed_opportunities_constrain_terminal_options() -> No
         (current, passed, future, fixed_opportunity),
         fixed=(fixed,),
         passed=(PassedOpportunity("p2", "g2", NOW, "pass-1", "fixture"),),
+        observed=(ObservedStarter(0, "p4", ("PG",)),),
     )
 
     decision = score_weekly_options(state, config=WeeklyPlanPolicyConfig(scenario_count=5))

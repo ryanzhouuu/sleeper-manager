@@ -1,13 +1,11 @@
-"""Translate a desired weekly assignment into safe lineup moves.
+"""Translate complete target lineups into atomic, position-valid roster actions."""
 
-The planner facade supplies observed and desired slot views. This module owns
-move ordering, including temporary bench steps needed to break occupied cycles,
-and applies one shared deadline to every dependent step in a sequence.
-"""
-
+from dataclasses import replace
 from datetime import datetime, timedelta
 
+from sleeper_manager.decisions._lineup_move_search import LineupMoveSearch
 from sleeper_manager.decisions._weekly_plan_models import WeeklyPlanError
+from sleeper_manager.domain.eligibility import eligible_for_slot
 from sleeper_manager.domain.planning import (
     LineupMove,
     PlannedAssignment,
@@ -22,86 +20,82 @@ def plan_moves(
     batch_start: datetime,
     lead_time: timedelta,
 ) -> tuple[LineupMove, ...]:
-    """Order legal moves and bench steps before the earliest affected tipoff."""
-    fixed_indices = {fixed.slot_index for fixed in state.fixed_slots}
-    open_indices = [slot.index for slot in state.starter_slots if slot.index not in fixed_indices]
-    observed_players = {
-        starter.slot_index: starter.player_id for starter in state.observed_starters
+    """Reach the target through legal swaps, preserving active starters and locks."""
+    slots = {slot.index: slot.position for slot in state.starter_slots}
+    desired = {item.slot_index: item.player_id for item in desired_view}
+    if len(desired) != len(desired_view) or not set(desired) <= slots.keys():
+        raise WeeklyPlanError("Desired lineup references duplicate or unknown slots")
+    if any(item.slot_position != slots[item.slot_index] for item in desired_view):
+        raise WeeklyPlanError("Desired lineup disagrees with slot positions")
+    fixed = {item.slot_index: item.player_id for item in state.fixed_slots}
+    if any(desired.get(index, player) != player for index, player in fixed.items()):
+        raise WeeklyPlanError("Desired lineup would move a fixed player")
+    desired.update(fixed)
+    if desired.keys() != slots.keys():
+        raise WeeklyPlanError("Desired lineup must cover every open slot")
+    players = [player for player in desired.values() if player is not None]
+    if len(set(players)) != len(players) or not set(players) <= set(state.roster_player_ids):
+        raise WeeklyPlanError("Desired lineup repeats a player or includes an unrostered player")
+    if set(players) & set(state.reserve_player_ids):
+        raise WeeklyPlanError("Desired lineup cannot start a reserve player")
+    observed = {item.slot_index: item.player_id for item in state.observed_starters}
+    locked_players = set(fixed.values())
+    if any(observed.get(index) != player for index, player in fixed.items()):
+        raise WeeklyPlanError("Observed lineup does not preserve a fixed player")
+    positions = {item.player_id: item.eligible_positions for item in state.observed_starters}
+    for opportunity in state.opportunities:
+        positions.setdefault(opportunity.sleeper_player_id, opportunity.eligible_positions)
+    eligible = {
+        player: frozenset(
+            index
+            for index, slot in slots.items()
+            if eligible_for_slot(positions.get(player, ()), slot)
+        )
+        for player in state.roster_player_ids
     }
-    desired_players = {assignment.slot_index: assignment.player_id for assignment in desired_view}
+    if any(
+        player is not None and index not in eligible[player] for index, player in desired.items()
+    ):
+        raise WeeklyPlanError("Desired player is not eligible for its slot")
     active_players = {item.sleeper_player_id for item in state.active_opportunities}
-    protected = {
-        starter.player_id
-        for starter in state.observed_starters
-        if starter.player_id in active_players and starter.slot_index in open_indices
-    }
-    if not protected <= set(desired_players.values()):
+    protected = frozenset(observed.values()) & (active_players - locked_players)
+    if not protected <= set(players):
         raise WeeklyPlanError("Lineup moves would bench an active starter")
-
-    pending: dict[str, list[int | None]] = {}
-
-    def pending_move(player_id: str) -> list[int | None]:
-        """Return the mutable source/target pair tracked for one player."""
-        return pending.setdefault(player_id, [None, None])
-
-    for index in open_indices:
-        current = observed_players.get(index)
-        wanted = desired_players.get(index)
-        if current == wanted:
-            continue
-        if current is not None:
-            pending_move(current)[0] = index
-        if wanted is not None:
-            pending_move(wanted)[1] = index
-
-    occupied = {
-        index: player for index, player in observed_players.items() if index in open_indices
+    passed = {(item.player_id, item.game_id) for item in state.passed_opportunities}
+    pending_scores = {
+        item.sleeper_player_id
+        for item in state.completed_opportunities
+        if (item.sleeper_player_id, item.game_id) not in passed
     }
-    # Every step must land before the earliest tipoff the sequence depends on,
-    # so a swap's bench step cannot carry a later deadline than its dependent fill.
+    protected |= frozenset(observed.values()) & set(players) & (pending_scores - locked_players)
+    indices = tuple(sorted(slots.keys() - fixed.keys()))
+    movable_roster = (
+        frozenset(state.roster_player_ids) - locked_players - set(state.reserve_player_ids)
+    )
+    search = LineupMoveSearch(
+        slot_indices=indices,
+        roster=movable_roster,
+        eligible_slots=eligible,
+        protected=protected,
+        bench_capacity=(
+            state.bench_capacity
+            if state.bench_capacity is not None
+            else len(movable_roster) - sum(observed.get(index) is not None for index in indices)
+        ),
+        deadline=batch_start,
+    )
+    moves = search.find(tuple(observed.get(i) for i in indices), tuple(desired[i] for i in indices))
+    affected = {
+        player
+        for move in moves
+        for player in (move.player_id, move.swap_player_id)
+        if player is not None
+    }
     sequence_deadline = min(
-        (_move_deadline(state, player_id, batch_start, lead_time) for player_id in pending),
+        (_move_deadline(state, player, batch_start, lead_time) for player in affected),
         default=batch_start,
     )
-    emitted: list[LineupMove] = []
-    while pending:
-        progressed = False
-        for player_id in sorted(pending):
-            source, target = pending[player_id]
-            if target is not None and target in occupied:
-                continue
-            emitted.append(
-                LineupMove(
-                    player_id=player_id,
-                    source_slot_index=source,
-                    target_slot_index=target,
-                    deadline=sequence_deadline,
-                )
-            )
-            if source is not None:
-                occupied.pop(source)
-            if target is not None:
-                occupied[target] = player_id
-            del pending[player_id]
-            progressed = True
-        if pending and not progressed:
-            movable = sorted(set(pending) - protected)
-            if not movable:
-                raise WeeklyPlanError("Lineup cycle would bench an active starter")
-            player_id = movable[0]
-            source, target = pending.pop(player_id)
-            emitted.append(
-                LineupMove(
-                    player_id=player_id,
-                    source_slot_index=source,
-                    target_slot_index=None,
-                    deadline=sequence_deadline,
-                )
-            )
-            if source is not None:
-                occupied.pop(source)
-            pending[player_id] = [None, target]
-    return tuple(emitted)
+    return tuple(replace(move, deadline=sequence_deadline) for move in moves)
 
 
 def _move_deadline(

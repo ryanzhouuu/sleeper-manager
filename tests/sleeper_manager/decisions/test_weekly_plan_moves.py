@@ -29,7 +29,7 @@ from tests.sleeper_manager.decisions.weekly_plan_support import (
 )
 
 
-def test_swap_moves_require_a_temporary_bench_step() -> None:
+def test_legacy_staged_moves_remain_valid() -> None:
     plan = _plan()
 
     assert plan.status is PlanStatus.ACTION_REQUIRED
@@ -132,9 +132,9 @@ def test_swap_moves_share_the_earliest_affected_tipoff() -> None:
     assert [
         (move.player_id, move.source_slot_index, move.target_slot_index) for move in plan.moves
     ] == [
-        ("b", 0, None),
         ("a", None, 0),
     ]
+    assert plan.moves[0].swap_player_id == "b"
     assert all(move.deadline == tonight - timedelta(minutes=10) for move in plan.moves)
 
 

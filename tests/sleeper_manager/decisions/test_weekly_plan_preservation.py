@@ -75,7 +75,8 @@ def test_valuable_center_util_swap_preserves_both_starters() -> None:
     assert tuple(item.player_id for item in plan.desired_assignments) == ("early", "later")
     assert plan.expected_terminal_score == 160
     assert plan.observed_terminal_score == 130
-    assert {move.player_id for move in plan.moves} == {"early", "later"}
+    assert len(plan.moves) == 1
+    assert {plan.moves[0].player_id, plan.moves[0].swap_player_id} == {"early", "later"}
 
 
 def test_selected_bench_player_can_still_replace_a_later_starter() -> None:
@@ -92,9 +93,9 @@ def test_selected_bench_player_can_still_replace_a_later_starter() -> None:
 
     assert tuple(item.player_id for item in plan.desired_assignments) == ("early",)
     assert [(move.player_id, move.target_slot_index) for move in plan.moves] == [
-        ("later", None),
         ("early", 0),
     ]
+    assert plan.moves[0].swap_player_id == "later"
 
 
 def test_completion_does_not_restore_a_deliberately_skipped_batch_player() -> None:
@@ -111,9 +112,9 @@ def test_completion_does_not_restore_a_deliberately_skipped_batch_player() -> No
 
     assert tuple(item.player_id for item in plan.desired_assignments) == ("selected",)
     assert [(move.player_id, move.target_slot_index) for move in plan.moves] == [
-        ("skip", None),
         ("selected", 0),
     ]
+    assert plan.moves[0].swap_player_id == "skip"
 
 
 def test_starter_without_remaining_opportunities_is_not_silently_removed() -> None:

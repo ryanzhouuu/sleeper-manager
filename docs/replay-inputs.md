@@ -173,7 +173,7 @@ standalone Lock-In diagnostics retain their embedded-projection requirements.
 Identity, outcome, membership, schedule, and unsupported-scoring failures still block.
 
 The default reference configuration is `full-advisor-replay-v5` with
-`weekly-planner-v4`: weekly planner and
+`weekly-planner-v5`: weekly planner and
 Lock-In policy each use 2,000 scenarios, seed 0, and tie tolerance 0.01; lineup moves use
 a ten-minute lead and the live balanced confidence threshold is 0.70. A run fails closed
 on blocked point-in-time projections, omitted or position-ineligible active starters,
@@ -187,6 +187,13 @@ that batch wherever they fit, preferring unchanged slots. Retained players do no
 add sampled scores or reserve future capacity. Option movement counts and
 tie-breaks describe the complete target. Fixed slots remain exact, and generated
 move sequences cannot bench an active starter, including temporary cycle steps.
+The planner emits atomic swaps for occupied-slot exchanges and checks each
+intermediate position. Known bench capacity and IR membership constrain moves;
+replays without capacity evidence cannot increase the observed bench count.
+Retained starters with completed, unpassed scores also stay in starting slots
+throughout the sequence to preserve their Lock-In eligibility.
+Unreachable targets and searches exceeding 10,000 lineup states are excluded
+before scoring, so replay never receives partial move instructions.
 
 The planner uses `postgame_recourse_rollout`: it samples current scores, then values
 keeping or passing them before the later assignment continuation. Joint retained

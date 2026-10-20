@@ -38,7 +38,8 @@ def test_build_weekly_plan_requires_the_better_bench_starter() -> None:
     assert plan.status is PlanStatus.ACTION_REQUIRED
     assert [
         (move.player_id, move.source_slot_index, move.target_slot_index) for move in plan.moves
-    ] == [("p1", 0, None), ("p2", None, 0)]
+    ] == [("p2", None, 0)]
+    assert plan.moves[0].swap_player_id == "p1"
     assert all(move.deadline == start - timedelta(minutes=10) for move in plan.moves)
     assert plan.expected_terminal_score == 30
     assert plan.best_alternative_score == 10
