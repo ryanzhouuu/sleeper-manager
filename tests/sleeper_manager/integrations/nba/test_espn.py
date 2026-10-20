@@ -105,6 +105,39 @@ def test_roster_and_schedule_are_canonical() -> None:
     assert schedule.records[0].status is GameStatus.FINAL
 
 
+def test_schedule_keeps_competitor_abbreviations() -> None:
+    schedule = parse_team_schedule(
+        {
+            "events": [
+                {
+                    "id": "game-1",
+                    "date": "2026-10-21T23:00:00Z",
+                    "competitions": [
+                        {
+                            "competitors": [
+                                {
+                                    "homeAway": "home",
+                                    "team": {"id": "18", "abbreviation": "NY"},
+                                },
+                                {
+                                    "homeAway": "away",
+                                    "team": {"id": "2", "abbreviation": "BOS"},
+                                },
+                            ],
+                            "status": {"type": {"name": "STATUS_SCHEDULED", "state": "pre"}},
+                        }
+                    ],
+                }
+            ]
+        },
+        retrieved_at=RETRIEVED_AT,
+    )
+
+    game = schedule.records[0]
+    assert game.home_abbreviation == "NY"
+    assert game.away_abbreviation == "BOS"
+
+
 def test_malformed_scoreboard_is_an_explicit_schema_error() -> None:
     with pytest.raises(ESPNSchemaError, match="competitions"):
         parse_scoreboard(

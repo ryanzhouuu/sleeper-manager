@@ -79,6 +79,8 @@ class ScheduledGame:
     regulation_periods: int = 4
     completed_periods: int = 4
     finalized_at: datetime | None = None
+    home_abbreviation: str | None = None
+    away_abbreviation: str | None = None
 
     def __post_init__(self) -> None:
         if self.finalized_at is None:
