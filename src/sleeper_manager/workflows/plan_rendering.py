@@ -69,7 +69,7 @@ def render_weekly_plan(
     if not actionable:
         return RenderedPlanNotification(
             title=title,
-            message=_static_message(plan),
+            message=_join_sections("\n\n", _static_message(plan), _value_clause(plan)),
         )
     sections = (
         _imperative(plan, player_names),
@@ -132,15 +132,18 @@ def _imperative(
 
 
 def _value_clause(plan: WeeklyPlan) -> str:
+    """Show the selected team total and, for moves, its change from the current lineup."""
     expected = plan.expected_terminal_score
     observed = plan.observed_terminal_score
-    if expected is None or observed is None:
-        return ""
+    if expected is None or plan.status is PlanStatus.BLOCKED:
+        return "Expected weekly total: unavailable."
+    total = f"Expected weekly total: {expected:.1f} pts."
+    if observed is None or not plan.moves:
+        return total
     delta = round(expected - observed, 6)
     if abs(delta) < _UNCHANGED_DELTA_EPSILON:
-        return "Expected terminal weekly value is unchanged."
-    direction = "improves by" if delta > 0 else "drops by"
-    return f"Expected terminal weekly value {direction} {abs(delta):.1f} points."
+        delta = 0.0
+    return f"{total}\nChange versus current lineup: {delta:+.1f} pts."
 
 
 def _risk_clause(plan: WeeklyPlan) -> str:

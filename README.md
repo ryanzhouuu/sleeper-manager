@@ -88,6 +88,11 @@ advice; hybrid advice requires an explicit selection and pinned history.
 Notifications group named availability warnings by status and game time, and count
 players with missing reports or unverified availability. Full player/game warnings
 remain in the stored recommendation trace.
+Lineup and Lock/Pass messages show the expected weekly team total assuming the
+recommendation is followed, including locked scores and modeled remaining slots.
+Lineups show the change versus the current lineup; Lock/Pass messages show the other
+action's team total separately from the completed player's score. Blocked advice or
+missing estimates display `Expected weekly total: unavailable.`
 
 `run-scheduled` writes forecast evidence to `forecasts.db` beside `SQLITE_PATH`
 (`.local/forecasts.db` by default). That write does not change the planning

@@ -14,6 +14,9 @@ def _evaluation_hash(evaluation: LockInEvaluation) -> str:
         "kind": evaluation.kind.value,
         "score": _rounded(evaluation.observed_score),
         "alternative": _rounded(evaluation.alternative_expected_score),
+        "expected_terminal_score": _rounded(
+            evaluation.decision.expected_terminal_score if evaluation.decision else None
+        ),
         "percentiles": [
             [rank, _rounded(value)] for rank, value in evaluation.alternative_percentiles
         ],
@@ -44,6 +47,9 @@ def _evaluation_trace_json(
         "trace": dict(evaluation.trace),
         "observed_score": evaluation.observed_score,
         "alternative_expected_score": evaluation.alternative_expected_score,
+        "expected_terminal_score": (
+            evaluation.decision.expected_terminal_score if evaluation.decision else None
+        ),
         "alternative_percentiles": evaluation.alternative_percentiles,
         "confidence": evaluation.confidence,
     }
@@ -95,15 +101,23 @@ def _evaluation_title(
 
 
 def _evaluation_message(evaluation: LockInEvaluation) -> str:
-    """Render stable score, alternative value, confidence, and reason evidence."""
+    """Separate the completed player's score from selected and alternative team totals."""
 
     if evaluation.kind is LockInEvaluationKind.UNAVAILABLE:
-        return "Safe Lock-In advice is unavailable: " + ", ".join(evaluation.reason_codes)
+        return (
+            "Safe Lock-In advice is unavailable: "
+            + ", ".join(evaluation.reason_codes)
+            + "\n\nExpected weekly total: unavailable."
+        )
     assert evaluation.observed_score is not None
     assert evaluation.alternative_expected_score is not None
     assert evaluation.confidence is not None
+    assert evaluation.decision is not None
+    alternative = "pass" if evaluation.kind is LockInEvaluationKind.LOCK else "lock"
     return (
-        f"Observed {evaluation.observed_score:.2f}; alternative expected "
-        f"{evaluation.alternative_expected_score:.2f}; confidence "
-        f"{evaluation.confidence:.0%}. Complete the action in Sleeper, then acknowledge it."
+        f"Observed game score: {evaluation.observed_score:.2f} pts.\n\n"
+        f"Expected weekly total: {evaluation.decision.expected_terminal_score:.1f} pts.\n"
+        f"Alternative ({alternative}): {evaluation.alternative_expected_score:.1f} pts.\n\n"
+        f"Confidence: {evaluation.confidence:.0%}. "
+        "Complete the action in Sleeper, then acknowledge it."
     )

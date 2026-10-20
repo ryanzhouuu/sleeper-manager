@@ -3,6 +3,8 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from sleeper_manager.domain.planning import (
     LineupMove,
     PlanConfidence,
@@ -61,7 +63,9 @@ def test_action_required_messages_lead_with_the_imperative() -> None:
     sections = rendered.message.split("\n\n")
     assert rendered.title == "Lineup move required"
     assert sections[0] == "Start Alice in UTIL."
-    assert sections[1] == "Expected terminal weekly value improves by 4.8 points."
+    assert sections[1] == (
+        "Expected weekly total: 104.8 pts.\nChange versus current lineup: +4.8 pts."
+    )
     assert sections[-1] == "Complete before Mon 6:50 AM CST."
 
 
@@ -162,7 +166,9 @@ def test_no_action_plans_do_not_prescribe_moves() -> None:
     rendered = render_weekly_plan(plan)
 
     assert rendered.title == "Lineup is set"
-    assert rendered.message == "Your lineup already matches the weekly plan."
+    assert rendered.message == (
+        "Your lineup already matches the weekly plan.\n\nExpected weekly total: 104.8 pts."
+    )
 
 
 def test_degraded_plans_surface_warnings_and_confidence() -> None:
@@ -211,10 +217,49 @@ def test_schedule_reasons_explain_why_the_change_matters() -> None:
     assert "2 later opportunities remain replannable." in schedule_section
 
 
-def test_value_clauses_are_omitted_without_scores() -> None:
+def test_missing_scores_are_explicitly_unavailable() -> None:
     rendered = render_weekly_plan(_plan(expected_terminal_score=None, observed_terminal_score=None))
 
-    assert "points" not in rendered.message
+    assert "Expected weekly total: unavailable." in rendered.message
+    assert "Change versus" not in rendered.message
+
+
+def test_total_is_visible_without_a_current_lineup_estimate() -> None:
+    rendered = render_weekly_plan(_plan(observed_terminal_score=None))
+
+    assert "Expected weekly total: 104.8 pts." in rendered.message
+    assert "Change versus" not in rendered.message
+
+
+@pytest.mark.parametrize(("expected", "change"), ((100.0, "+0.0"), (99.99, "+0.0"), (95.2, "-4.8")))
+def test_unchanged_and_negative_lineup_comparisons(expected: float, change: str) -> None:
+    rendered = render_weekly_plan(_plan(expected_terminal_score=expected))
+
+    assert f"Change versus current lineup: {change} pts." in rendered.message
+
+
+def test_blocked_plans_do_not_present_retained_scores_as_valid() -> None:
+    rendered = render_weekly_plan(
+        _plan(status=PlanStatus.BLOCKED, blocking_reasons=(PlanningReasonCode.MISSING_PROJECTION,))
+    )
+
+    assert "Expected weekly total: unavailable." in rendered.message
+    assert "104.8" not in rendered.message
+    assert "Change versus" not in rendered.message
+
+
+def test_degraded_static_plans_still_show_available_total() -> None:
+    rendered = render_weekly_plan(
+        _plan(
+            status=PlanStatus.DEGRADED,
+            moves=(),
+            desired_assignments=_plan().observed_assignments,
+            warnings=(PlanningReasonCode.STALE_NBA_STATE,),
+        )
+    )
+
+    assert "Expected weekly total: 104.8 pts." in rendered.message
+    assert "Change versus" not in rendered.message
 
 
 def test_approximation_estimates_are_disclosed() -> None:
