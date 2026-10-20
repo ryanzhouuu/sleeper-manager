@@ -282,17 +282,17 @@ def assignment_terminal_value(
 
 
 def option(
-    assignment: AssignmentResult,
+    assignments: tuple[SlotAssignment, ...],
     expected_terminal_value: float,
     baseline: float,
     state: TeamWeekState,
 ) -> WeeklyPlanOption:
-    """Build a public option summary from an evaluated assignment."""
+    """Describe the complete target without feeding retained players into scoring."""
 
-    retained = _retained_observed_count(assignment.assignments, state)
-    moves = _move_count(assignment.assignments, state)
+    retained = _retained_observed_count(assignments, state)
+    moves = _move_count(assignments, state)
     return WeeklyPlanOption(
-        assignments=assignment.assignments,
+        assignments=assignments,
         expected_terminal_value=round(expected_terminal_value, 6),
         marginal_value=round(expected_terminal_value - baseline, 6),
         move_count=moves,

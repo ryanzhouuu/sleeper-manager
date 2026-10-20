@@ -1,15 +1,44 @@
 """Complete batch placements without scoring or silently removing later starters."""
 
 from dataclasses import replace
+from datetime import timedelta
 
 from sleeper_manager.decisions._weekly_plan_models import WeeklyPlanError
+from sleeper_manager.decisions._weekly_plan_moves import plan_moves
 from sleeper_manager.decisions.lineup import (
     AssignmentCandidate,
     AssignmentResult,
     SlotAssignment,
     maximum_weight_assignment,
 )
-from sleeper_manager.domain.planning import GameOpportunity, TeamWeekState
+from sleeper_manager.domain.planning import GameOpportunity, PlannedAssignment, TeamWeekState
+
+
+def executable_completions(
+    state: TeamWeekState,
+    batch: tuple[GameOpportunity, ...],
+    assignments: tuple[AssignmentResult, ...],
+) -> dict[AssignmentResult, tuple[SlotAssignment, ...]]:
+    """Exclude options whose completed targets cannot preserve active eligibility."""
+    completed = {}
+    for assignment in assignments:
+        try:
+            target = complete_assignment(state, batch, assignment)
+            plan_moves(
+                state,
+                tuple(
+                    PlannedAssignment(item.slot_index, item.slot_position, item.player_id)
+                    for item in target
+                ),
+                batch[0].scheduled_start,
+                timedelta(0),
+            )
+        except WeeklyPlanError:
+            continue
+        completed[assignment] = target
+    if not completed:
+        raise WeeklyPlanError("No safe complete lineup remains")
+    return completed
 
 
 def complete_assignment(
@@ -24,7 +53,12 @@ def complete_assignment(
     Fixed slots remain the caller's responsibility. Raises WeeklyPlanError if
     completion would omit a protected active starter.
     """
-    slots = tuple(slot for slot in state.starter_slots if slot.index in state.open_slot_indices)
+    slots = tuple(
+        sorted(
+            (slot for slot in state.starter_slots if slot.index in state.open_slot_indices),
+            key=lambda slot: slot.index,
+        )
+    )
     placed = {item.slot_index: item for item in assignment.assignments if item.player_id}
     placed_players = {item.player_id for item in placed.values()}
     batch_players = {item.sleeper_player_id for item in batch}

@@ -7,6 +7,7 @@ and applies one shared deadline to every dependent step in a sequence.
 
 from datetime import datetime, timedelta
 
+from sleeper_manager.decisions._weekly_plan_models import WeeklyPlanError
 from sleeper_manager.domain.planning import (
     LineupMove,
     PlannedAssignment,
@@ -28,6 +29,14 @@ def plan_moves(
         starter.slot_index: starter.player_id for starter in state.observed_starters
     }
     desired_players = {assignment.slot_index: assignment.player_id for assignment in desired_view}
+    active_players = {item.sleeper_player_id for item in state.active_opportunities}
+    protected = {
+        starter.player_id
+        for starter in state.observed_starters
+        if starter.player_id in active_players and starter.slot_index in open_indices
+    }
+    if not protected <= set(desired_players.values()):
+        raise WeeklyPlanError("Lineup moves would bench an active starter")
 
     pending: dict[str, list[int | None]] = {}
 
@@ -76,7 +85,10 @@ def plan_moves(
             del pending[player_id]
             progressed = True
         if pending and not progressed:
-            player_id = min(pending)
+            movable = sorted(set(pending) - protected)
+            if not movable:
+                raise WeeklyPlanError("Lineup cycle would bench an active starter")
+            player_id = movable[0]
             source, target = pending.pop(player_id)
             emitted.append(
                 LineupMove(

@@ -87,13 +87,24 @@ def build_weekly_plan(
             planner_version,
         )
 
-    decision = score_weekly_options(state, config=policy_config)
-    desired_players = {
-        assignment.slot_index: assignment.player_id for assignment in decision.selected.assignments
-    }
-    desired_players.update({fixed.slot_index: fixed.player_id for fixed in state.fixed_slots})
-    desired_view = _ordered_view(slot_positions, desired_players)
-    moves = plan_moves(state, desired_view, batch[0].scheduled_start, lead_time)
+    try:
+        decision = score_weekly_options(state, config=policy_config)
+        desired_players = {
+            assignment.slot_index: assignment.player_id
+            for assignment in decision.selected.assignments
+        }
+        desired_players.update({fixed.slot_index: fixed.player_id for fixed in state.fixed_slots})
+        desired_view = _ordered_view(slot_positions, desired_players)
+        moves = plan_moves(state, desired_view, batch[0].scheduled_start, lead_time)
+    except WeeklyPlanError:
+        return _static_plan(
+            state,
+            observed_view,
+            slot_positions,
+            PlanStatus.BLOCKED,
+            (PlanningReasonCode.ROSTER_STATE_MISMATCH,),
+            planner_version,
+        )
 
     blocking_reasons: tuple[PlanningReasonCode, ...] = ()
     status = PlanStatus.ACTION_REQUIRED if moves else PlanStatus.NO_ACTION

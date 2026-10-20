@@ -12,7 +12,7 @@ from math import isfinite
 
 from sleeper_manager.decisions.lineup import SlotAssignment
 
-WEEKLY_PLANNER_VERSION = "weekly-planner-v3"
+WEEKLY_PLANNER_VERSION = "weekly-planner-v4"
 DEFAULT_MOVE_LEAD_TIME = timedelta(minutes=10)
 
 
@@ -69,7 +69,7 @@ class PlacementEvaluation:
 
 @dataclass(frozen=True, slots=True)
 class WeeklyPlanOption:
-    """Summarize one complete assignment for the actionable game batch."""
+    """Describe a complete open-slot target; retained starters have no sampled game."""
 
     assignments: tuple[SlotAssignment, ...]
     expected_terminal_value: float

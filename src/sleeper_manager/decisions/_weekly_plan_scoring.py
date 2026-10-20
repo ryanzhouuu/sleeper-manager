@@ -6,6 +6,7 @@ the assignment-search helpers before returning the public decision model.
 
 from __future__ import annotations
 
+from sleeper_manager.decisions._weekly_plan_completion import executable_completions
 from sleeper_manager.decisions._weekly_plan_evaluations import (
     EvaluatedAssignment,
     enumerate_current_assignments,
@@ -97,6 +98,8 @@ def score_weekly_options(
         open_slots,
         required_player_ids=required_active_players,
     )
+    completions = executable_completions(state, batch, assignments)
+    assignments = tuple(completions)
     assignment_tie_key = tie_key(state)
     observed_result = observed_assignment_result(state, open_slots, candidates)
     empty_assignment = AssignmentResult(0.0, ())
@@ -134,7 +137,7 @@ def score_weekly_options(
         EvaluatedAssignment(
             assignment,
             current_terminal_value(assignment),
-            assignment_tie_key(assignment.assignments),
+            assignment_tie_key(completions[assignment]),
         )
         for assignment in assignments
     )
@@ -145,7 +148,7 @@ def score_weekly_options(
     )
     selected_evaluation = ordered[0]
     selected = option(
-        selected_evaluation.result,
+        completions[selected_evaluation.result],
         selected_evaluation.expected_terminal_value,
         baseline,
         state,
@@ -154,7 +157,7 @@ def score_weekly_options(
     if len(ordered) > 1:
         alternative_evaluation = ordered[1]
         alternative = option(
-            alternative_evaluation.result,
+            completions[alternative_evaluation.result],
             alternative_evaluation.expected_terminal_value,
             baseline,
             state,
