@@ -279,7 +279,7 @@ def test_one_required_move_sends_one_notification(tmp_path) -> None:  # type: ig
     assert result.recommendation.player_id == "p2"
     assert result.recommendation.game_id == "g1"
     assert result.notification is not None
-    assert [action.label for action in result.notification.actions] == ["Open Sleeper"]
+    assert result.notification.actions == ()
     assert "Start Ben in UTIL." in sender.messages[0].message
     assert result.plan.manager_policy_version == "runtime-policy-v7"
     assert result.plan.moves[0].deadline == GAME_START - timedelta(minutes=10)

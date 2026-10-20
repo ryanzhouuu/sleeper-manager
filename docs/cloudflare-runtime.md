@@ -34,8 +34,8 @@ work. After two attempts, an expired running lease or a due retry triggers a
 deduplicated per league and manager-local day; unsuccessful delivery can retry.
 Active leases, completed work, and prior-day jobs stay quiet. These operational
 records use decision type `daily_plan_delayed`, fantasy week `0`, and player `system`
-to keep them separate from weekly advice. They offer Open Sleeper without Lock or
-Pass acknowledgement actions. Watchdog failures are logged without blocking planning.
+to keep them separate from weekly advice. They have no notification actions.
+Watchdog failures are logged without blocking planning.
 Failed ntfy deliveries retain the HTTP status, a numeric provider error code from a
 small JSON response, and numeric `Retry-After` guidance when present. Response text,
 topics, and payloads are omitted. Diagnostic parsing failures preserve the original
@@ -46,8 +46,9 @@ pre-tipoff wakes run the weekly lineup planner at most once and refresh live Loc
 opportunity rows.
 Postgame wakes fetch ESPN game summaries directly, stabilize finals, and may send
 Lock, Pass, or unavailable-warning notifications. Lineup notifications include
-Open Sleeper only.
-Lock-In notifications include Locked, Passed, and Open Sleeper. The `test-notification`
+advice without action links.
+Lock-In notifications include Locked and Passed acknowledgement links. Notifications
+do not append an Open Sleeper link. The `test-notification`
 command remains a local diagnostic and is never invoked from `scheduled()`.
 
 Projection history and the active runtime policy live in D1. They are not bundled into the
@@ -223,8 +224,8 @@ does not establish predictive calibration; run forecast/replay checks before act
 
 Postgame watches start two hours after tipoff and retry every five minutes until the
 opportunity is acknowledged, expired, or otherwise closed. Lock and Pass notifications
-include Locked, Passed, and Open Sleeper actions. Unavailable warnings include Open Sleeper
-only. Acknowledgement updates recommendation and opportunity state together; a later ESPN
+include Locked and Passed actions. Unavailable warnings have no notification actions.
+Acknowledgement updates recommendation and opportunity state together; a later ESPN
 stat correction refreshes the locked score without sending another action.
 
 `--apply` requires `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` in the environment. Do
@@ -238,7 +239,8 @@ The production Wrangler configuration declares these secret names as required.
 Their values remain encrypted in Cloudflare and must never be added to `[vars]`.
 For Discord-only delivery, leave `NTFY_TOPIC` unset. Configuring it selects ntfy as
 primary and Discord as fallback; `NTFY_ACCESS_TOKEN` is optional for that setup.
-Discord notifications contain the advice and clickable action links.
+Discord notifications contain the advice and eligible Locked/Passed action links,
+without an appended Sleeper navigation link.
 
 Apply D1 migrations before the first sync if either database is new.
 

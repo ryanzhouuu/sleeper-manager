@@ -159,7 +159,7 @@ class NotificationLoop:
         request: RecommendationRequest,
         now: datetime,
     ) -> NotificationLoopResult:
-
+        """Deliver advice with only the configured acknowledgement actions."""
         requires_acknowledgements = request.decision_type not in _UNACKNOWLEDGEABLE_KINDS and (
             self._acknowledgement_kinds is None
             or request.decision_type in self._acknowledgement_kinds
@@ -187,8 +187,6 @@ class NotificationLoop:
                         method="POST",
                     )
                 )
-        actions.append(NotificationAction(label="Open Sleeper", url=request.open_sleeper_url))
-
         notification = Notification(
             title=request.title,
             message=request.message,

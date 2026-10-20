@@ -179,7 +179,7 @@ def test_daily_due_work_collects_once_and_notifies(tmp_path) -> None:  # type: i
         assert summary.claimed_count == 1
         assert calls == [NOW]
         assert len(sender.messages) == 1
-        assert [action.label for action in sender.messages[0].actions] == ["Open Sleeper"]
+        assert sender.messages[0].actions == ()
         assert len(pending) == 1
         assert pending[0].decision_type == WEEKLY_LINEUP_DECISION_TYPE
         assert json.loads(pending[0].trace_json)["trigger"] == "daily"

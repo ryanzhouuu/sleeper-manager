@@ -107,7 +107,6 @@ def test_two_identical_finals_notify_lock_with_acknowledgement_actions(
         assert [action.label for action in sender.messages[0].actions] == [
             "Locked",
             "Passed",
-            "Open Sleeper",
         ]
         assert second.recommendation is not None
         assert second.recommendation.decision_type == LOCK_IN_DECISION_TYPE

@@ -153,7 +153,7 @@ def test_unavailable_warning_omits_acknowledgement_buttons(tmp_path) -> None:  #
         assert result.evaluation.kind is LockInEvaluationKind.UNAVAILABLE
         assert result.recommendation is not None
         assert result.recommendation.decision_type == LOCK_IN_WARNING_TYPE
-        assert [action.label for action in sender.messages[0].actions] == ["Open Sleeper"]
+        assert sender.messages[0].actions == ()
 
     asyncio.run(exercise())
 

@@ -59,13 +59,13 @@ def test_notification_loop_persists_actions_and_suppresses_duplicates(tmp_path) 
 
     assert first.status == "created"
     assert first.notification is not None
-    assert len(first.notification.actions) == 3
+    assert len(first.notification.actions) == 2
     assert first.delivery is not None and first.delivery.succeeded
     assert second.status == "duplicate"
     assert second.notification is None
     assert len(sender.messages) == 1
 
-    acknowledgement_actions = first.notification.actions[:2]
+    acknowledgement_actions = first.notification.actions
     tokens = {
         parse_qs(urlparse(action.url).query)["token"][0] for action in acknowledgement_actions
     }
@@ -105,7 +105,7 @@ def test_notification_loop_retries_after_all_delivery_attempts_fail(tmp_path) ->
     assert attempts == [(1,), (2,)]
 
 
-def test_lineup_recommendations_only_offer_open_sleeper(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_lineup_recommendations_omit_navigation_and_acknowledgements(tmp_path) -> None:  # type: ignore[no-untyped-def]
     repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
     asyncio.run(repository.initialize())
     sender = RecordingSender()
@@ -123,7 +123,7 @@ def test_lineup_recommendations_only_offer_open_sleeper(tmp_path) -> None:  # ty
 
     assert result.status == "created"
     assert result.notification is not None
-    assert [action.label for action in result.notification.actions] == ["Open Sleeper"]
+    assert result.notification.actions == ()
     connection = sqlite3.connect(tmp_path / "state.db")
     try:
         token_rows = connection.execute(
@@ -152,7 +152,7 @@ def test_default_configuration_still_suppresses_lineup_acknowledgements(tmp_path
     )
 
     assert result.notification is not None
-    assert [action.label for action in result.notification.actions] == ["Open Sleeper"]
+    assert result.notification.actions == ()
 
 
 def test_configured_acknowledgement_kinds_keep_creating_actions(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -173,7 +173,6 @@ def test_configured_acknowledgement_kinds_keep_creating_actions(tmp_path) -> Non
     assert [action.label for action in result.notification.actions] == [
         "Locked",
         "Passed",
-        "Open Sleeper",
     ]
 
 

@@ -67,7 +67,7 @@ def test_repeated_stale_daily_work_sends_one_durable_alert_without_claiming_work
         await _notify(repository, notifications)
         assert len(sender.messages) == 1
         assert sender.messages[0].title == "Daily plan delayed"
-        assert [action.label for action in sender.messages[0].actions] == ["Open Sleeper"]
+        assert sender.messages[0].actions == ()
         assert await repository.list_scheduled_work() == (WORK,)
         stored = await repository.list_pending_recommendations(
             "league-1", 0, decision_type=DAILY_PLAN_DELAYED_KIND
