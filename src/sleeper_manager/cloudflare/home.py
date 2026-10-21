@@ -361,6 +361,7 @@ async def _games(
                 espn_id=player.espn_id,
                 opponent=game.opponent,
                 home=game.home,
+                injury_status=player.injury_status,
             )
             for player in players
             for game in labeled

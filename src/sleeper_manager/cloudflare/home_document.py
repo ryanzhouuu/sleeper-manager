@@ -15,16 +15,19 @@ from sleeper_manager.domain.scheduling import TimeWindow
 from sleeper_manager.integrations.nba.mapping import espn_team_endpoint_id, normalize_team
 
 _KEPT_GAME_STATUSES = frozenset({GameStatus.SCHEDULED, GameStatus.IN_PROGRESS, GameStatus.FINAL})
+_POSITION_ORDER = ("PG", "SG", "SF", "PF", "C")
 
 
 @dataclass(frozen=True, slots=True)
 class HomeIdentity:
-    """Name and image ids for one Sleeper player."""
+    """Name, image id, positions, and injury status for one Sleeper player."""
 
     sleeper_id: str
     name: str | None
     nba_team: str | None
     espn_id: str | None
+    positions: tuple[str, ...] = ()
+    injury_status: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +58,8 @@ class RosterRow:
     name: str | None
     nba_team: str | None
     espn_id: str | None
+    positions: tuple[str, ...] = ()
+    injury_status: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +71,7 @@ class GameRow:
     espn_id: str | None
     opponent: str | None
     home: bool
+    injury_status: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,6 +81,13 @@ class LabeledGame:
     start: datetime
     opponent: str | None
     home: bool
+
+
+def ordered_positions(positions: Sequence[str]) -> tuple[str, ...]:
+    """Basketball order PG, SG, SF, PF, C; other values follow in their given order."""
+    known = [position for position in _POSITION_ORDER if position in positions]
+    others = [position for position in positions if position not in _POSITION_ORDER]
+    return tuple(known + others)
 
 
 def player_image_url(espn_id: str | None) -> str | None:
@@ -207,6 +220,8 @@ def _roster_item(row: RosterRow) -> dict[str, Any]:
         "slot": row.slot,
         "name": row.name,
         "nba_team": row.nba_team,
+        "positions": list(row.positions),
+        "injury_status": row.injury_status,
         "image_url": player_image_url(row.espn_id),
         "team_image_url": team_image_url(row.nba_team),
     }
@@ -216,6 +231,7 @@ def _game_item(game: GameRow) -> dict[str, Any]:
     return {
         "start": game.start.isoformat(),
         "player_name": game.player_name,
+        "injury_status": game.injury_status,
         "player_image_url": player_image_url(game.espn_id),
         "opponent": game.opponent,
         "opponent_image_url": team_image_url(game.opponent),

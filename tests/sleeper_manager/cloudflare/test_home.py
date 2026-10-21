@@ -47,7 +47,13 @@ class FakeSleeper:
             "fpts_decimal": 4,
         }
         self.catalog: dict[str, dict[str, object]] = {
-            "known": {"full_name": "Known Player", "team": "NOP", "espn_id": "55"},
+            "known": {
+                "full_name": "Known Player",
+                "team": "NOP",
+                "espn_id": "55",
+                "fantasy_positions": ["SG", "C", "PG", "G"],
+                "injury_status": "DTD",
+            },
             "unparsed": {"full_name": "", "team": "BOS"},
         }
 
@@ -249,10 +255,12 @@ def test_build_home_reuses_cached_catalog_and_schedule(tmp_path) -> None:  # typ
     repository = _repository(tmp_path)
 
     _build(sleeper, schedule, repository)
-    _build(sleeper, schedule, repository)
+    cached = _build(sleeper, schedule, repository).payload
 
     assert sleeper.player_calls == 1
     assert schedule.calls == ["NOP"]
+    assert cached["roster"][0]["positions"] == ["PG", "SG", "C", "G"]
+    assert cached["roster"][0]["injury_status"] == "DTD"
 
 
 def test_build_home_recommendation_failure_keeps_the_roster(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -464,3 +472,30 @@ def test_roster_standings_reject_non_integer_settings() -> None:
     assert standings[2].record is not None
     assert standings[2].points_for is None
     assert 3 not in standings
+
+
+def test_build_home_includes_positions_and_injury_status(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    document = _build(FakeSleeper(), FakeSchedule(), _repository(tmp_path)).payload
+
+    assert document["roster"][0]["positions"] == ["PG", "SG", "C", "G"]
+    assert document["roster"][0]["injury_status"] == "DTD"
+    assert document["roster"][1]["positions"] == []
+    assert document["roster"][1]["injury_status"] is None
+    assert document["games"]["items"][0]["injury_status"] == "DTD"
+
+
+def test_build_home_drops_blank_positions_and_non_string_injury(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    sleeper = FakeSleeper()
+    sleeper.catalog["known"] = {
+        "full_name": "Known Player",
+        "team": "NOP",
+        "espn_id": "55",
+        "fantasy_positions": [" ", "PG"],
+        "injury_status": 1,
+    }
+
+    row = _build(sleeper, FakeSchedule(), _repository(tmp_path)).payload["roster"][0]
+
+    assert row["name"] == "Known Player"
+    assert row["positions"] == ["PG"]
+    assert row["injury_status"] is None

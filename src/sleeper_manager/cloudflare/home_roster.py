@@ -123,6 +123,8 @@ def _roster_row(
         name=identity.name,
         nba_team=identity.nba_team,
         espn_id=identity.espn_id,
+        positions=identity.positions,
+        injury_status=identity.injury_status,
     )
 
 
