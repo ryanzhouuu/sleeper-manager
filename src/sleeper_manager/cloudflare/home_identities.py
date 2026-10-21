@@ -15,7 +15,7 @@ from sleeper_manager.cloudflare.home_cache import (
     read_home_cache,
     write_home_cache,
 )
-from sleeper_manager.cloudflare.home_document import HomeIdentity
+from sleeper_manager.cloudflare.home_document import HomeIdentity, ordered_positions
 from sleeper_manager.cloudflare.providers import CloudflareProviderError
 from sleeper_manager.domain.nba import DataQualityState, ProviderPlayer, ProviderResult
 from sleeper_manager.domain.scheduling import manager_local_day
@@ -71,8 +71,22 @@ async def load_player_identities(
             name=parsed.full_name,
             nba_team=parsed.team,
             espn_id=parsed.espn_id,
+            positions=_positions(raw.get("fantasy_positions")),
+            injury_status=_injury_status(raw.get("injury_status")),
         )
     return identities, False
+
+
+def _positions(value: object) -> tuple[str, ...]:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        return ()
+    return ordered_positions([item.strip() for item in value if item.strip()])
+
+
+def _injury_status(value: object) -> str | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip()
 
 
 async def fill_espn_ids(
@@ -137,6 +151,8 @@ async def remember_identities(
                 "name": identity.name,
                 "nba_team": identity.nba_team,
                 "espn_id": identity.espn_id,
+                "positions": list(identity.positions),
+                "injury_status": identity.injury_status,
             }
             for identity in identities.values()
         },

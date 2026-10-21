@@ -2,8 +2,9 @@
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import TypeGuard
 
-from sleeper_manager.cloudflare.home_document import HomeIdentity, RosterRow
+from sleeper_manager.cloudflare.home_document import HomeIdentity, RosterRow, TeamRecord
 
 _BENCH_AND_RESERVE = frozenset({"BN", "IR"})
 
@@ -15,6 +16,40 @@ class ParsedSide:
     roster_id: int
     matchup_id: int | None
     points: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class RosterStanding:
+    """Season record and points for one roster. Unparseable settings are None."""
+
+    record: TeamRecord | None
+    points_for: float | None
+
+
+def roster_standings(raw_rosters: Sequence[object]) -> dict[int, RosterStanding]:
+    """Read Sleeper roster settings by roster id. Rosters without an integer id are skipped."""
+    standings: dict[int, RosterStanding] = {}
+    for raw in raw_rosters:
+        if not isinstance(raw, Mapping):
+            continue
+        roster_id = raw.get("roster_id")
+        if not _is_integer(roster_id):
+            continue
+        settings = raw.get("settings")
+        if not isinstance(settings, Mapping):
+            settings = {}
+        wins, losses, ties = (settings.get(key) for key in ("wins", "losses", "ties"))
+        record = (
+            TeamRecord(wins, losses, ties)
+            if _is_integer(wins) and _is_integer(losses) and _is_integer(ties)
+            else None
+        )
+        fpts, decimal = settings.get("fpts"), settings.get("fpts_decimal")
+        points_for = (
+            round(fpts + decimal / 100, 2) if _is_integer(fpts) and _is_integer(decimal) else None
+        )
+        standings[roster_id] = RosterStanding(record, points_for)
+    return standings
 
 
 def roster_rows(
@@ -88,7 +123,13 @@ def _roster_row(
         name=identity.name,
         nba_team=identity.nba_team,
         espn_id=identity.espn_id,
+        positions=identity.positions,
+        injury_status=identity.injury_status,
     )
+
+
+def _is_integer(value: object) -> TypeGuard[int]:
+    return isinstance(value, int) and not isinstance(value, bool)
 
 
 def _points(value: object) -> float | None:

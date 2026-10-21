@@ -8,6 +8,7 @@ and cache write failures still return a live document.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, Literal, Protocol
 
@@ -22,13 +23,19 @@ from sleeper_manager.cloudflare.home_document import (
     assemble_home,
     avatar_image_url,
     label_team_games,
+    plan_status_from_trace,
 )
 from sleeper_manager.cloudflare.home_identities import (
     fill_espn_ids,
     load_player_identities,
     remember_identities,
 )
-from sleeper_manager.cloudflare.home_roster import matchup_sides, roster_rows
+from sleeper_manager.cloudflare.home_roster import (
+    RosterStanding,
+    matchup_sides,
+    roster_rows,
+    roster_standings,
+)
 from sleeper_manager.cloudflare.providers import CloudflareProviderError
 from sleeper_manager.cloudflare.routes import RouteResponse
 from sleeper_manager.domain.nba import (
@@ -94,7 +101,7 @@ async def build_home(
     loaded = await _load_league(sleeper, league_id)
     if loaded is None:
         return _league_unavailable()
-    league, users, raw_users, rosters, state = loaded
+    league, users, raw_users, rosters, standings, state = loaded
     week = _fantasy_week(state, league)
     if week is None:
         return _league_unavailable()
@@ -112,6 +119,7 @@ async def build_home(
         raw_users,
         rosters,
         manager_roster,
+        standings,
         league_id=league_id,
         user_id=user_id,
         week=week,
@@ -158,9 +166,10 @@ async def build_home(
             games_status=games_status,
             games=games,
             recommendation_status=recommendation[0],
-            recommendation_title=recommendation[1],
-            recommendation_message=recommendation[2],
-            recommendation_deadline=recommendation[3],
+            recommendation_plan_status=recommendation[1],
+            recommendation_title=recommendation[2],
+            recommendation_message=recommendation[3],
+            recommendation_deadline=recommendation[4],
         ),
     )
 
@@ -214,6 +223,7 @@ async def _load_league(
         tuple[SleeperUserPayload, ...],
         tuple[Mapping[str, Any], ...],
         tuple[SleeperRosterPayload, ...],
+        dict[int, RosterStanding],
         SleeperStatePayload,
     ]
     | None
@@ -234,7 +244,7 @@ async def _load_league(
         state = SleeperStatePayload.model_validate(raw_state)
     except (CloudflareProviderError, ValidationError, TypeError, ValueError):
         return None
-    return league, users, raw_users, rosters, state
+    return league, users, raw_users, rosters, roster_standings(raw_roster_list), state
 
 
 async def _matchup(
@@ -243,16 +253,20 @@ async def _matchup(
     raw_users: Sequence[Mapping[str, Any]],
     rosters: Sequence[SleeperRosterPayload],
     manager_roster: SleeperRosterPayload,
+    standings: Mapping[int, RosterStanding],
     *,
     league_id: str,
     user_id: str,
     week: int,
 ) -> tuple[HomeSide, HomeSide | None] | None:
     manager_user = next((user for user in users if user.user_id == user_id), None)
-    manager_side = HomeSide(
-        name=_display_name(manager_user),
-        score=None,
-        image_url=avatar_image_url(_user_avatar(raw_users, user_id)),
+    manager_side = _with_standing(
+        HomeSide(
+            name=_display_name(manager_user),
+            score=None,
+            image_url=avatar_image_url(_user_avatar(raw_users, user_id)),
+        ),
+        standings.get(manager_roster.roster_id),
     )
     if week == 0:
         return manager_side, None
@@ -268,11 +282,7 @@ async def _matchup(
         return None
     if not mine:
         return manager_side, None
-    manager_side = HomeSide(
-        name=manager_side.name,
-        score=mine[0].points,
-        image_url=manager_side.image_url,
-    )
+    manager_side = replace(manager_side, score=mine[0].points)
     if mine[0].matchup_id is None:
         return manager_side, None
     opponents = tuple(
@@ -286,17 +296,32 @@ async def _matchup(
         (roster for roster in rosters if roster.roster_id == opponents[0].roster_id),
         None,
     )
-    if opponent_roster is None or opponent_roster.owner_id is None:
+    if opponent_roster is None:
         return manager_side, HomeSide(name=None, score=opponents[0].points, image_url=None)
+    opponent_standing = standings.get(opponent_roster.roster_id)
+    if opponent_roster.owner_id is None:
+        return manager_side, _with_standing(
+            HomeSide(name=None, score=opponents[0].points, image_url=None),
+            opponent_standing,
+        )
     opponent_user = next(
         (user for user in users if user.user_id == opponent_roster.owner_id),
         None,
     )
-    return manager_side, HomeSide(
-        name=_display_name(opponent_user),
-        score=opponents[0].points,
-        image_url=avatar_image_url(_user_avatar(raw_users, opponent_roster.owner_id)),
+    return manager_side, _with_standing(
+        HomeSide(
+            name=_display_name(opponent_user),
+            score=opponents[0].points,
+            image_url=avatar_image_url(_user_avatar(raw_users, opponent_roster.owner_id)),
+        ),
+        opponent_standing,
     )
+
+
+def _with_standing(side: HomeSide, standing: RosterStanding | None) -> HomeSide:
+    if standing is None:
+        return side
+    return replace(side, record=standing.record, points_for=standing.points_for)
 
 
 async def _games(
@@ -336,6 +361,7 @@ async def _games(
                 espn_id=player.espn_id,
                 opponent=game.opponent,
                 home=game.home,
+                injury_status=player.injury_status,
             )
             for player in players
             for game in labeled
@@ -389,7 +415,7 @@ async def _recommendation(
     repository: AsyncRuntimeStateRepository,
     league_id: str,
     week: int,
-) -> tuple[_SectionStatus, str | None, str | None, datetime | None]:
+) -> tuple[_SectionStatus, str | None, str | None, str | None, datetime | None]:
     try:
         record = await repository.latest_current_recommendation(
             league_id,
@@ -397,7 +423,13 @@ async def _recommendation(
             decision_type=_WEEKLY_LINEUP,
         )
     except Exception:
-        return "unavailable", None, None, None
+        return "unavailable", None, None, None, None
     if record is None:
-        return "empty", None, None, None
-    return "ready", record.title, record.message, record.deadline
+        return "empty", None, None, None, None
+    return (
+        "ready",
+        plan_status_from_trace(record.trace_json),
+        record.title,
+        record.message,
+        record.deadline,
+    )

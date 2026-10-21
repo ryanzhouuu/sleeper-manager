@@ -128,6 +128,11 @@ and unavailable official reports. Source hashes remain in projection/shadow diag
 Visible availability changes revise notification identity; identical refreshed warnings
 deduplicate. Recommendation traces retain `availability_notes` and a separate
 `availability_material_hash`, preserving the underlying plan's material identity.
+Notifications group named statuses by game time and summarize missing reports as
+player counts. Lineup and actionable Lock/Pass messages also include their selected
+expected terminal weekly team score; unavailable advice labels the estimate as
+unavailable. Lock/Pass traces store this as `expected_terminal_score` alongside the
+alternative, and selected-score changes participate in material delivery identity.
 
 Local `run-scheduled` uses the same hybrid artifact store in `SQLITE_PATH` and reads
 external revisions from the neighboring `forecasts.db`. Its HTTP adapter supports

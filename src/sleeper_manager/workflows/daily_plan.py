@@ -30,6 +30,7 @@ from sleeper_manager.workflows.availability_advice import (
     availability_material_hash,
     state_availability_notes,
 )
+from sleeper_manager.workflows.availability_rendering import state_availability_summary
 from sleeper_manager.workflows.notification_loop import (
     Clock,
     NotificationLoop,
@@ -122,7 +123,10 @@ async def _run_weekly_lineup_workflow(
     notes = state_availability_notes(
         state, player_names=player_names, local_timezone=local_timezone
     )
-    rendered = replace(rendered, message=append_availability_message(rendered.message, notes))
+    summary = state_availability_summary(
+        state, player_names=player_names, local_timezone=local_timezone
+    )
+    rendered = replace(rendered, message=append_availability_message(rendered.message, summary))
     material_hash = availability_material_hash(plan.material_hash, notes)
     trace = append_availability_trace(
         serialize_weekly_plan_trace(plan, trigger=trigger), notes, material_hash

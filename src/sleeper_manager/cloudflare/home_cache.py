@@ -65,7 +65,11 @@ async def write_home_cache(
 
 
 def decode_identities(payload: object | None) -> dict[str, HomeIdentity] | None:
-    """Decode a cached name map. None when the payload is not that map."""
+    """Decode a cached name map. None when the payload is not that map.
+
+    Entries written before positions were cached have no `positions` key and
+    count as a miss, so the catalog is read again.
+    """
     if not isinstance(payload, dict):
         return None
     identities: dict[str, HomeIdentity] = {}
@@ -81,7 +85,15 @@ def decode_identities(payload: object | None) -> dict[str, HomeIdentity] | None:
             return None
         if espn_id is not None and not isinstance(espn_id, str):
             return None
-        identities[sleeper_id] = HomeIdentity(sleeper_id, name, nba_team, espn_id)
+        positions = raw.get("positions")
+        if not isinstance(positions, list) or not all(isinstance(item, str) for item in positions):
+            return None
+        injury_status = raw.get("injury_status")
+        if injury_status is not None and not isinstance(injury_status, str):
+            return None
+        identities[sleeper_id] = HomeIdentity(
+            sleeper_id, name, nba_team, espn_id, tuple(positions), injury_status
+        )
     return identities
 
 

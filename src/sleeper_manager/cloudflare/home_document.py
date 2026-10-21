@@ -3,26 +3,40 @@
 Callers pass already loaded league, schedule, and recommendation data.
 """
 
+import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Literal
 
 from sleeper_manager.domain.nba import GameStatus, ScheduledGame
+from sleeper_manager.domain.planning import PlanStatus
 from sleeper_manager.domain.scheduling import TimeWindow
 from sleeper_manager.integrations.nba.mapping import espn_team_endpoint_id, normalize_team
 
 _KEPT_GAME_STATUSES = frozenset({GameStatus.SCHEDULED, GameStatus.IN_PROGRESS, GameStatus.FINAL})
+_POSITION_ORDER = ("PG", "SG", "SF", "PF", "C")
 
 
 @dataclass(frozen=True, slots=True)
 class HomeIdentity:
-    """Name and image ids for one Sleeper player."""
+    """Name, image id, positions, and injury status for one Sleeper player."""
 
     sleeper_id: str
     name: str | None
     nba_team: str | None
     espn_id: str | None
+    positions: tuple[str, ...] = ()
+    injury_status: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TeamRecord:
+    """Season wins, losses, and ties for one fantasy roster."""
+
+    wins: int
+    losses: int
+    ties: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +46,8 @@ class HomeSide:
     name: str | None
     score: float | None
     image_url: str | None
+    record: TeamRecord | None = None
+    points_for: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,6 +58,8 @@ class RosterRow:
     name: str | None
     nba_team: str | None
     espn_id: str | None
+    positions: tuple[str, ...] = ()
+    injury_status: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +71,7 @@ class GameRow:
     espn_id: str | None
     opponent: str | None
     home: bool
+    injury_status: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +81,13 @@ class LabeledGame:
     start: datetime
     opponent: str | None
     home: bool
+
+
+def ordered_positions(positions: Sequence[str]) -> tuple[str, ...]:
+    """Basketball order PG, SG, SF, PF, C; other values follow in their given order."""
+    known = [position for position in _POSITION_ORDER if position in positions]
+    others = [position for position in positions if position not in _POSITION_ORDER]
+    return tuple(known + others)
 
 
 def player_image_url(espn_id: str | None) -> str | None:
@@ -84,6 +110,21 @@ def avatar_image_url(avatar: str | None) -> str | None:
     if avatar is None or not avatar.strip():
         return None
     return f"https://sleepercdn.com/avatars/thumbs/{avatar.strip()}"
+
+
+def plan_status_from_trace(trace_json: str) -> str | None:
+    """Weekly plan status recorded in a recommendation trace, or None when unreadable."""
+    try:
+        payload = json.loads(trace_json)
+    except json.JSONDecodeError:
+        return None
+    status = payload.get("status") if isinstance(payload, dict) else None
+    if not isinstance(status, str):
+        return None
+    try:
+        return PlanStatus(status).value
+    except ValueError:
+        return None
 
 
 def label_team_games(
@@ -125,6 +166,7 @@ def assemble_home(
     games_status: Literal["ready", "empty", "unavailable"],
     games: Sequence[GameRow],
     recommendation_status: Literal["ready", "empty", "unavailable"],
+    recommendation_plan_status: str | None = None,
     recommendation_title: str | None = None,
     recommendation_message: str | None = None,
     recommendation_deadline: datetime | None = None,
@@ -137,6 +179,7 @@ def assemble_home(
     if recommendation_status == "ready":
         recommendation: dict[str, Any] = {
             "status": "ready",
+            "plan_status": recommendation_plan_status,
             "title": recommendation_title,
             "message": recommendation_message,
             "deadline": (
@@ -158,7 +201,18 @@ def assemble_home(
 
 
 def _side(side: HomeSide) -> dict[str, Any]:
-    return {"name": side.name, "score": side.score, "image_url": side.image_url}
+    record = side.record
+    return {
+        "name": side.name,
+        "score": side.score,
+        "image_url": side.image_url,
+        "record": (
+            None
+            if record is None
+            else {"wins": record.wins, "losses": record.losses, "ties": record.ties}
+        ),
+        "points_for": side.points_for,
+    }
 
 
 def _roster_item(row: RosterRow) -> dict[str, Any]:
@@ -166,6 +220,8 @@ def _roster_item(row: RosterRow) -> dict[str, Any]:
         "slot": row.slot,
         "name": row.name,
         "nba_team": row.nba_team,
+        "positions": list(row.positions),
+        "injury_status": row.injury_status,
         "image_url": player_image_url(row.espn_id),
         "team_image_url": team_image_url(row.nba_team),
     }
@@ -175,6 +231,7 @@ def _game_item(game: GameRow) -> dict[str, Any]:
     return {
         "start": game.start.isoformat(),
         "player_name": game.player_name,
+        "injury_status": game.injury_status,
         "player_image_url": player_image_url(game.espn_id),
         "opponent": game.opponent,
         "opponent_image_url": team_image_url(game.opponent),

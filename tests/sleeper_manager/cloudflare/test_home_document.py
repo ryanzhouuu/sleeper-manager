@@ -1,12 +1,16 @@
 from datetime import UTC, datetime
 
+import pytest
+
 from sleeper_manager.cloudflare.home_document import (
     GameRow,
     HomeSide,
     RosterRow,
+    TeamRecord,
     assemble_home,
     avatar_image_url,
     label_team_games,
+    plan_status_from_trace,
     player_image_url,
     team_image_url,
 )
@@ -97,6 +101,7 @@ def test_assemble_home_allowlist_and_null_score() -> None:
         games_status="empty",
         games=(),
         recommendation_status="ready",
+        recommendation_plan_status="no_action",
         recommendation_title="Lineup is set",
         recommendation_message="Stored message",
         recommendation_deadline=TIPOFF,
@@ -109,6 +114,7 @@ def test_assemble_home_allowlist_and_null_score() -> None:
     assert document["roster"][0]["team_image_url"].endswith("/nyk.png")
     assert document["roster"][1]["image_url"].endswith("/10.png")
     assert document["games"] == {"status": "empty", "items": []}
+    assert document["recommendation"]["plan_status"] == "no_action"
     assert document["recommendation"]["title"] == "Lineup is set"
     assert document["recommendation"]["deadline"] == TIPOFF.isoformat()
     assert "league_id" not in document["league"]
@@ -127,7 +133,13 @@ def test_assemble_home_game_row_uses_player_image_fields() -> None:
             score=12.5,
             image_url="https://sleepercdn.com/avatars/thumbs/abc",
         ),
-        opponent=HomeSide(name="Away Team", score=4, image_url=None),
+        opponent=HomeSide(
+            name="Away Team",
+            score=4,
+            image_url=None,
+            record=TeamRecord(wins=2, losses=1, ties=0),
+            points_for=812.4,
+        ),
         roster=(),
         games_status="ready",
         games=(
@@ -142,6 +154,9 @@ def test_assemble_home_game_row_uses_player_image_fields() -> None:
         recommendation_status="empty",
     )
 
+    assert document["matchup"]["opponent"]["record"] == {"wins": 2, "losses": 1, "ties": 0}
+    assert document["matchup"]["opponent"]["points_for"] == 812.4
+    assert document["matchup"]["manager"]["record"] is None
     item = document["games"]["items"][0]
     assert item["player_name"] == "Jalen Brunson"
     assert item["home"] is False
@@ -150,3 +165,19 @@ def test_assemble_home_game_row_uses_player_image_fields() -> None:
     assert item["start"] == TIPOFF.isoformat()
     assert document["recommendation"] == {"status": "empty"}
     assert set(document) == {"league", "matchup", "roster", "games", "recommendation"}
+
+
+@pytest.mark.parametrize(
+    ("trace_json", "expected"),
+    [
+        ('{"status": "action_required"}', "action_required"),
+        ('{"status": "blocked", "kind": "weekly_lineup"}', "blocked"),
+        ("{}", None),
+        ('{"status": "pending"}', None),
+        ('{"status": 1}', None),
+        ("[]", None),
+        ("not json", None),
+    ],
+)
+def test_plan_status_from_trace(trace_json: str, expected: str | None) -> None:
+    assert plan_status_from_trace(trace_json) == expected

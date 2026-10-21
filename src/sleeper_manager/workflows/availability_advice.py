@@ -14,9 +14,9 @@ def state_availability_notes(
     player_names: Mapping[str, str] | None = None,
     local_timezone: tzinfo | None = None,
 ) -> tuple[str, ...]:
-    """Present scoped assumptions without exposing diagnostic source identifiers."""
+    """Retain each game's assumptions without exposing diagnostic source identifiers."""
     notes: list[str] = []
-    seen: set[tuple[str, str, str]] = set()
+    seen: set[tuple[str, str, str, str]] = set()
     data_gap = False
     for opportunity in state.opportunities:
         snapshot = opportunity.projection
@@ -28,7 +28,7 @@ def state_availability_notes(
                 continue
             if reason.code not in ("confirmed_game_absence", "availability_uncertainty"):
                 continue
-            key = opportunity.sleeper_player_id, reason.code, reason.message
+            key = opportunity.sleeper_player_id, opportunity.game_id, reason.code, reason.message
             if key in seen:
                 continue
             seen.add(key)

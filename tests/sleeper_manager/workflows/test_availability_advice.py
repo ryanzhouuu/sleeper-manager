@@ -118,7 +118,11 @@ def test_confirmed_absence_changes_lineup_and_late_clearance_withdraws_old_advic
         assert any(
             move.player_id == "p2" and move.target_slot_index == 0 for move in out.plan.moves
         )
-        assert "Out for this game" in out.notification.message
+        assert "• Out: Ann" in out.notification.message
+        assert (
+            "Out for this game"
+            in json.loads(out.recommendation.trace_json)["availability_notes"][0]
+        )
         cleared = await run(
             reported(inputs, "p1", AvailabilityStatus.AVAILABLE), repository, notifications
         )
