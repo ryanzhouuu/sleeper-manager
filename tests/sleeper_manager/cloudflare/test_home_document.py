@@ -6,6 +6,7 @@ from sleeper_manager.cloudflare.home_document import (
     GameRow,
     HomeSide,
     RosterRow,
+    TeamRecord,
     assemble_home,
     avatar_image_url,
     label_team_games,
@@ -132,7 +133,13 @@ def test_assemble_home_game_row_uses_player_image_fields() -> None:
             score=12.5,
             image_url="https://sleepercdn.com/avatars/thumbs/abc",
         ),
-        opponent=HomeSide(name="Away Team", score=4, image_url=None),
+        opponent=HomeSide(
+            name="Away Team",
+            score=4,
+            image_url=None,
+            record=TeamRecord(wins=2, losses=1, ties=0),
+            points_for=812.4,
+        ),
         roster=(),
         games_status="ready",
         games=(
@@ -147,6 +154,9 @@ def test_assemble_home_game_row_uses_player_image_fields() -> None:
         recommendation_status="empty",
     )
 
+    assert document["matchup"]["opponent"]["record"] == {"wins": 2, "losses": 1, "ties": 0}
+    assert document["matchup"]["opponent"]["points_for"] == 812.4
+    assert document["matchup"]["manager"]["record"] is None
     item = document["games"]["items"][0]
     assert item["player_name"] == "Jalen Brunson"
     assert item["home"] is False

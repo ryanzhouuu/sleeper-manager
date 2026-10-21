@@ -2,6 +2,7 @@ import asyncio
 from datetime import UTC, datetime, timedelta
 
 from sleeper_manager.cloudflare.home import build_home, roster_rows
+from sleeper_manager.cloudflare.home_roster import roster_standings
 from sleeper_manager.cloudflare.providers import CloudflareProviderError
 from sleeper_manager.domain.nba import (
     DataQualityReport,
@@ -38,6 +39,13 @@ class FakeSleeper:
             {"roster_id": 1, "matchup_id": 7, "points": True},
             {"roster_id": 2, "matchup_id": 7, "points": 9},
         ]
+        self.manager_settings: dict[str, object] | None = {
+            "wins": 2,
+            "losses": 1,
+            "ties": 0,
+            "fpts": 812,
+            "fpts_decimal": 4,
+        }
         self.catalog: dict[str, dict[str, object]] = {
             "known": {"full_name": "Known Player", "team": "NOP", "espn_id": "55"},
             "unparsed": {"full_name": "", "team": "BOS"},
@@ -82,6 +90,7 @@ class FakeSleeper:
                 "players": list(self.manager_players),
                 "starters": list(self.manager_starters),
                 "reserve": [],
+                "settings": self.manager_settings,
             },
             {
                 "roster_id": 2,
@@ -89,6 +98,7 @@ class FakeSleeper:
                 "players": ["other"],
                 "starters": ["other"],
                 "reserve": [],
+                "settings": {"wins": 1, "losses": 1, "ties": 1, "fpts": 700, "fpts_decimal": 50},
             },
         ]
 
@@ -418,3 +428,39 @@ def test_build_home_keeps_manager_when_opponent_owner_is_missing(tmp_path) -> No
     assert document["matchup"]["opponent"]["name"] is None
     assert document["matchup"]["opponent"]["score"] == 9.0
     assert document["roster"][0]["name"] == "Known Player"
+
+
+def test_build_home_includes_season_records(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    matchup = _build(FakeSleeper(), FakeSchedule(), _repository(tmp_path)).payload["matchup"]
+
+    assert matchup["manager"]["record"] == {"wins": 2, "losses": 1, "ties": 0}
+    assert matchup["manager"]["points_for"] == 812.04
+    assert matchup["opponent"]["record"] == {"wins": 1, "losses": 1, "ties": 1}
+    assert matchup["opponent"]["points_for"] == 700.5
+
+
+def test_build_home_missing_settings_leave_record_null(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    sleeper = FakeSleeper()
+    sleeper.manager_settings = None
+
+    response = _build(sleeper, FakeSchedule(), _repository(tmp_path))
+
+    assert response.status_code == 200
+    assert response.payload["matchup"]["manager"]["record"] is None
+    assert response.payload["matchup"]["manager"]["points_for"] is None
+
+
+def test_roster_standings_reject_non_integer_settings() -> None:
+    standings = roster_standings(
+        [
+            {"roster_id": 1, "settings": {"wins": True, "losses": 0, "ties": 0, "fpts": 10}},
+            {"roster_id": 2, "settings": {"wins": 1, "losses": 0, "ties": 0, "fpts": "10"}},
+            {"roster_id": "3", "settings": {"wins": 1, "losses": 0, "ties": 0}},
+        ]
+    )
+
+    assert standings[1].record is None
+    assert standings[1].points_for is None
+    assert standings[2].record is not None
+    assert standings[2].points_for is None
+    assert 3 not in standings

@@ -28,12 +28,23 @@ class HomeIdentity:
 
 
 @dataclass(frozen=True, slots=True)
+class TeamRecord:
+    """Season wins, losses, and ties for one fantasy roster."""
+
+    wins: int
+    losses: int
+    ties: int
+
+
+@dataclass(frozen=True, slots=True)
 class HomeSide:
     """One fantasy matchup participant."""
 
     name: str | None
     score: float | None
     image_url: str | None
+    record: TeamRecord | None = None
+    points_for: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,7 +188,18 @@ def assemble_home(
 
 
 def _side(side: HomeSide) -> dict[str, Any]:
-    return {"name": side.name, "score": side.score, "image_url": side.image_url}
+    record = side.record
+    return {
+        "name": side.name,
+        "score": side.score,
+        "image_url": side.image_url,
+        "record": (
+            None
+            if record is None
+            else {"wins": record.wins, "losses": record.losses, "ties": record.ties}
+        ),
+        "points_for": side.points_for,
+    }
 
 
 def _roster_item(row: RosterRow) -> dict[str, Any]:
