@@ -21,11 +21,15 @@ export default async function HomePage() {
   }
   const { league, matchup, roster, games, recommendation } = result.document;
   return (
-    <main className="page">
-      <WeekBlock league={league} matchup={matchup} />
-      <RecommendationBlock recommendation={recommendation} />
-      <RosterBlock roster={roster} />
-      <GamesBlock games={games} timeZone={league.timezone} />
+    <main className="page split">
+      <div className="column">
+        <WeekBlock league={league} matchup={matchup} />
+        <RecommendationBlock recommendation={recommendation} />
+        <RosterBlock roster={roster} />
+      </div>
+      <div className="column">
+        <GamesBlock games={games} timeZone={league.timezone} />
+      </div>
     </main>
   );
 }
