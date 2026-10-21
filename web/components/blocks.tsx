@@ -1,6 +1,10 @@
+import type { CSSProperties } from "react";
 import {
   MISSING,
   formatLocalTime,
+  formatPointsFor,
+  formatPositions,
+  formatRecord,
   formatScore,
   groupGamesByDay,
   opponentLabel,
@@ -44,7 +48,7 @@ export function WeekBlock({
       <h1 className="label">
         {league.name} · week {league.week}
       </h1>
-      <ul className="rows">
+      <ul className="rows side-rows">
         {sides.map((side, index) => (
           <SideRow key={index} side={side} />
         ))}
@@ -60,6 +64,12 @@ function SideRow({ side }: { side: MatchupSide }) {
         <Mark src={side.image_url} alt={side.name ?? ""} size={16} />
       </span>
       <span className="text">{side.name ?? MISSING}</span>
+      <span className="number">
+        {side.record === null ? null : formatRecord(side.record)}
+      </span>
+      <span className="number">
+        {side.points_for === null ? null : formatPointsFor(side.points_for)}
+      </span>
       <span className="number">
         {side.score === null ? null : formatScore(side.score)}
       </span>
@@ -91,18 +101,43 @@ export function RecommendationBlock({
   );
 }
 
+function PlayerName({
+  name,
+  injuryStatus,
+}: {
+  name: string | null;
+  injuryStatus: string | null;
+}) {
+  return (
+    <span className="player">
+      <span className="text">{name ?? MISSING}</span>
+      {injuryStatus === null ? null : (
+        <span className="status"> · {injuryStatus}</span>
+      )}
+    </span>
+  );
+}
+
 export function RosterBlock({ roster }: { roster: RosterEntry[] }) {
+  const positionsWidth = Math.max(
+    1,
+    ...roster.map((entry) => formatPositions(entry.positions).length),
+  );
   return (
     <section className="block">
       <h2 className="label">roster</h2>
-      <ul className="rows">
+      <ul
+        className="rows"
+        style={{ "--positions-width": `${positionsWidth}ch` } as CSSProperties}
+      >
         {roster.map((entry, index) => (
           <li key={index} className="row roster-row">
             <span className="text">{entry.slot}</span>
             <span className="cell">
               <Mark src={entry.image_url} alt={entry.name ?? ""} size={20} />
             </span>
-            <span className="text">{entry.name ?? MISSING}</span>
+            <PlayerName name={entry.name} injuryStatus={entry.injury_status} />
+            <span className="text">{formatPositions(entry.positions)}</span>
             <span className="cell">
               <Mark
                 src={entry.team_image_url}
@@ -152,7 +187,10 @@ export function GamesBlock({
                     size={20}
                   />
                 </span>
-                <span className="text">{game.player_name ?? MISSING}</span>
+                <PlayerName
+                  name={game.player_name}
+                  injuryStatus={game.injury_status}
+                />
                 <span className="cell">
                   <Mark
                     src={game.opponent_image_url}

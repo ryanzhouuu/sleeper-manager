@@ -95,12 +95,23 @@ ul {
   border-top: 1px solid var(--rule);
 }
 
+.side-rows {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto auto auto;
+}
+
 .side-row {
-  grid-template-columns: 16px minmax(0, 1fr) auto;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+.side-row .number {
+  justify-self: end;
+  padding-left: 1ch;
 }
 
 .roster-row {
-  grid-template-columns: 4ch 20px minmax(0, 1fr) 16px 3ch;
+  grid-template-columns: 4ch 20px minmax(0, 1fr) var(--positions-width) 16px 3ch;
 }
 
 .game-row {
@@ -119,6 +130,16 @@ ul {
 
 .number {
   white-space: nowrap;
+}
+
+.player {
+  display: flex;
+  min-width: 0;
+}
+
+.status {
+  flex: none;
+  white-space: pre;
 }
 
 .mark {

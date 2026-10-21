@@ -1,4 +1,4 @@
-import type { GameItem } from "./home";
+import type { GameItem, TeamRecord } from "./home";
 
 export const MISSING = "—";
 
@@ -60,4 +60,16 @@ export function opponentLabel(
 
 export function formatScore(score: number): string {
   return score.toFixed(1);
+}
+
+export function formatRecord({ wins, losses, ties }: TeamRecord): string {
+  return ties > 0 ? `${wins}-${losses}-${ties}` : `${wins}-${losses}`;
+}
+
+export function formatPointsFor(points: number): string {
+  return `${points.toFixed(1)} pf`;
+}
+
+export function formatPositions(positions: readonly string[]): string {
+  return positions.length > 0 ? positions.join("/") : MISSING;
 }

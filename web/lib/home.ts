@@ -3,16 +3,26 @@ export type SectionStatus = "ready" | "empty" | "unavailable";
 export type PlanStatus =
   "action_required" | "no_action" | "degraded" | "blocked";
 
+export interface TeamRecord {
+  wins: number;
+  losses: number;
+  ties: number;
+}
+
 export interface MatchupSide {
   name: string | null;
   score: number | null;
   image_url: string | null;
+  record: TeamRecord | null;
+  points_for: number | null;
 }
 
 export interface RosterEntry {
   slot: string;
   name: string | null;
   nba_team: string | null;
+  positions: string[];
+  injury_status: string | null;
   image_url: string | null;
   team_image_url: string | null;
 }
@@ -20,6 +30,7 @@ export interface RosterEntry {
 export interface GameItem {
   start: Date;
   player_name: string | null;
+  injury_status: string | null;
   player_image_url: string | null;
   opponent: string | null;
   opponent_image_url: string | null;
@@ -105,7 +116,26 @@ function side(value: unknown): MatchupSide {
     name: nullableString(fields.name),
     score: nullableNumber(fields.score),
     image_url: nullableString(fields.image_url),
+    record: teamRecord(fields.record),
+    points_for: nullableNumber(fields.points_for),
   };
+}
+
+// Workers deployed before records, positions, and injury status omit them.
+function teamRecord(value: unknown): TeamRecord | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  const fields = record(value);
+  return {
+    wins: integer(fields.wins),
+    losses: integer(fields.losses),
+    ties: integer(fields.ties),
+  };
+}
+
+function positions(value: unknown): string[] {
+  return value === undefined ? [] : array(value).map(string);
 }
 
 function rosterEntry(value: unknown): RosterEntry {
@@ -114,6 +144,8 @@ function rosterEntry(value: unknown): RosterEntry {
     slot: string(fields.slot),
     name: nullableString(fields.name),
     nba_team: nullableString(fields.nba_team),
+    positions: positions(fields.positions),
+    injury_status: nullableString(fields.injury_status),
     image_url: nullableString(fields.image_url),
     team_image_url: nullableString(fields.team_image_url),
   };
@@ -127,6 +159,7 @@ function gameItem(value: unknown): GameItem {
   return {
     start: instant(fields.start),
     player_name: nullableString(fields.player_name),
+    injury_status: nullableString(fields.injury_status),
     player_image_url: nullableString(fields.player_image_url),
     opponent: nullableString(fields.opponent),
     opponent_image_url: nullableString(fields.opponent_image_url),

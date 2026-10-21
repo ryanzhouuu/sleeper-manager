@@ -27,6 +27,9 @@ describe("WeekBlock", () => {
     expect(html).toContain("Lock In · week 3");
     expect(html).toContain("142.6");
     expect(html).toContain("Away Team");
+    expect(html).toContain("2-1<");
+    expect(html).toContain("812.4 pf");
+    expect(html).toContain("1-1-1");
   });
 
   it("omits the opponent on a bye and a missing score", () => {
@@ -89,15 +92,27 @@ describe("RecommendationBlock", () => {
 });
 
 describe("RosterBlock", () => {
-  it("renders a dash for an empty slot and keeps image cells", () => {
+  it("renders dashes for an empty slot and keeps image cells", () => {
     const html = renderToStaticMarkup(<RosterBlock roster={document.roster} />);
     const emptySlot = html.split(/<li[ >]/)[2];
 
     expect(emptySlot).toContain("UTIL");
-    expect(emptySlot.match(/—/g)).toHaveLength(2);
+    expect(emptySlot.match(/—/g)).toHaveLength(3);
     expect(emptySlot).not.toContain("<img");
     expect(emptySlot.match(/class="cell"/g)).toHaveLength(2);
     expect(html).toContain('alt="Jalen Brunson"');
+  });
+});
+
+describe("RosterBlock positions and injuries", () => {
+  it("shows positions, injury status, and sizes the positions column", () => {
+    const html = renderToStaticMarkup(<RosterBlock roster={document.roster} />);
+    const tatum = html.split(/<li[ >]/)[3];
+
+    expect(tatum).toContain("SF/PF");
+    expect(tatum).toContain('<span class="status"> · DTD</span>');
+    expect(html).toContain("--positions-width:5ch");
+    expect(html.split(/<li[ >]/)[1]).not.toContain('class="status"');
   });
 });
 
@@ -111,6 +126,7 @@ describe("GamesBlock", () => {
     expect(html.indexOf("@ BOS")).toBeLessThan(html.indexOf("vs LAL"));
     expect(html).toContain("11:30 PM");
     expect(html.match(/Jalen Brunson<\/span>/g)).toHaveLength(2);
+    expect(html).toContain('Jayson Tatum</span><span class="status"> · DTD');
   });
 
   it.each([

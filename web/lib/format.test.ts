@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   formatLocalTime,
+  formatPointsFor,
+  formatPositions,
+  formatRecord,
   formatScore,
   groupGamesByDay,
   opponentLabel,
@@ -11,6 +14,7 @@ function game(start: string, overrides: Partial<GameItem> = {}): GameItem {
   return {
     start: new Date(start),
     player_name: "Jalen Brunson",
+    injury_status: null,
     player_image_url: null,
     opponent: "BOS",
     opponent_image_url: null,
@@ -61,5 +65,25 @@ describe("formatScore", () => {
   it("shows one decimal", () => {
     expect(formatScore(142.6)).toBe("142.6");
     expect(formatScore(9)).toBe("9.0");
+  });
+});
+
+describe("formatRecord", () => {
+  it("shows ties only when nonzero", () => {
+    expect(formatRecord({ wins: 2, losses: 1, ties: 0 })).toBe("2-1");
+    expect(formatRecord({ wins: 2, losses: 1, ties: 1 })).toBe("2-1-1");
+  });
+});
+
+describe("formatPointsFor", () => {
+  it("labels season points", () => {
+    expect(formatPointsFor(812.04)).toBe("812.0 pf");
+  });
+});
+
+describe("formatPositions", () => {
+  it("joins positions and marks an empty list", () => {
+    expect(formatPositions(["SF", "PF"])).toBe("SF/PF");
+    expect(formatPositions([])).toBe("—");
   });
 });

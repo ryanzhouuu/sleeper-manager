@@ -1,18 +1,40 @@
 {
-  "league": { "name": "Lock In", "week": 3, "timezone": "America/Chicago" },
+  "league": {
+    "name": "Lock In",
+    "week": 3,
+    "timezone": "America/Chicago"
+  },
   "matchup": {
     "manager": {
       "name": "Home Team",
       "score": 142.6,
-      "image_url": "https://sleepercdn.com/avatars/thumbs/abc"
+      "image_url": "https://sleepercdn.com/avatars/thumbs/abc",
+      "record": {
+        "wins": 2,
+        "losses": 1,
+        "ties": 0
+      },
+      "points_for": 812.4
     },
-    "opponent": { "name": "Away Team", "score": 128.1, "image_url": null }
+    "opponent": {
+      "name": "Away Team",
+      "score": 128.1,
+      "image_url": null,
+      "record": {
+        "wins": 1,
+        "losses": 1,
+        "ties": 1
+      },
+      "points_for": 700.5
+    }
   },
   "roster": [
     {
       "slot": "PG",
       "name": "Jalen Brunson",
       "nba_team": "NYK",
+      "positions": ["PG"],
+      "injury_status": null,
       "image_url": "https://a.espncdn.com/i/headshots/nba/players/full/3934672.png",
       "team_image_url": "https://a.espncdn.com/i/teamlogos/nba/500/nyk.png"
     },
@@ -20,6 +42,8 @@
       "slot": "UTIL",
       "name": null,
       "nba_team": null,
+      "positions": [],
+      "injury_status": null,
       "image_url": null,
       "team_image_url": null
     },
@@ -27,6 +51,8 @@
       "slot": "BN",
       "name": "Jayson Tatum",
       "nba_team": "BOS",
+      "positions": ["SF", "PF"],
+      "injury_status": "DTD",
       "image_url": "https://a.espncdn.com/i/headshots/nba/players/full/4065648.png",
       "team_image_url": "https://a.espncdn.com/i/teamlogos/nba/500/bos.png"
     },
@@ -34,6 +60,8 @@
       "slot": "IR",
       "name": "Joel Embiid",
       "nba_team": "PHI",
+      "positions": ["C"],
+      "injury_status": "Out",
       "image_url": "https://a.espncdn.com/i/headshots/nba/players/full/3059318.png",
       "team_image_url": "https://a.espncdn.com/i/teamlogos/nba/500/phi.png"
     }
@@ -44,6 +72,7 @@
       {
         "start": "2026-10-22T04:30:00+00:00",
         "player_name": "Jayson Tatum",
+        "injury_status": "DTD",
         "player_image_url": "https://a.espncdn.com/i/headshots/nba/players/full/4065648.png",
         "opponent": "LAL",
         "opponent_image_url": "https://a.espncdn.com/i/teamlogos/nba/500/lal.png",
@@ -52,6 +81,7 @@
       {
         "start": "2026-10-21T23:00:00+00:00",
         "player_name": "Jalen Brunson",
+        "injury_status": null,
         "player_image_url": "https://a.espncdn.com/i/headshots/nba/players/full/3934672.png",
         "opponent": "BOS",
         "opponent_image_url": "https://a.espncdn.com/i/teamlogos/nba/500/bos.png",
@@ -60,6 +90,7 @@
       {
         "start": "2026-10-23T00:00:00+00:00",
         "player_name": "Jalen Brunson",
+        "injury_status": null,
         "player_image_url": "https://a.espncdn.com/i/headshots/nba/players/full/3934672.png",
         "opponent": "MIA",
         "opponent_image_url": "https://a.espncdn.com/i/teamlogos/nba/500/mia.png",
