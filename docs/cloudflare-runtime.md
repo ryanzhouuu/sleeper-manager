@@ -62,6 +62,12 @@ Workers try the primary public ESPN host, then its alternate after a transport e
 403, 429, or server error. Each endpoint gets at most two requests total. Missing
 resources, invalid JSON, and schema drift fail explicitly; custom base URLs stay isolated.
 
+Each planning run fetches a fresh ESPN injury snapshot, shared by manager and opponent
+collection, and updates the persisted cache with the provider's original timestamps.
+Team rosters and schedules retain their existing cache windows. Injury fetch failures
+remain blocking evidence; planning does not substitute the previous cached snapshot.
+The fifteen-minute injury freshness limit still applies at the final decision cutoff.
+
 Official game availability uses a Workers-native fetch adapter and the shared PDF
 parser, now included in runtime dependencies. The adapter checks recent publication
 slots directly rather than renewing an old cached designation. Missing publications,

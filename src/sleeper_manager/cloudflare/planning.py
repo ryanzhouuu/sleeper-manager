@@ -108,6 +108,7 @@ async def collect_cloudflare_planning_inputs(
         repository,
         clock=tick,
         provider_name="espn",
+        refresh_injuries=True,
     )
     catalog_source = _CatalogSource(sleeper)
     control = DirectBaselineProjectionProvider(history)
