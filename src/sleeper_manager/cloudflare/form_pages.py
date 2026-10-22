@@ -5,7 +5,7 @@ from html import escape
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-_STYLE = """+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#11161d;
+_STYLE = """:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#11161d;
 color:#e5eaf0;font:15px/1.5 ui-monospace,monospace}main{max-width:48rem;margin:auto;
 padding:2rem 1rem}section{background:#1c242e;padding:1rem;margin:1rem 0}h1,h2,p{
 font-size:inherit;margin:0 0 .75rem}h1,h2,a{color:#8baac6}form{margin:.75rem 0}
