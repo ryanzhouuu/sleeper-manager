@@ -200,7 +200,7 @@ def decision_critical_opportunities(
 ) -> tuple[GameOpportunity, ...]:
     """Return every legal future opportunity that can affect the current decision."""
 
-    locked_players = {slot.player_id for slot in state.fixed_slots}
+    locked_players = {slot.player_id for slot in state.fixed_slots} | set(state.reserve_player_ids)
     passed = {(item.player_id, item.game_id) for item in state.passed_opportunities}
     open_indices = set(state.open_slot_indices)
     remaining = (

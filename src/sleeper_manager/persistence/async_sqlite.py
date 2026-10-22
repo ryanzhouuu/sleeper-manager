@@ -318,3 +318,9 @@ class AsyncSQLiteStateRepository(AsyncRuntimeStateRepository):
             league_id,
             fantasy_week,
         )
+
+    async def list_week_lock_in_opportunities(
+        self, league_id: str, fantasy_week: int
+    ) -> tuple[LockInOpportunityRecord, ...]:
+        """Expose the same week-scoped eligibility evidence as the Worker repository."""
+        return self._repository.list_week_lock_in_opportunities(league_id, fantasy_week)

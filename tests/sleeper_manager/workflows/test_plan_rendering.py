@@ -166,7 +166,7 @@ def test_no_action_plans_do_not_prescribe_moves() -> None:
     rendered = render_weekly_plan(plan)
 
     assert rendered.title == "Lineup is set"
-    assert rendered.message == (
+    assert rendered.message.startswith(
         "Your lineup already matches the weekly plan.\n\nExpected weekly total: 104.8 pts."
     )
 

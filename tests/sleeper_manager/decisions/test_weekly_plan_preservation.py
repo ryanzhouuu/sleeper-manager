@@ -72,11 +72,10 @@ def test_valuable_center_util_swap_preserves_both_starters() -> None:
 
     plan = build_weekly_plan(state, policy=POLICY)
 
-    assert tuple(item.player_id for item in plan.desired_assignments) == ("early", "later")
+    assert tuple(item.player_id for item in plan.desired_assignments) == ("later", "early")
     assert plan.expected_terminal_score == 160
-    assert plan.observed_terminal_score == 130
-    assert len(plan.moves) == 1
-    assert {plan.moves[0].player_id, plan.moves[0].swap_player_id} == {"early", "later"}
+    assert plan.observed_terminal_score == 160
+    assert plan.moves == ()
 
 
 def test_selected_bench_player_can_still_replace_a_later_starter() -> None:

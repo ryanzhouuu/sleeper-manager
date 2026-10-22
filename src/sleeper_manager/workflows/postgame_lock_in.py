@@ -1,84 +1,34 @@
-"""Observe direct ESPN finals and turn stable scores into live Lock-In advice."""
-
-from __future__ import annotations
+"""Observe direct ESPN finals and deliver coordinated team advice from stable scores."""
 
 import json
-from dataclasses import asdict, dataclass, replace
+from dataclasses import replace
 from datetime import datetime, timedelta
-from hashlib import sha256
-from typing import Literal, Protocol
-from zoneinfo import ZoneInfo
 
-from sleeper_manager.decisions.live_lock_in import (
-    LiveLockInPolicyConfig,
-    evaluate_live_lock_in,
-)
 from sleeper_manager.decisions.lock_in import ScoreMaximizingLockInPolicy
-from sleeper_manager.domain.lock_in import (
-    LockInEvaluation,
-    LockInEvaluationKind,
-    LockInOpportunityStatus,
-)
-from sleeper_manager.domain.nba import DataQualityState, GameStatus, GameSummary, ProviderResult
-from sleeper_manager.domain.planning import GameOpportunity, PlanningGameStatus, TeamWeekState
+from sleeper_manager.domain.lock_in import LockInOpportunityStatus
+from sleeper_manager.domain.nba import GameStatus
 from sleeper_manager.domain.runtime_policy import RuntimePolicy
 from sleeper_manager.domain.scoring import calculate_fantasy_points
-from sleeper_manager.persistence.base import AsyncRuntimeStateRepository, RecommendationRecord
+from sleeper_manager.persistence.base import AsyncRuntimeStateRepository
 from sleeper_manager.persistence.lock_in_opportunities import (
     LockInObservation,
     LockInOpportunityRecord,
 )
-from sleeper_manager.workflows.availability_advice import (
-    append_availability_message,
-    append_availability_trace,
-    availability_material_hash,
-    state_availability_notes,
+from sleeper_manager.workflows.coordinated_postgame import deliver_coordinated_postgame
+from sleeper_manager.workflows.lock_in_planning import sync_live_lock_in_opportunities
+from sleeper_manager.workflows.notification_loop import NotificationLoop
+from sleeper_manager.workflows.planning_inputs import LivePlanningInputs
+from sleeper_manager.workflows.postgame_observations import summary_fingerprint, summary_wait_reason
+from sleeper_manager.workflows.postgame_types import (
+    LOCK_IN_ACKNOWLEDGEMENT_KINDS,
+    LOCK_IN_DECISION_TYPE,
+    LOCK_IN_WARNING_TYPE,
+    DirectGameSummarySource,
+    PostgameLockInResult,
 )
-from sleeper_manager.workflows.availability_rendering import state_availability_summary
-from sleeper_manager.workflows.lock_in_evidence import merge_lock_in_opportunity_evidence
-from sleeper_manager.workflows.lock_in_rendering import (
-    _evaluation_hash,
-    _evaluation_message,
-    _evaluation_title,
-    _evaluation_trace_json,
-    _material_idempotency_key,
-)
-from sleeper_manager.workflows.notification_loop import (
-    NotificationLoop,
-    RecommendationRequest,
-    recommendation_id_for,
-)
-from sleeper_manager.workflows.planning_inputs import (
-    LivePlanningInputs,
-    build_live_team_week_state,
-)
+from sleeper_manager.workflows.recommendation_state import refreshed_team_state
 
-LOCK_IN_DECISION_TYPE = "live_lock_in"
-LOCK_IN_WARNING_TYPE = "live_lock_in_unavailable"
-LOCK_IN_ACKNOWLEDGEMENT_KINDS = frozenset({LOCK_IN_DECISION_TYPE, "placeholder_lock_in"})
 _RECHECK_DELAY = timedelta(minutes=5)
-
-
-class DirectGameSummarySource(Protocol):
-    """Fetch an uncached provider summary for one scheduled postgame wake."""
-
-    async def __call__(self, game_id: str) -> ProviderResult[GameSummary]: ...
-
-
-@dataclass(frozen=True, slots=True)
-class PostgameLockInResult:
-    """Report whether a postgame wake should complete or remain scheduled."""
-
-    outcome: Literal[
-        "wait",
-        "notified",
-        "duplicate",
-        "unavailable",
-        "automatic_final",
-        "delivery_failed",
-    ]
-    recommendation: RecommendationRecord | None = None
-    evaluation: LockInEvaluation | None = None
 
 
 async def run_postgame_lock_in(
@@ -97,11 +47,18 @@ async def run_postgame_lock_in(
 ) -> PostgameLockInResult:
     """Fetch once, stabilize every relevant player, evaluate, and notify safely."""
 
+    await sync_live_lock_in_opportunities(inputs, repository=repository, observed_at=decision_time)
     due = await repository.list_due_lock_in_opportunities(decision_time)
     opportunities = tuple(item for item in due if item.key.game_id == game_id)
     if not opportunities:
         return PostgameLockInResult("wait")
     summary_result = await fetch_summary(game_id)
+    decision_time = max(decision_time, summary_result.quality.retrieved_at)
+    if any(row.action_deadline <= decision_time for row in opportunities):
+        await repository.expire_lock_in_opportunities(decision_time)
+        opportunities = tuple(row for row in opportunities if row.action_deadline > decision_time)
+        if not opportunities:
+            return PostgameLockInResult("wait")
     summary = summary_result.records
     reason = summary_wait_reason(summary_result, opportunities)
     if reason is not None:
@@ -151,46 +108,20 @@ async def run_postgame_lock_in(
     if not stable:
         return PostgameLockInResult("wait")
 
-    live_inputs = await _inputs_with_lock_in_evidence(inputs, repository)
-    state = build_live_team_week_state(live_inputs, decision_time=decision_time)
-    results: list[PostgameLockInResult] = []
-    for opportunity in stable:
-        results.append(
-            await _evaluate_opportunity(
-                opportunity,
-                state,
-                summary=summary,
-                repository=repository,
-                notifications=notifications,
-                runtime_policy=runtime_policy,
-                open_sleeper_url=open_sleeper_url,
-                player_names=player_names or {},
-                policy=policy or ScoreMaximizingLockInPolicy(),
-            )
-        )
-    return _combined_result(results)
-
-
-def summary_wait_reason(
-    result: ProviderResult[GameSummary],
-    opportunities: tuple[LockInOpportunityRecord, ...],
-) -> str | None:
-    """Identify provider evidence that cannot count as a stable final poll."""
-
-    if result.records.game.status is not GameStatus.FINAL:
-        return "game_not_final"
-    if result.quality.state in {
-        DataQualityState.PARTIAL,
-        DataQualityState.EMPTY,
-        DataQualityState.ERROR,
-        DataQualityState.UNRESOLVED,
-        DataQualityState.STALE,
-    }:
-        return "summary_incomplete"
-    present = {item.player_id for item in result.records.player_box_scores}
-    if any(item.provider_player_id not in present for item in opportunities):
-        return "rostered_player_missing"
-    return None
+    live_inputs = replace(inputs, runtime_policy_version=runtime_policy.manager_intent.version)
+    state = await refreshed_team_state(live_inputs, repository, decision_time)
+    return await deliver_coordinated_postgame(
+        live_inputs,
+        state,
+        stable,
+        decision_time=decision_time,
+        repository=repository,
+        notifications=notifications,
+        runtime_policy=runtime_policy,
+        open_sleeper_url=open_sleeper_url,
+        player_names=player_names,
+        policy=policy,
+    )
 
 
 async def _defer_opportunities(
@@ -217,294 +148,6 @@ async def _defer_opportunities(
             deferred,
             expected_version=opportunity.row_version,
         )
-
-
-async def _evaluate_opportunity(
-    opportunity: LockInOpportunityRecord,
-    state: TeamWeekState,
-    *,
-    summary: GameSummary,
-    repository: AsyncRuntimeStateRepository,
-    notifications: NotificationLoop,
-    runtime_policy: RuntimePolicy,
-    open_sleeper_url: str,
-    player_names: dict[str, str],
-    policy: ScoreMaximizingLockInPolicy,
-) -> PostgameLockInResult:
-    """Evaluate one stable player score and persist its material outcome."""
-
-    completed_state = _completed_state(state, opportunity, summary)
-    if completed_state is None:
-        evaluation = _mapping_unavailable_evaluation(state, opportunity, runtime_policy)
-    else:
-        completed, live_state = completed_state
-        evaluation = evaluate_live_lock_in(
-            live_state,
-            completed,
-            deadline=opportunity.action_deadline,
-            manager_policy_version=runtime_policy.manager_intent.version,
-            policy=policy,
-            config=LiveLockInPolicyConfig(runtime_policy.manager_intent.minimum_confidence),
-        )
-    notes = state_availability_notes(
-        state, player_names=player_names, local_timezone=ZoneInfo(runtime_policy.manager_timezone)
-    )
-    availability = state_availability_summary(
-        state, player_names=player_names, local_timezone=ZoneInfo(runtime_policy.manager_timezone)
-    )
-    evaluation_hash = availability_material_hash(_evaluation_hash(evaluation), notes)
-    trace_json = append_availability_trace(
-        _evaluation_trace_json(evaluation, opportunity), notes, evaluation_hash
-    )
-    if evaluation.kind is LockInEvaluationKind.WAIT:
-        await _supersede_changed_recommendation(
-            repository,
-            opportunity,
-            replacement_id=None,
-            changed_at=state.decision_time,
-        )
-        await _store_evaluation(
-            repository,
-            opportunity,
-            status=LockInOpportunityStatus.FINALIZING,
-            evaluation_hash=evaluation_hash,
-            trace_json=trace_json,
-        )
-        return PostgameLockInResult("wait", evaluation=evaluation)
-    if evaluation.kind is LockInEvaluationKind.AUTOMATIC_FINAL:
-        await _supersede_changed_recommendation(
-            repository,
-            opportunity,
-            replacement_id=None,
-            changed_at=state.decision_time,
-        )
-        await _store_evaluation(
-            repository,
-            opportunity,
-            status=LockInOpportunityStatus.AUTOMATIC_FINAL,
-            evaluation_hash=evaluation_hash,
-            trace_json=trace_json,
-        )
-        return PostgameLockInResult("automatic_final", evaluation=evaluation)
-
-    decision_type = (
-        LOCK_IN_WARNING_TYPE
-        if evaluation.kind is LockInEvaluationKind.UNAVAILABLE
-        else LOCK_IN_DECISION_TYPE
-    )
-    idempotency_key = _material_idempotency_key(opportunity, evaluation, evaluation_hash)
-    await _supersede_changed_recommendation(
-        repository,
-        opportunity,
-        replacement_id=recommendation_id_for(idempotency_key),
-        changed_at=state.decision_time,
-    )
-    request = RecommendationRequest(
-        league_id=opportunity.key.league_id,
-        fantasy_week=opportunity.key.fantasy_week,
-        player_id=opportunity.key.player_id,
-        game_id=opportunity.key.game_id,
-        decision_type=decision_type,
-        title=_evaluation_title(evaluation, player_names),
-        message=append_availability_message(_evaluation_message(evaluation), availability),
-        deadline=opportunity.action_deadline,
-        policy_version=runtime_policy.manager_intent.version,
-        open_sleeper_url=open_sleeper_url,
-        trace_json=trace_json,
-        idempotency_key=idempotency_key,
-    )
-    result = await notifications.run(request)
-    stored = await repository.get_lock_in_opportunity(opportunity.key)
-    if stored is not None:
-        await _store_evaluation(
-            repository,
-            stored,
-            status=(
-                LockInOpportunityStatus.RECONCILIATION_REQUIRED
-                if evaluation.kind is LockInEvaluationKind.UNAVAILABLE
-                else LockInOpportunityStatus.ACTIONABLE
-            ),
-            evaluation_hash=evaluation_hash,
-            trace_json=trace_json,
-            recommendation=result.recommendation,
-        )
-    outcome: Literal["notified", "duplicate", "unavailable", "delivery_failed"]
-    if result.status == "delivery_failed":
-        outcome = "delivery_failed"
-    elif evaluation.kind is LockInEvaluationKind.UNAVAILABLE:
-        outcome = "unavailable"
-    else:
-        outcome = "duplicate" if result.status == "duplicate" else "notified"
-    return PostgameLockInResult(outcome, result.recommendation, evaluation)
-
-
-async def _supersede_changed_recommendation(
-    repository: AsyncRuntimeStateRepository,
-    opportunity: LockInOpportunityRecord,
-    *,
-    replacement_id: str | None,
-    changed_at: datetime,
-) -> None:
-    """Retire stale pending advice before storing a materially different outcome."""
-
-    current_id = opportunity.current_recommendation_id
-    if current_id is not None and current_id != replacement_id:
-        await repository.supersede_recommendation(current_id, changed_at)
-
-
-def _completed_state(
-    state: TeamWeekState,
-    opportunity: LockInOpportunityRecord,
-    summary: GameSummary,
-) -> tuple[GameOpportunity, TeamWeekState] | None:
-    """Overlay durable final evidence when the current mapped player-game still exists."""
-
-    target = next(
-        (
-            item
-            for item in state.opportunities
-            if item.sleeper_player_id == opportunity.key.player_id
-            and item.game_id == opportunity.key.game_id
-        ),
-        None,
-    )
-    if target is None:
-        return None
-    completed = replace(
-        target,
-        status=PlanningGameStatus.FINAL,
-        eligible_slot_indices=(
-            (opportunity.slot_index,) if opportunity.slot_index is not None else ()
-        ),
-        eligible_positions=opportunity.eligible_positions,
-        rostered_at_tipoff=opportunity.rostered_at_tipoff,
-        completed_fantasy_score=opportunity.stable_score,
-        finalized_at=summary.game.finalized_at or state.decision_time,
-        data_quality="stable-direct-espn-summary",
-    )
-    finalized_at = completed.finalized_at
-    return completed, replace(
-        state,
-        opportunities=tuple(
-            completed
-            if item == target
-            else replace(item, status=PlanningGameStatus.FINAL, finalized_at=finalized_at)
-            if item.game_id == opportunity.key.game_id
-            else item
-            for item in state.opportunities
-        ),
-    )
-
-
-def _mapping_unavailable_evaluation(
-    state: TeamWeekState,
-    opportunity: LockInOpportunityRecord,
-    runtime_policy: RuntimePolicy,
-) -> LockInEvaluation:
-    """Describe a persisted player-game that disappeared from current mapped inputs."""
-
-    return LockInEvaluation(
-        decision_time=state.decision_time,
-        kind=LockInEvaluationKind.UNAVAILABLE,
-        player_id=opportunity.key.player_id,
-        game_id=opportunity.key.game_id,
-        deadline=opportunity.action_deadline,
-        information_version=state.input_version,
-        manager_policy_version=runtime_policy.manager_intent.version,
-        reason_codes=("mapping_unavailable",),
-        trace=(
-            ("league_configuration_version", state.league_configuration_version),
-            ("scoring_policy_version", state.scoring_policy_version),
-            ("projection_model_version", state.projection_model_version),
-            ("current_player_game_mapping", "missing"),
-        ),
-        observed_score=opportunity.stable_score,
-    )
-
-
-async def _store_evaluation(
-    repository: AsyncRuntimeStateRepository,
-    opportunity: LockInOpportunityRecord,
-    *,
-    status: LockInOpportunityStatus,
-    evaluation_hash: str,
-    trace_json: str,
-    recommendation: RecommendationRecord | None = None,
-) -> None:
-    """Guard the latest evaluation and recommendation identity against stale writers."""
-
-    updated = replace(
-        opportunity,
-        status=status,
-        current_recommendation_id=(recommendation.recommendation_id if recommendation else None),
-        current_recommendation_kind=(recommendation.decision_type if recommendation else None),
-        latest_evaluation_hash=evaluation_hash,
-        trace_json=trace_json,
-        updated_at=opportunity.current_observed_at or opportunity.updated_at,
-    )
-    await repository.update_lock_in_opportunity(
-        updated,
-        expected_version=opportunity.row_version,
-    )
-
-
-def summary_fingerprint(summary: GameSummary) -> str:
-    """Hash normalized game and box-score facts without retrieval timestamps."""
-
-    payload = {
-        "game": {
-            "id": summary.game.provider_id,
-            "start": summary.game.start_time.isoformat(),
-            "status": summary.game.status.value,
-            "completed_periods": summary.game.completed_periods,
-        },
-        "players": [
-            {
-                "player_id": item.player_id,
-                "team_id": item.team_id,
-                "started": item.started,
-                "did_play": item.did_play,
-                "minutes": item.minutes,
-                "line": asdict(item.line),
-            }
-            for item in sorted(summary.player_box_scores, key=lambda value: value.player_id)
-        ],
-    }
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
-    return sha256(encoded).hexdigest()
-
-
-def _combined_result(results: list[PostgameLockInResult]) -> PostgameLockInResult:
-    """Choose the most operationally significant result from a coalesced game."""
-
-    for outcome in (
-        "delivery_failed",
-        "notified",
-        "unavailable",
-        "duplicate",
-        "wait",
-        "automatic_final",
-    ):
-        match = next((item for item in results if item.outcome == outcome), None)
-        if match is not None:
-            return match
-    return PostgameLockInResult("wait")
-
-
-async def _inputs_with_lock_in_evidence(
-    inputs: LivePlanningInputs,
-    repository: AsyncRuntimeStateRepository,
-) -> LivePlanningInputs:
-    """Overlay current locked, passed, and automatic-final scores onto live inputs."""
-
-    records = await repository.load_acknowledged_lock_in_opportunities(
-        inputs.league_profile.league_id,
-        inputs.week_window.week,
-    )
-    return replace(
-        inputs,
-        acknowledgements=merge_lock_in_opportunity_evidence(inputs.acknowledgements, records),
-    )
 
 
 __all__ = (

@@ -5,7 +5,11 @@ from collections.abc import Mapping
 from datetime import tzinfo
 from hashlib import sha256
 
-from sleeper_manager.domain.planning import TeamWeekState
+from sleeper_manager.domain.planning import PlanningReasonCode, TeamWeekState
+
+INJURY_DATA_UNAVAILABLE_NOTE = (
+    "Injury updates are unavailable; advice uses provisional availability."
+)
 
 
 def state_availability_notes(
@@ -16,6 +20,8 @@ def state_availability_notes(
 ) -> tuple[str, ...]:
     """Retain each game's assumptions without exposing diagnostic source identifiers."""
     notes: list[str] = []
+    if PlanningReasonCode.INJURY_DATA_UNAVAILABLE in state.warnings:
+        notes.append(INJURY_DATA_UNAVAILABLE_NOTE)
     seen: set[tuple[str, str, str, str]] = set()
     data_gap = False
     for opportunity in state.opportunities:

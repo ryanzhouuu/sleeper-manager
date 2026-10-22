@@ -220,7 +220,7 @@ def test_continuation_value_is_allocated_once_across_selected_assignment() -> No
     assert decision.selected.expected_terminal_value == 40
     assert decision.perfect_information_bound == 40
     assert decision.selected.expected_terminal_value <= decision.perfect_information_bound
-    assert tuple(item.player_id for item in decision.selected.assignments) == ("p1", None)
+    assert tuple(item.player_id for item in decision.selected.assignments) == ("p1", "p2")
     assert {
         (evaluation.player_id, evaluation.slot_index, evaluation.marginal_terminal_value)
         for evaluation in decision.evaluations

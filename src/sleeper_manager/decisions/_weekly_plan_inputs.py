@@ -45,14 +45,40 @@ def option_candidates(
     return tuple(candidates)
 
 
+def protected_performances(state: TeamWeekState) -> tuple[GameOpportunity, ...]:
+    """Retain active trials and still-eligible finals whose score has not been verified."""
+    passed = {(row.player_id, row.game_id) for row in state.passed_opportunities}
+    return tuple(
+        game
+        for game in state.opportunities
+        if (game.sleeper_player_id, game.game_id) not in state.recovery_forfeitures
+        and (
+            game.status is PlanningGameStatus.ACTIVE
+            or (
+                game.status is PlanningGameStatus.FINAL
+                and game.completed_fantasy_score is None
+                and game.rostered_at_tipoff is not False
+                and game.eligible_slot_indices
+                and (game.sleeper_player_id, game.game_id) not in passed
+                and (state.week_ends_at is None or state.decision_time < state.week_ends_at)
+                and not any(
+                    later.sleeper_player_id == game.sleeper_player_id
+                    and game.scheduled_start < later.scheduled_start <= state.decision_time
+                    for later in state.opportunities
+                )
+            )
+        )
+    )
+
+
 def active_assignment_candidates(
     state: TeamWeekState,
     open_slots: tuple[StarterSlot, ...],
 ) -> tuple[AssignmentCandidate, ...]:
-    """Represent observed in-progress starters as required zero-value placements."""
+    """Reserve positions for observed performances that cannot yet be discarded."""
 
     active_by_player: dict[str, list[GameOpportunity]] = {}
-    for opportunity in state.active_opportunities:
+    for opportunity in protected_performances(state):
         active_by_player.setdefault(opportunity.sleeper_player_id, []).append(opportunity)
     locked_players = {fixed.player_id for fixed in state.fixed_slots}
     candidates: list[AssignmentCandidate] = []
@@ -88,7 +114,7 @@ def active_assignment_candidates(
 def next_actionable_batch(state: TeamWeekState) -> tuple[GameOpportunity, ...] | None:
     """Return the earliest unpassed scheduled opportunities sharing a tipoff."""
     passed = {(item.player_id, item.game_id) for item in state.passed_opportunities}
-    locked_players = {item.player_id for item in state.fixed_slots}
+    locked_players = {item.player_id for item in state.fixed_slots} | set(state.reserve_player_ids)
     candidates = tuple(
         opportunity
         for opportunity in state.opportunities
@@ -118,7 +144,7 @@ def future_opportunities(
 ) -> tuple[GameOpportunity, ...]:
     """Return later rostered opportunities still eligible for replanning."""
     passed = {(item.player_id, item.game_id) for item in state.passed_opportunities}
-    locked_players = {item.player_id for item in state.fixed_slots}
+    locked_players = {item.player_id for item in state.fixed_slots} | set(state.reserve_player_ids)
     return tuple(
         sorted(
             (

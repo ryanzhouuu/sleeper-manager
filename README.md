@@ -85,14 +85,43 @@ Official game absences constrain active projections; uncertain or unverified sta
 evidence is explained in lineup and Lock-In messages. Existing policies use direct-baseline
 advice; hybrid advice requires an explicit selection and pinned history.
 
+## Recommendations
+
 Notifications group named availability warnings by status and game time, and count
 players with missing reports or unverified availability. Full player/game warnings
 remain in the stored recommendation trace.
+Daily, pre-tipoff, and postgame runs produce a complete team recommendation from
+the current lineup, confirmed decisions, and retained player-game observations.
+They show every starter slot, bench choices, exact lock positions, ordered actions,
+and recovery deadlines. Locked/Passed buttons still confirm individual actions;
+delivering advice never proves that a swap, lock, or pass occurred.
+
+Stable completed scores remain available for joint comparison with later games.
+Observed bench transitions permanently forfeit that performance; returning the player
+to a starting slot does not restore it. An extra attempt is preferred at equal
+modeled value only when an executable recovery preserves the baseline choices.
+Recovery obligations persist across runs, including after a recovery recommendation
+is ignored. A named recovery may explicitly forfeit its own active attempt; it
+cannot discard another active starter or relocate an accepted lock.
+
+Values use bounded postgame placement search and an approximate later-week
+continuation. Search limits or uncertain evidence can make advice or totals
+unavailable. These changes do not claim a weekly scoring improvement or automatic
+lock detection.
+
+Large deliveries use ordered message parts to preserve the whole
+recommendation and its confirmations within [Discord's content limit](https://docs.discord.com/developers/resources/webhook#execute-webhook)
+and [ntfy's message/action limits](https://docs.ntfy.sh/publish/#limitations).
+Unchanged successful deliveries stay quiet. A failed multipart delivery retries
+as a whole, so already received parts can repeat after a partial transport failure.
+
 Lineup and Lock/Pass messages show the expected weekly team total assuming the
 recommendation is followed, including locked scores and modeled remaining slots.
 Lineups show the change versus the current lineup; Lock/Pass messages show the other
 action's team total separately from the completed player's score. Blocked advice or
 missing estimates display `Expected weekly total: unavailable.`
+
+## Forecast archive
 
 `run-scheduled` writes forecast evidence to `forecasts.db` beside `SQLITE_PATH`
 (`.local/forecasts.db` by default). That write does not change the planning

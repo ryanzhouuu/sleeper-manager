@@ -24,6 +24,7 @@ class ReplayState:
     player_games: tuple[ReplayPlayerGame, ...]
     locked_slots: tuple[FixedSlot, ...] = ()
     decisions: tuple[LockInDecision, ...] = ()
+    fantasy_week_end: datetime | None = None
 
     @property
     def open_slot_indices(self) -> tuple[int, ...]:
@@ -53,7 +54,7 @@ class ReplayState:
                     for other in self.player_games
                 )
             ),
-            default=_week_end(self.games, game.start_time),
+            default=self.fantasy_week_end or _week_end(self.games, game.start_time),
         )
         if at >= next_start:
             return None

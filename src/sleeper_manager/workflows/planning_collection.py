@@ -36,6 +36,7 @@ from sleeper_manager.workflows.game_availability import (
     collect_official_game_evidence,
 )
 from sleeper_manager.workflows.lock_in_evidence import merge_lock_in_opportunity_evidence
+from sleeper_manager.workflows.planning_history import player_game_evidence
 from sleeper_manager.workflows.planning_inputs import (
     AvailabilityResourceResult,
     FantasyWeekWindow,
@@ -215,6 +216,10 @@ async def collect_live_planning_inputs(
             acknowledgements,
             await load_opportunities(profile.league_id, week_window.week),
         )
+    load_history = getattr(acknowledgement_source, "list_week_lock_in_opportunities", None)
+    history = (
+        await load_history(profile.league_id, week_window.week) if load_history is not None else ()
+    )
     try:
         inputs = LivePlanningInputs(
             league_profile=profile,
@@ -228,6 +233,7 @@ async def collect_live_planning_inputs(
             availability_results=(availability_result,),
             projections=tuple(projections),
             acknowledgements=acknowledgements,
+            player_game_evidence=tuple(player_game_evidence(row) for row in history),
             identity_quality_reports=tuple(identity_reports),
             catalog_version=_catalog_version(catalog),
             catalog_retrieved_at=catalog_retrieved_at,

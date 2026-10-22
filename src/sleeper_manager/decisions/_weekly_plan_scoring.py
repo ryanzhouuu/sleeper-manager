@@ -6,6 +6,9 @@ the assignment-search helpers before returning the public decision model.
 
 from __future__ import annotations
 
+from dataclasses import replace
+from datetime import timedelta
+
 from sleeper_manager.decisions._weekly_plan_completion import executable_completions
 from sleeper_manager.decisions._weekly_plan_evaluations import (
     EvaluatedAssignment,
@@ -24,13 +27,16 @@ from sleeper_manager.decisions._weekly_plan_inputs import (
     option_candidates,
     scenario_input,
 )
+from sleeper_manager.decisions._weekly_plan_lock_targets import recourse_lock_targets
 from sleeper_manager.decisions._weekly_plan_models import (
     TerminalValueApproximation,
     WeeklyPlanDecision,
     WeeklyPlanError,
     WeeklyPlanPolicyConfig,
 )
+from sleeper_manager.decisions._weekly_plan_moves import plan_moves
 from sleeper_manager.decisions._weekly_plan_recourse import recourse_terminal_values
+from sleeper_manager.decisions._weekly_plan_recovery import prove_recovery
 from sleeper_manager.decisions._weekly_plan_terminal_values import assignment_terminal_values
 from sleeper_manager.decisions.lineup import AssignmentCandidate, AssignmentResult
 from sleeper_manager.decisions.simulation import (
@@ -46,6 +52,8 @@ def score_weekly_options(
     state: TeamWeekState,
     *,
     config: WeeklyPlanPolicyConfig | None = None,
+    capture_samples: bool = False,
+    sampling_inputs: tuple[ScenarioInput, ...] | None = None,
 ) -> WeeklyPlanDecision:
     """Rank current-batch assignments against simulated continuation value.
 
@@ -79,7 +87,7 @@ def score_weekly_options(
         decision_time=state.decision_time,
     )
     scenarios = generate_projection_scenarios(
-        scenario_inputs,
+        sampling_inputs if sampling_inputs is not None else scenario_inputs,
         decision_time=state.decision_time,
         count=policy_config.scenario_count,
         seed=seed,
@@ -109,11 +117,12 @@ def score_weekly_options(
         + (empty_assignment,)
     )
     postgame_scenarios = generate_projection_scenarios(
-        future_inputs,
+        sampling_inputs if sampling_inputs is not None else future_inputs,
         decision_time=state.decision_time,
         count=policy_config.postgame_scenario_count,
         seed=seed ^ 0x504F5354,
     )
+    samples: dict[AssignmentResult, tuple[float, ...]] | None = {} if capture_samples else None
     terminal_values = recourse_terminal_values(
         assignments_to_evaluate,
         candidates=candidates,
@@ -125,6 +134,8 @@ def score_weekly_options(
         minimum_confidence=policy_config.minimum_lock_in_confidence,
         tie_tolerance=policy_config.tie_tolerance,
         ignored_candidate_ids=active_candidate_ids,
+        placement_options=recourse_lock_targets(state, batch, completions),
+        score_samples=samples,
     )
     baseline = terminal_values[empty_assignment]
 
@@ -147,12 +158,39 @@ def score_weekly_options(
         selection_limit=2,
     )
     selected_evaluation = ordered[0]
+    recovery = None
+    baseline_target = completions[selected_evaluation.result]
+    best_count = sum(item.player_id is not None for item in selected_evaluation.result.assignments)
+    recovery_rank: tuple[object, ...] | None = None
+    for candidate in evaluated:
+        if candidate.expected_terminal_value + 1e-6 < selected_evaluation.expected_terminal_value:
+            continue
+        count = sum(item.player_id is not None for item in candidate.result.assignments)
+        if count < best_count:
+            continue
+        proof = prove_recovery(state, baseline_target, completions[candidate.result], batch)
+        if proof is not None:
+            action_count = len(
+                plan_moves(state, proof.attempt_assignments, batch[0].scheduled_start, timedelta(0))
+            )
+            rank = (-count, action_count, candidate.assignment_tie_key)
+            if recovery_rank is None or rank < recovery_rank:
+                selected_evaluation, recovery, best_count = candidate, proof, count
+                recovery_rank = rank
+    ordered = (
+        selected_evaluation,
+        *tuple(item for item in ordered if item != selected_evaluation),
+    )[:2]
     selected = option(
         completions[selected_evaluation.result],
         selected_evaluation.expected_terminal_value,
         baseline,
         state,
     )
+    if samples is not None:
+        selected = replace(selected, scenario_terminal_scores=samples[selected_evaluation.result])
+    if recovery is not None:
+        selected = replace(selected, recovery_obligations=(recovery,))
     alternative = None
     if len(ordered) > 1:
         alternative_evaluation = ordered[1]

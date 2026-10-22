@@ -1,5 +1,6 @@
 """Restrict accepted-score placements to lineups that retain every active starter."""
 
+from sleeper_manager.decisions.completed_scores import executable_lock_placements
 from sleeper_manager.decisions.lineup import AssignmentCandidate, maximum_weight_assignment
 from sleeper_manager.domain.eligibility import eligible_for_slot
 from sleeper_manager.domain.planning import GameOpportunity, TeamWeekState
@@ -7,6 +8,14 @@ from sleeper_manager.domain.planning import GameOpportunity, TeamWeekState
 
 def feasible_lock_slot_indices(state: TeamWeekState, game: GameOpportunity) -> frozenset[int]:
     """Allow active starter realignment, while preserving fixed slots and tipoff eligibility."""
+    if game.sleeper_player_id in state.reserve_player_ids:
+        return frozenset()
+    if any(row.player_id == game.sleeper_player_id for row in state.observed_starters):
+        return frozenset(
+            lock.slot_index
+            for target in executable_lock_placements(state, (game,))
+            for lock in target.locks
+        )
     slots = tuple(slot for slot in state.starter_slots if slot.index in state.open_slot_indices)
     active_by_player = {item.sleeper_player_id: item for item in state.active_opportunities}
     active = tuple(

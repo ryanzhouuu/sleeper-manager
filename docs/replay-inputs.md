@@ -172,8 +172,8 @@ not block an otherwise supported full replay. Original bundle coverage is preser
 standalone Lock-In diagnostics retain their embedded-projection requirements.
 Identity, outcome, membership, schedule, and unsupported-scoring failures still block.
 
-The default reference configuration is `full-advisor-replay-v5` with
-`weekly-planner-v5`: weekly planner and
+The default reference configuration is `full-advisor-replay-v6` with
+`weekly-planner-v6`: weekly planner and
 Lock-In policy each use 2,000 scenarios, seed 0, and tie tolerance 0.01; lineup moves use
 a ten-minute lead and the live balanced confidence threshold is 0.70. A run fails closed
 on blocked point-in-time projections, omitted or position-ineligible active starters,
@@ -213,3 +213,13 @@ Lock placement can restore a previously started player from the current bench an
 realign active starters to other eligible slots. Every active player and fixed slot
 must survive the assignment. Optional Lock evaluations wait when no placement can
 preserve all active starters; they retry when later replay events release capacity.
+
+The executor shares the coordinated team planner with live daily, pre-tipoff, and
+postgame runs. It applies pre-lock moves before accepting exact slots, retains
+recovery obligations between events, and records explicit trial forfeitures
+without reviving their eligibility. Future realized outcomes remain hidden until
+the corresponding finalization event. Later-week continuation values remain an
+approximation; replay results are required before claiming a scoring improvement.
+Planning cutoffs retain the weekly policy configuration; finalization triggers
+use the Lock-In configuration's sample count, seed, and tie tolerance for the
+whole coordinated decision, matching the live postgame workflow.

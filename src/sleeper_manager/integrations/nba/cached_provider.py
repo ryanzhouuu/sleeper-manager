@@ -112,11 +112,15 @@ class AsyncCachedNBAProvider:
         *,
         clock: Callable[[], datetime] | None = None,
         provider_name: str = "nba",
+        refresh_injuries: bool = False,
     ) -> None:
+        """Refresh injuries once per instance when collection owns a planning run."""
         self._inner = inner
         self._cache = cache
         self._clock = clock or (lambda: datetime.now(UTC))
         self._provider_name = provider_name
+        self._refresh_injuries = refresh_injuries
+        self._injury_result: ProviderResult[tuple[PlayerAvailability, ...]] | None = None
 
     async def scoreboard(self, game_date: date):  # type: ignore[no-untyped-def]
         return await self._inner.scoreboard(game_date)
@@ -143,12 +147,19 @@ class AsyncCachedNBAProvider:
         )
 
     async def injuries(self) -> ProviderResult[tuple[PlayerAvailability, ...]]:
-        return await self._through(
+        """Share fresh run-scoped evidence without renewing its retrieval timestamp."""
+        if self._refresh_injuries and self._injury_result is not None:
+            return self._injury_result
+        result = await self._through(
             "injuries",
             lambda: self._inner.injuries(),
             _encode_availability,
             _decode_availability,
+            refresh=self._refresh_injuries,
         )
+        if self._refresh_injuries:
+            self._injury_result = result
+        return result
 
     async def _through(
         self,
@@ -156,10 +167,13 @@ class AsyncCachedNBAProvider:
         fetch: Callable[[], Awaitable[ProviderResult[tuple[RecordT, ...]]]],
         encode: Callable[[tuple[RecordT, ...]], list[dict[str, Any]]],
         decode: Callable[[list[dict[str, Any]]], tuple[RecordT, ...]],
+        *,
+        refresh: bool = False,
     ) -> ProviderResult[tuple[RecordT, ...]]:
+        """Bypass stored evidence on refresh and persist the provider's original metadata."""
         now = self._clock()
         cache_key = f"{self._provider_name}:{resource_key}"
-        cached = await self._cache.get(cache_key, now=now)
+        cached = None if refresh else await self._cache.get(cache_key, now=now)
         if cached is not None and cached.quality in {
             DataQualityState.FRESH,
             DataQualityState.PARTIAL,

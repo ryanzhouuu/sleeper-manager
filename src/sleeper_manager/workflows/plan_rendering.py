@@ -3,14 +3,22 @@
 import json
 import re
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime, tzinfo
 from typing import Literal
 
+from sleeper_manager.domain.lock_in import LockInDecisionKind
 from sleeper_manager.domain.planning import (
     PlanningReasonCode,
     PlanStatus,
     WeeklyPlan,
+)
+from sleeper_manager.workflows.recommendation_context import (
+    full_recommendation_context,
+    score_action_phrases,
+)
+from sleeper_manager.workflows.recommendation_context import (
+    slot_labels as _slot_labels,
 )
 
 WEEKLY_LINEUP_DECISION_TYPE = "weekly_lineup"
@@ -43,9 +51,16 @@ _REASON_PHRASES = {
     PlanningReasonCode.AMBIGUOUS_ELIGIBILITY: "slot eligibility is uncertain",
     PlanningReasonCode.STALE_SLEEPER_STATE: "Sleeper state may be stale",
     PlanningReasonCode.STALE_NBA_STATE: "NBA provider data is unavailable or may be stale",
+    PlanningReasonCode.INJURY_DATA_UNAVAILABLE: "injury updates are unavailable",
     PlanningReasonCode.ACKNOWLEDGEMENT_CONFLICT: "acknowledged decisions conflict",
     PlanningReasonCode.AMBIGUOUS_EVENT_ORDER: "event ordering is ambiguous",
     PlanningReasonCode.DEADLINE_ELAPSED: "the lineup deadline has passed",
+    PlanningReasonCode.RECOVERY_WINDOW_CLOSED: (
+        "an earlier recovery window closed; its later-game chance is no longer assumed"
+    ),
+    PlanningReasonCode.LOW_CONFIDENCE: "the joint decision did not meet the confidence threshold",
+    PlanningReasonCode.SEARCH_LIMIT: "the planner reached its bounded search limit",
+    PlanningReasonCode.MISSING_TIPOFF_EVIDENCE: "past starter eligibility could not be verified",
 }
 
 
@@ -61,21 +76,27 @@ def render_weekly_plan(
     player_names: Mapping[str, str] | None = None,
     local_timezone: tzinfo | None = None,
 ) -> RenderedPlanNotification:
-    title = _TITLES[plan.status]
+    title = "Lock-In team recommendation" if plan.score_actions else _TITLES[plan.status]
     # Blocked plans suppress instructions even when they retain moves.
     actionable = plan.status in (PlanStatus.ACTION_REQUIRED, PlanStatus.DEGRADED) and bool(
-        plan.moves
+        plan.moves or plan.score_actions
     )
     if not actionable:
         return RenderedPlanNotification(
             title=title,
-            message=_join_sections("\n\n", _static_message(plan), _value_clause(plan)),
+            message=_join_sections(
+                "\n\n",
+                _static_message(plan),
+                _value_clause(plan),
+                full_recommendation_context(plan, player_names, local_timezone),
+            ),
         )
     sections = (
         _imperative(plan, player_names),
         _value_clause(plan),
         _schedule_clause(plan, local_timezone),
         _risk_clause(plan),
+        full_recommendation_context(plan, player_names, local_timezone),
         _deadline_clause(plan, local_timezone),
     )
     return RenderedPlanNotification(
@@ -114,8 +135,10 @@ def _imperative(
     player_names: Mapping[str, str] | None,
 ) -> str:
     labels = _slot_labels(plan)
-    phrases = []
-    for move in plan.moves:
+    phrases = score_action_phrases(plan, player_names, LockInDecisionKind.PASS)
+    for index, move in enumerate(plan.moves):
+        if index == plan.pre_lock_move_count:
+            phrases.extend(score_action_phrases(plan, player_names, LockInDecisionKind.LOCK))
         name = _player_name(move.player_id, player_names)
         source = labels.get(move.source_slot_index) if move.source_slot_index is not None else None
         target = labels.get(move.target_slot_index) if move.target_slot_index is not None else None
@@ -128,6 +151,8 @@ def _imperative(
             phrases.append(f"Move {name} to the bench.")
         else:
             phrases.append(f"Move {name} from {source} to {target}.")
+    if plan.pre_lock_move_count == len(plan.moves):
+        phrases.extend(score_action_phrases(plan, player_names, LockInDecisionKind.LOCK))
     return " ".join(phrases)
 
 
@@ -184,7 +209,9 @@ def _approximation_clause(plan: WeeklyPlan) -> str:
 
 
 def _deadline_clause(plan: WeeklyPlan, local_timezone: tzinfo | None) -> str:
-    deadlines = [move.deadline for move in plan.moves]
+    deadlines = [move.deadline for move in plan.moves] + [
+        action.deadline for action in plan.score_actions
+    ]
     if not deadlines:
         return ""
     moment = min(deadlines).astimezone(local_timezone or plan.decision_time.tzinfo)
@@ -224,25 +251,6 @@ def _schedule_clause(plan: WeeklyPlan, local_timezone: tzinfo | None) -> str:
     return "\n".join(lines)
 
 
-def _slot_labels(plan: WeeklyPlan) -> dict[int, str]:
-    positions = {
-        assignment.slot_index: assignment.slot_position for assignment in plan.desired_assignments
-    }
-    counts: dict[str, int] = {}
-    for position in positions.values():
-        counts[position] = counts.get(position, 0) + 1
-    ordinals: dict[str, int] = {}
-    labels: dict[int, str] = {}
-    for index in sorted(positions):
-        position = positions[index]
-        if counts[position] > 1:
-            ordinals[position] = ordinals.get(position, 0) + 1
-            labels[index] = f"{position} {ordinals[position]}"
-        else:
-            labels[index] = position
-    return labels
-
-
 def _player_name(player_id: str, names: Mapping[str, str] | None) -> str:
     if names is None:
         return player_id
@@ -252,10 +260,33 @@ def _player_name(player_id: str, names: Mapping[str, str] | None) -> str:
 def serialize_weekly_plan_trace(
     plan: WeeklyPlan,
     *,
-    trigger: Literal["daily", "pre_tipoff"] | None = None,
+    trigger: Literal["daily", "pre_tipoff", "postgame"] | None = None,
 ) -> str:
     payload: dict[str, object] = {
-        "schema_version": 2,
+        "schema_version": 3,
+        "league_id": plan.league_id,
+        "season": plan.season,
+        "week": plan.week,
+        "roster_id": plan.roster_id,
+        "score_actions": [asdict(row) for row in plan.score_actions],
+        "pre_lock_move_count": plan.pre_lock_move_count,
+        "passes_before_moves": True,
+        "recovery_obligations": [
+            {
+                **asdict(row),
+                "recovery_id": row.recovery_id,
+                "displaced_players": sorted(
+                    {item.player_id for item in row.baseline_assignments if item.player_id}
+                    - {item.player_id for item in row.attempt_assignments if item.player_id}
+                ),
+                "proof": "executable_combined_recovery",
+                "opportunity_count": len(row.added_player_games),
+            }
+            for row in plan.recovery_obligations
+        ],
+        "forfeited_opportunities": plan.forfeited_opportunities,
+        "recovery_failures": plan.recovery_failures,
+        "bench_player_ids": plan.bench_player_ids,
         "kind": WEEKLY_LINEUP_DECISION_TYPE,
         "plan_id": plan.plan_id,
         "material_hash": plan.material_hash,
@@ -351,7 +382,9 @@ def serialize_weekly_plan_trace(
             "postgame_scenario_count": plan.distribution_summary.postgame_scenario_count,
             "minimum_lock_in_confidence": plan.distribution_summary.minimum_lock_in_confidence,
         }
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), default=lambda value: value.isoformat()
+    )
 
 
 __all__ = (

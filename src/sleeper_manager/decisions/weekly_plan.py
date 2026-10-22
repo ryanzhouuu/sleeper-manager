@@ -46,6 +46,7 @@ def build_weekly_plan(
     lead_time: timedelta = DEFAULT_MOVE_LEAD_TIME,
     policy: WeeklyPlanPolicyConfig | None = None,
     planner_version: str = WEEKLY_PLANNER_VERSION,
+    _decision: WeeklyPlanDecision | None = None,
 ) -> WeeklyPlan:
     """Build the next executable lineup plan from validated team-week state.
 
@@ -88,7 +89,7 @@ def build_weekly_plan(
         )
 
     try:
-        decision = score_weekly_options(state, config=policy_config)
+        decision = _decision or score_weekly_options(state, config=policy_config)
         desired_players = {
             assignment.slot_index: assignment.player_id
             for assignment in decision.selected.assignments
@@ -96,13 +97,17 @@ def build_weekly_plan(
         desired_players.update({fixed.slot_index: fixed.player_id for fixed in state.fixed_slots})
         desired_view = _ordered_view(slot_positions, desired_players)
         moves = plan_moves(state, desired_view, batch[0].scheduled_start, lead_time)
-    except WeeklyPlanError:
+    except WeeklyPlanError as error:
         return _static_plan(
             state,
             observed_view,
             slot_positions,
             PlanStatus.BLOCKED,
-            (PlanningReasonCode.ROSTER_STATE_MISMATCH,),
+            (
+                PlanningReasonCode.SEARCH_LIMIT
+                if "limit" in str(error).lower()
+                else PlanningReasonCode.ROSTER_STATE_MISMATCH,
+            ),
             planner_version,
         )
 
@@ -159,6 +164,9 @@ def build_weekly_plan(
         freshness=state.freshness,
         warnings=state.warnings,
         blocking_reasons=blocking_reasons,
+        recovery_obligations=decision.selected.recovery_obligations,
+        recovery_failures=state.recovery_failures,
+        forfeited_opportunities=state.recovery_forfeitures,
     )
 
 
@@ -173,8 +181,9 @@ def _static_plan(
     """Preserve observed and fixed assignments when optimization cannot run."""
 
     observed_players = {assignment.slot_index: assignment.player_id for assignment in observed_view}
-    for fixed in state.fixed_slots:
-        observed_players[fixed.slot_index] = fixed.player_id
+    if status is not PlanStatus.BLOCKED:
+        for fixed in state.fixed_slots:
+            observed_players[fixed.slot_index] = fixed.player_id
     return WeeklyPlan(
         league_id=state.league_id,
         season=state.season,
@@ -197,6 +206,8 @@ def _static_plan(
         freshness=state.freshness,
         warnings=state.warnings,
         blocking_reasons=state.blocking_reasons + extra_blocking,
+        recovery_obligations=state.recovery_obligations,
+        recovery_failures=state.recovery_failures,
     )
 
 

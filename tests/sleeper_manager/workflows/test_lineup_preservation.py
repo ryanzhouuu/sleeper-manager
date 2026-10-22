@@ -91,7 +91,7 @@ def test_preserved_lineup_is_persisted_without_a_bench_notification(
         assert trace["moves"] == []
         assert trace["desired_assignments"] == trace["observed_assignments"]
         assert {item["player_id"] for item in trace["desired_assignments"]} == {"p1", "p2"}
-        assert trace["planner_version"] == "weekly-planner-v5"
+        assert trace["planner_version"] == "weekly-planner-v6"
         assert "bench" not in result.recommendation.message.casefold()
 
     asyncio.run(exercise())

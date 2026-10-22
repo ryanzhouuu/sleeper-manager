@@ -113,7 +113,7 @@ def test_schedule_provider_failure_blocks_planning() -> None:
     assert state.opportunities == ()
 
 
-def test_injury_provider_failure_blocks_planning() -> None:
+def test_injury_provider_failure_warns_without_blocking_planning() -> None:
     nba = _nba()
     nba.injury_failure = True
 
@@ -122,7 +122,9 @@ def test_injury_provider_failure_blocks_planning() -> None:
 
     evidence = asyncio_run(run())
     state = build_live_team_week_state(evidence.inputs, decision_time=evidence.decision_time)
-    assert PlanningReasonCode.STALE_NBA_STATE in state.blocking_reasons
+    assert not state.is_blocked
+    assert [reason.value for reason in state.warnings] == ["injury_data_unavailable"]
+    assert all(opportunity.availability_status == "unknown" for opportunity in state.opportunities)
 
 
 def test_missing_catalog_player_stays_unresolved() -> None:

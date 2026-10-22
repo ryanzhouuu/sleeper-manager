@@ -57,7 +57,7 @@ def test_full_bench_substitution_delivers_one_swap(tmp_path: Path, trigger: str)
             == "Swap Incoming (bench) and Outgoing (PG)."
         )
         trace = json.loads(result.recommendation.trace_json)
-        assert trace["schema_version"] == 2
+        assert trace["schema_version"] == 3
         assert trace["trigger"] == trigger
         assert len(trace["moves"]) == 1
         assert trace["moves"][0]["kind"] == "swap"

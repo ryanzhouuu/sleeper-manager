@@ -66,11 +66,22 @@ An active starter must not be treated as locked, but a lineup update must not si
   a bench occupant beyond the observed count. IR players are excluded from swaps.
 - Move search checks at most 10,000 distinct lineup states per candidate. A
   candidate that exceeds that limit is excluded without emitting instructions.
+- A recoverable extra attempt may be explicitly forfeited only by a named
+  recovery obligation. Ordinary active starters and accepted locks retain their
+  existing protections. Unknown bench capacity permits verified atomic swaps,
+  without assuming additional temporary bench space.
 
-Weekly lineup decision traces use schema version 2. Each entry in `moves` includes
+Weekly lineup decision traces use schema version 3. Each entry in `moves` includes
 `kind` (`move` or `swap`) and `swap_player_id` (null for a one-player move). For a
 swap, the named players exchange `source_slot_index` and `target_slot_index`;
-null denotes the bench. The entire exchange takes effect in one action.
+null denotes the bench. The entire exchange takes effect in one action. Schema 3 also records proposed
+score actions, pre-lock move ordering, the complete bench, named recovery
+obligations, and any recommended forfeitures. Schema 2 records remain readable;
+they do not establish recovery provenance. Joint completed-score search admits at
+most 4,096 placements and explores at most 100,000 placement combinations. A search
+limit produces a blocked result with a complete observed roster view. Known scores
+and upcoming starts share at most 256 distinct continuation states and paired
+scenario draws, so the two decisions use the same value model.
 
 ### Adding a free agent or waiver player
 
@@ -81,6 +92,10 @@ You cannot add a player and receive points from a game they played before joinin
 A player's new fantasy team can earn points only from games played after the trade. Scores from games before the trade stay with the original fantasy team.
 
 **Example:** If Team A locks in James Harden's score and then trades him to Team B, that week's locked-in points remain with Team A.
+
+Observing a player's final eligible game before week end does not prove the player
+is locked. The planner can still compare that score with a legal replacement;
+accepted positions require confirmation.
 
 ## If you do not lock in a game
 

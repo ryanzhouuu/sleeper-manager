@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import datetime, timedelta
 from hashlib import sha256
@@ -27,11 +28,8 @@ from sleeper_manager.workflows.planning_inputs import (
     PlayerEligibilityEvidence,
     ResolvedPlayerIdentity,
 )
-from sleeper_manager.workflows.postgame_lock_in import (
-    DirectGameSummarySource,
-    summary_fingerprint,
-    summary_wait_reason,
-)
+from sleeper_manager.workflows.postgame_observations import summary_fingerprint, summary_wait_reason
+from sleeper_manager.workflows.postgame_types import DirectGameSummarySource
 
 _POSTGAME_INITIAL_DELAY = timedelta(hours=2)
 
@@ -237,6 +235,9 @@ def _opportunity_record(
         rostered_at_tipoff=rostered,
         roster_evidence_at=evidence_at,
         league_configuration_fingerprint=inputs.league_profile.configuration_fingerprint,
+        trace_json=json.dumps(
+            {"observed_starter": listed_as_starter, "observed_at": snapshot_at.isoformat()}
+        ),
     )
 
 
@@ -287,6 +288,31 @@ def _merge_planning_evidence(
         current.league_configuration_fingerprint is not None
         and current.league_configuration_fingerprint != candidate.league_configuration_fingerprint
     )
+    current_trace = json.loads(current.trace_json)
+    candidate_trace = json.loads(candidate.trace_json)
+    retained_loss = current_trace.get(
+        "eligibility_forfeited",
+        current.status is LockInOpportunityStatus.INELIGIBLE
+        and current.updated_at >= current.scheduled_start,
+    )
+    begun = (
+        current.status in {LockInOpportunityStatus.ACTIVE, LockInOpportunityStatus.FINALIZING}
+        or candidate.status in {LockInOpportunityStatus.ACTIVE, LockInOpportunityStatus.FINALIZING}
+        or current.current_observed_score is not None
+        or current.stable_score is not None
+    )
+    forfeited = retained_loss is True or (
+        datetime.fromisoformat(candidate_trace.get("observed_at", candidate.updated_at.isoformat()))
+        >= current.scheduled_start
+        and candidate_trace.get("observed_starter") is False
+        and begun
+        and current.status
+        not in {
+            LockInOpportunityStatus.ACKNOWLEDGED_LOCKED,
+            LockInOpportunityStatus.ACKNOWLEDGED_PASSED,
+            LockInOpportunityStatus.AUTOMATIC_FINAL,
+        }
+    )
     return replace(
         current,
         provider_player_id=candidate.provider_player_id,
@@ -294,13 +320,21 @@ def _merge_planning_evidence(
         action_deadline=candidate.action_deadline,
         fantasy_week_end=candidate.fantasy_week_end,
         status=(
-            LockInOpportunityStatus.RECONCILIATION_REQUIRED
+            LockInOpportunityStatus.INELIGIBLE
+            if forfeited
+            else LockInOpportunityStatus.RECONCILIATION_REQUIRED
             if league_changed
+            else candidate.status
+            if candidate.status is LockInOpportunityStatus.RECONCILIATION_REQUIRED and not advanced
             else current.status
             if current.status is LockInOpportunityStatus.INELIGIBLE
             and candidate.roster_evidence_at is None
             else current.status
             if advanced
+            or (
+                current.status is LockInOpportunityStatus.ACTIVE
+                and candidate.status is LockInOpportunityStatus.SCHEDULED
+            )
             else candidate.status
         ),
         next_check_at=(current.next_check_at if advanced else candidate.next_check_at),
@@ -317,6 +351,7 @@ def _merge_planning_evidence(
         ),
         league_configuration_fingerprint=candidate.league_configuration_fingerprint,
         updated_at=candidate.updated_at,
+        trace_json=json.dumps({**current_trace, "eligibility_forfeited": forfeited}),
     )
 
 

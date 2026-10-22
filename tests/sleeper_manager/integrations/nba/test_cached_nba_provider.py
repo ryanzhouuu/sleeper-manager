@@ -232,3 +232,47 @@ def test_async_cache_hits_and_expired_refresh_are_fail_closed(tmp_path) -> None:
             await stale_provider.injuries()
 
     run(exercise())
+
+
+def test_run_scoped_injuries_bypass_stored_cache_and_share_one_fetch(tmp_path: Path) -> None:
+    async def exercise() -> None:
+        repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
+        await repository.initialize()
+        inner = _CountingNBA()
+        await AsyncCachedNBAProvider(inner, repository, clock=lambda: NOW).injuries()
+        later = NOW + timedelta(minutes=16)
+        provider = AsyncCachedNBAProvider(
+            inner, repository, clock=lambda: later, refresh_injuries=True
+        )
+
+        first = await provider.injuries()
+        second = await provider.injuries()
+
+        assert inner.injury_calls == 2
+        assert first is second
+        assert first.quality.retrieved_at == NOW
+        assert first.records[0].source.retrieved_at == NOW
+        stored = await repository.get("nba:injuries", now=later)
+        assert stored is not None
+        assert stored.retrieved_at == NOW
+
+    run(exercise())
+
+
+def test_run_scoped_injury_failure_does_not_fall_back_to_valid_cache(tmp_path: Path) -> None:
+    async def exercise() -> None:
+        repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
+        await repository.initialize()
+        inner = _CountingNBA()
+        await AsyncCachedNBAProvider(inner, repository, clock=lambda: NOW).injuries()
+        inner.injury_error = RuntimeError("injury endpoint unavailable")
+        provider = AsyncCachedNBAProvider(
+            inner, repository, clock=lambda: NOW, refresh_injuries=True
+        )
+
+        with pytest.raises(RuntimeError, match="injury endpoint unavailable"):
+            await provider.injuries()
+
+        assert inner.injury_calls == 2
+
+    run(exercise())

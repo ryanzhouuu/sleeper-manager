@@ -20,7 +20,7 @@ from sleeper_manager.domain.lock_in import LockInEvaluation
 from sleeper_manager.domain.planning import WeeklyPlan
 from sleeper_manager.persistence.forecast_repository import ForecastArchiveRepository
 
-FULL_ADVISOR_EXECUTOR_VERSION = "full-advisor-replay-v5"
+FULL_ADVISOR_EXECUTOR_VERSION = "full-advisor-replay-v6"
 
 
 class FullAdvisorReplayError(ValueError):

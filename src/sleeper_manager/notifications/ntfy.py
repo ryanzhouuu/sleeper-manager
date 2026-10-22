@@ -1,8 +1,11 @@
+"""Keep complete advice and paired confirmations within ntfy message and action limits."""
+
 from typing import Any
 
 import httpx
 
 from sleeper_manager.notifications.base import Notification
+from sleeper_manager.notifications.parts import ntfy_parts
 
 
 class NtfySender:
@@ -30,6 +33,11 @@ class NtfySender:
             await self._client.aclose()
 
     async def send(self, notification: Notification) -> None:
+        """Report success only after the complete set of parts has been accepted."""
+        for part in ntfy_parts(notification):
+            await self._send_part(part)
+
+    async def _send_part(self, notification: Notification) -> None:
         payload: dict[str, Any] = {
             "topic": self._topic,
             "title": notification.title,

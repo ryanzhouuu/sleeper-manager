@@ -23,6 +23,7 @@ from sleeper_manager.persistence.lock_in_statements import (
     LIST_ACKNOWLEDGED_LOCK_IN_OPPORTUNITIES_SQL,
     LIST_ACTIONABLE_LOCK_IN_OPPORTUNITIES_SQL,
     LIST_DUE_LOCK_IN_OPPORTUNITIES_SQL,
+    LIST_WEEK_LOCK_IN_OPPORTUNITIES_SQL,
     LOAD_LOCK_IN_OPPORTUNITY_SQL,
     RECORD_LOCK_IN_OBSERVATION_SQL,
     UPDATE_LOCK_IN_OPPORTUNITY_SQL,
@@ -158,6 +159,13 @@ class D1LockInOpportunityMixin:
             league_id,
             fantasy_week,
         )
+        return tuple(lock_in_opportunity_from_mapping(self._mapping(row)) for row in rows)
+
+    async def list_week_lock_in_opportunities(
+        self, league_id: str, fantasy_week: int
+    ) -> tuple[LockInOpportunityRecord, ...]:
+        """Retain eligibility and stable scores independently of recommendation status."""
+        rows = await self._all(LIST_WEEK_LOCK_IN_OPPORTUNITIES_SQL, league_id, fantasy_week)
         return tuple(lock_in_opportunity_from_mapping(self._mapping(row)) for row in rows)
 
 

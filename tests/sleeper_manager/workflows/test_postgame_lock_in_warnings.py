@@ -298,8 +298,8 @@ def test_scoring_bonuses_and_dnps_use_discovered_policy(tmp_path) -> None:  # ty
     asyncio.run(exercise())
 
 
-def test_final_eligible_game_is_automatic_without_notification(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """Persist the last eligible score without sending Lock or Pass advice."""
+def test_final_eligible_game_remains_a_choice_until_confirmed(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """A final game remains discardable; observing it does not prove acceptance."""
 
     async def exercise() -> None:
         repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
@@ -352,10 +352,10 @@ def test_final_eligible_game_is_automatic_without_notification(tmp_path) -> None
         stored = await repository.get_lock_in_opportunity(
             LockInOpportunityKey("league-1", 1, 1, "p1", "g1")
         )
-        assert result.outcome == "automatic_final"
+        assert result.outcome == "notified"
         assert stored is not None
-        assert stored.status is LockInOpportunityStatus.AUTOMATIC_FINAL
+        assert stored.status is LockInOpportunityStatus.ACTIONABLE
         assert stored.stable_score == 20.0
-        assert sender.messages == []
+        assert len(sender.messages) == 1
 
     asyncio.run(exercise())

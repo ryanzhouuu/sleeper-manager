@@ -3,6 +3,7 @@
 from dataclasses import replace
 from datetime import timedelta
 
+from sleeper_manager.decisions._weekly_plan_inputs import protected_performances
 from sleeper_manager.decisions._weekly_plan_models import WeeklyPlanError
 from sleeper_manager.decisions._weekly_plan_moves import plan_moves
 from sleeper_manager.decisions.lineup import (
@@ -108,7 +109,7 @@ def complete_assignment(
         )
         filled = tuple(replace(item, score=0.0) for item in matched.assignments)
     completed = tuple(sorted((*placed.values(), *filled), key=lambda item: item.slot_index))
-    active_players = {item.sleeper_player_id for item in state.active_opportunities}
+    active_players = {item.sleeper_player_id for item in protected_performances(state)}
     protected = {
         starter.player_id
         for starter in state.observed_starters

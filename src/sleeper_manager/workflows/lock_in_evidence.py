@@ -23,6 +23,11 @@ def evidence_from_lock_in_opportunity(
             decided_at=record.acknowledged_at or record.updated_at,
             provenance=LOCK_IN_OPPORTUNITY_PROVENANCE,
         )
+    if (
+        record.status is LockInOpportunityStatus.AUTOMATIC_FINAL
+        and record.updated_at < record.fantasy_week_end
+    ):
+        return None
     if record.status in {
         LockInOpportunityStatus.ACKNOWLEDGED_LOCKED,
         LockInOpportunityStatus.AUTOMATIC_FINAL,

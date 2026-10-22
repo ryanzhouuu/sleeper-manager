@@ -144,6 +144,12 @@ WHERE league_id = ? AND fantasy_week = ?
 ORDER BY roster_id, player_id, scheduled_start, game_id
 """
 
+LIST_WEEK_LOCK_IN_OPPORTUNITIES_SQL = f"""
+SELECT {LOCK_IN_OPPORTUNITY_COLUMNS} FROM lock_in_opportunities
+WHERE league_id = ? AND fantasy_week = ?
+ORDER BY roster_id, player_id, scheduled_start, game_id
+"""
+
 HAS_OPEN_LOCK_IN_WATCH_SQL = """
 SELECT 1 FROM lock_in_opportunities
 WHERE game_id = ? AND action_deadline > ?
@@ -155,8 +161,26 @@ CONSUME_LOCK_IN_OPPORTUNITY_SQL = """
 UPDATE lock_in_opportunities SET
     status = CASE WHEN ? = 'locked' THEN 'acknowledged_locked' ELSE 'acknowledged_passed' END,
     acknowledged_action = ?,
+    slot_index = CASE WHEN (
+        SELECT acknowledged_action FROM recommendations
+        WHERE recommendation_id = current_recommendation_id
+    ) = 'locked' THEN COALESCE((
+        SELECT json_extract(trace_json, '$.acknowledgement.slot_index') FROM recommendations
+        WHERE recommendation_id = current_recommendation_id
+    ), slot_index) ELSE slot_index END,
+    slot_position = CASE WHEN (
+        SELECT acknowledged_action FROM recommendations
+        WHERE recommendation_id = current_recommendation_id
+    ) = 'locked' THEN COALESCE((
+        SELECT json_extract(trace_json, '$.acknowledgement.slot_position') FROM recommendations
+        WHERE recommendation_id = current_recommendation_id
+    ), slot_position) ELSE slot_position END,
     acknowledged_at = ?,
     updated_at = ?,
     row_version = row_version + 1
 WHERE current_recommendation_id = ? AND status = 'actionable'
+  AND EXISTS (
+      SELECT 1 FROM recommendations r
+      WHERE r.recommendation_id = current_recommendation_id AND r.status = 'acknowledged'
+  )
 """

@@ -4,7 +4,8 @@ from collections import defaultdict
 from collections.abc import Mapping
 from datetime import datetime, tzinfo
 
-from sleeper_manager.domain.planning import TeamWeekState
+from sleeper_manager.domain.planning import PlanningReasonCode, TeamWeekState
+from sleeper_manager.workflows.availability_advice import INJURY_DATA_UNAVAILABLE_NOTE
 
 _MISSING_REPORT = "The team has not submitted a game report; participation remains provisional."
 _UNCERTAINTY_LABELS = {
@@ -51,6 +52,8 @@ def state_availability_summary(
 
     names = player_names or {}
     lines: list[str] = []
+    if PlanningReasonCode.INJURY_DATA_UNAVAILABLE in state.warnings:
+        lines.append(f"• {INJURY_DATA_UNAVAILABLE_NOTE}")
     for (start, label), players in sorted(groups.items()):
         moment = start.astimezone(local_timezone or state.decision_time.tzinfo)
         hour = moment.hour % 12 or 12
