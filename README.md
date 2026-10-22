@@ -109,6 +109,12 @@ continuation. Search limits or uncertain evidence can make advice or totals
 unavailable. These changes do not claim a weekly scoring improvement or automatic
 lock detection.
 
+Large deliveries use ordered message parts to preserve the whole
+recommendation and its confirmations within [Discord's content limit](https://docs.discord.com/developers/resources/webhook#execute-webhook)
+and [ntfy's message/action limits](https://docs.ntfy.sh/publish/#limitations).
+Unchanged successful deliveries stay quiet. A failed multipart delivery retries
+as a whole, so already received parts can repeat after a partial transport failure.
+
 Lineup and Lock/Pass messages show the expected weekly team total assuming the
 recommendation is followed, including locked scores and modeled remaining slots.
 Lineups show the change versus the current lineup; Lock/Pass messages show the other
