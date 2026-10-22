@@ -52,9 +52,11 @@ forecast archive checks, and the local `run-scheduled` command.
 
 ## HTTP
 
-`GET /health` returns `{"status": "ok"}`. `GET /ack` consumes a notification action
-token. `GET /home` returns the public roster, matchup, games, and weekly recommendation
-document. `/home` does not accept credentials and its body omits ids, tokens, and secrets.
+`GET /health` returns `{"status": "ok"}`. `GET /ack` displays a confirmation form
+without changing state. A same-origin `POST /ack` records the action only after an
+explicit submission. `GET /home` returns the public roster, matchup, games, and
+weekly recommendation document. `/home` does not accept credentials and its body
+omits ids, tokens, and secrets.
 
 Python Workers require the `python_workers` compatibility flag and are currently
 in beta. Use `uvx --from workers-py pywrangler dev` for local Worker development.

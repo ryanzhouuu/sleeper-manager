@@ -9,11 +9,12 @@ import json
 from datetime import UTC, datetime
 from urllib.parse import parse_qs, urlparse
 
+from sleeper_manager.cloudflare.confirmation import confirmation
 from sleeper_manager.cloudflare.home import build_home
 from sleeper_manager.cloudflare.providers import CloudflareESPNProvider, CloudflareSleeperClient
-from sleeper_manager.cloudflare.routes import acknowledge
 from sleeper_manager.cloudflare.runtime import run_queued_planning, run_scheduled
 from sleeper_manager.persistence.d1 import D1StateRepository
+from sleeper_manager.persistence.manager_store import D1ManagerStore
 
 try:
     from workers import Response, fetch  # type: ignore[import-not-found]
@@ -24,8 +25,11 @@ except ImportError:  # pragma: no cover - the Workers SDK exists only in the dep
     class _FallbackResponse:
         """Local stand-in for Workers `Response` so route tests can read status and JSON."""
 
-        def __init__(self, body: object = None, status: int = 200) -> None:
+        def __init__(
+            self, body: object = None, status: int = 200, headers: dict[str, str] | None = None
+        ) -> None:
             self.body = body
+            self.headers = headers or {}
             self.status_code = status
             self.payload: object | None = None
 
@@ -56,7 +60,7 @@ def _env_value(env: object, name: str, default: str = "") -> str:
 
 
 class Default(_WorkerEntrypoint):  # type: ignore[misc]
-    """Workers SDK entry: home and acknowledgement HTTP plus the five-minute Cron."""
+    """Workers SDK entry: home and confirmation HTTP plus the five-minute Cron."""
 
     async def fetch(self, request):  # type: ignore[no-untyped-def]
         parsed = urlparse(request.url)
@@ -84,10 +88,13 @@ class Default(_WorkerEntrypoint):  # type: ignore[misc]
         if parsed.path != "/ack":
             return Response("Not found", status=404)
 
-        repository = D1StateRepository(self.env.sleeper_manager_state)
-        await repository.initialize()
-        result = await acknowledge(repository, _query_values(request.url))
-        return Response.json(result.payload, status=result.status_code)
+        form = await confirmation(
+            request,
+            D1ManagerStore(self.env.sleeper_manager_state),
+            _query_values(request.url),
+            now=datetime.now(UTC),
+        )
+        return Response(form.body, status=form.status, headers=form.headers)
 
     async def scheduled(self, controller, env, ctx):  # type: ignore[no-untyped-def]
         del env, ctx
