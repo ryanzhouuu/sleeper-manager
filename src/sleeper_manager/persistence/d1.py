@@ -38,6 +38,7 @@ from sleeper_manager.persistence.base import (
     ScheduledWorkRecord,
     ScheduledWorkStatus,
 )
+from sleeper_manager.persistence.d1_retry import retry_idempotent_d1_write
 from sleeper_manager.persistence.lock_in_d1 import D1LockInOpportunityMixin
 from sleeper_manager.persistence.lock_in_statements import CONSUME_LOCK_IN_OPPORTUNITY_SQL
 from sleeper_manager.persistence.rows import (
@@ -524,7 +525,9 @@ class D1StateRepository(D1LockInOpportunityMixin, AsyncRuntimeStateRepository):
             offset += page_size
         return tuple(records)
 
+    @retry_idempotent_d1_write
     async def upsert_scheduled_work(self, work: ScheduledWorkRecord) -> None:
+        """Repeat stable schedule upserts safely after an ambiguous transient failure."""
         await self._run(UPSERT_SCHEDULED_WORK_SQL, *scheduled_work_values(work))
 
     async def claim_due_work(
