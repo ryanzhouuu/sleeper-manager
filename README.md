@@ -88,6 +88,10 @@ advice; hybrid advice requires an explicit selection and pinned history.
 Notifications group named availability warnings by status and game time, and count
 players with missing reports or unverified availability. Full player/game warnings
 remain in the stored recommendation trace.
+Retained player-game observations keep stable completed scores available for planning.
+Observed bench transitions permanently forfeit that performance; returning the player
+to a starting slot does not restore it. Locks and passes still require confirmations.
+
 Lineup and Lock/Pass messages show the expected weekly team total assuming the
 recommendation is followed, including locked scores and modeled remaining slots.
 Lineups show the change versus the current lineup; Lock/Pass messages show the other

@@ -76,6 +76,10 @@ class LockInOpportunityRepository(Protocol):
 
     def upsert_lock_in_opportunity(self, record: LockInOpportunityRecord) -> bool: ...
 
+    def list_week_lock_in_opportunities(
+        self, league_id: str, fantasy_week: int
+    ) -> tuple[LockInOpportunityRecord, ...]: ...
+
     def get_lock_in_opportunity(
         self, key: LockInOpportunityKey
     ) -> LockInOpportunityRecord | None: ...
@@ -116,6 +120,10 @@ class AsyncLockInOpportunityRepository(Protocol):
     """Async guarded persistence surface used by the Worker runtime."""
 
     async def upsert_lock_in_opportunity(self, record: LockInOpportunityRecord) -> bool: ...
+
+    async def list_week_lock_in_opportunities(
+        self, league_id: str, fantasy_week: int
+    ) -> tuple[LockInOpportunityRecord, ...]: ...
 
     async def get_lock_in_opportunity(
         self, key: LockInOpportunityKey

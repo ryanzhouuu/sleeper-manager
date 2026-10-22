@@ -33,9 +33,11 @@ from sleeper_manager.domain.planning import (
     StarterSlot,
     TeamWeekState,
 )
+from sleeper_manager.domain.player_game_evidence import PlayerGameEvidence
 from sleeper_manager.domain.projection import ProjectionSnapshot
 from sleeper_manager.domain.scoring import ScoringPolicy
 from sleeper_manager.projections.live_baseline import LiveProjectionTarget
+from sleeper_manager.workflows.planning_history import reconcile_player_games
 
 
 class LiveProjectionProvider(Protocol):
@@ -179,6 +181,7 @@ class LivePlanningInputs:
     availability_results: tuple[AvailabilityResourceResult, ...] = ()
     projections: tuple[LiveProjectionResult, ...] = ()
     acknowledgements: tuple[AcknowledgedDecisionEvidence, ...] = ()
+    player_game_evidence: tuple[PlayerGameEvidence, ...] = ()
     identity_quality_reports: tuple[DataQualityReport, ...] = ()
     catalog_version: str | None = None
     catalog_retrieved_at: datetime | None = None
@@ -288,6 +291,9 @@ def build_live_team_week_state(
                 )
             )
 
+    reconciled_games = reconcile_player_games(
+        opportunities, inputs.player_game_evidence, observed, decision_time
+    )
     fixed_slots, passed_opportunities = _acknowledgement_constraints(
         inputs.acknowledgements,
         opportunity_keys,
@@ -311,7 +317,7 @@ def build_live_team_week_state(
             bench_capacity=sum(slot.position == "BN" for slot in profile.roster_slots),
             reserve_player_ids=roster.reserve_ids if roster is not None else (),
             observed_starters=observed,
-            opportunities=tuple(opportunities),
+            opportunities=reconciled_games,
             fixed_slots=fixed_slots,
             passed_opportunities=passed_opportunities,
             scoring_policy_version=profile.scoring.version,

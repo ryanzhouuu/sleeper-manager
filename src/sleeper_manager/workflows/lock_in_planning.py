@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import datetime, timedelta
 from hashlib import sha256
@@ -237,6 +238,7 @@ def _opportunity_record(
         rostered_at_tipoff=rostered,
         roster_evidence_at=evidence_at,
         league_configuration_fingerprint=inputs.league_profile.configuration_fingerprint,
+        trace_json=json.dumps({"observed_starter": listed_as_starter}),
     )
 
 
@@ -287,6 +289,19 @@ def _merge_planning_evidence(
         current.league_configuration_fingerprint is not None
         and current.league_configuration_fingerprint != candidate.league_configuration_fingerprint
     )
+    forfeited = (
+        current.status is LockInOpportunityStatus.INELIGIBLE
+        and current.updated_at >= current.scheduled_start
+    ) or (
+        candidate.updated_at >= current.scheduled_start
+        and json.loads(candidate.trace_json).get("observed_starter") is False
+        and current.status
+        not in {
+            LockInOpportunityStatus.ACKNOWLEDGED_LOCKED,
+            LockInOpportunityStatus.ACKNOWLEDGED_PASSED,
+            LockInOpportunityStatus.AUTOMATIC_FINAL,
+        }
+    )
     return replace(
         current,
         provider_player_id=candidate.provider_player_id,
@@ -294,7 +309,9 @@ def _merge_planning_evidence(
         action_deadline=candidate.action_deadline,
         fantasy_week_end=candidate.fantasy_week_end,
         status=(
-            LockInOpportunityStatus.RECONCILIATION_REQUIRED
+            LockInOpportunityStatus.INELIGIBLE
+            if forfeited
+            else LockInOpportunityStatus.RECONCILIATION_REQUIRED
             if league_changed
             else current.status
             if current.status is LockInOpportunityStatus.INELIGIBLE

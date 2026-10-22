@@ -144,6 +144,12 @@ WHERE league_id = ? AND fantasy_week = ?
 ORDER BY roster_id, player_id, scheduled_start, game_id
 """
 
+LIST_WEEK_LOCK_IN_OPPORTUNITIES_SQL = f"""
+SELECT {LOCK_IN_OPPORTUNITY_COLUMNS} FROM lock_in_opportunities
+WHERE league_id = ? AND fantasy_week = ?
+ORDER BY roster_id, player_id, scheduled_start, game_id
+"""
+
 HAS_OPEN_LOCK_IN_WATCH_SQL = """
 SELECT 1 FROM lock_in_opportunities
 WHERE game_id = ? AND action_deadline > ?

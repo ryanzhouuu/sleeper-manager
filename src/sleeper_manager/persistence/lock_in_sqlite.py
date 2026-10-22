@@ -25,6 +25,7 @@ from sleeper_manager.persistence.lock_in_statements import (
     LIST_ACKNOWLEDGED_LOCK_IN_OPPORTUNITIES_SQL,
     LIST_ACTIONABLE_LOCK_IN_OPPORTUNITIES_SQL,
     LIST_DUE_LOCK_IN_OPPORTUNITIES_SQL,
+    LIST_WEEK_LOCK_IN_OPPORTUNITIES_SQL,
     LOAD_LOCK_IN_OPPORTUNITY_SQL,
     RECORD_LOCK_IN_OBSERVATION_SQL,
     UPDATE_LOCK_IN_OPPORTUNITY_SQL,
@@ -159,6 +160,16 @@ class SQLiteLockInOpportunityMixin:
             rows = connection.execute(
                 LIST_ACKNOWLEDGED_LOCK_IN_OPPORTUNITIES_SQL,
                 (league_id, fantasy_week),
+            ).fetchall()
+        return self._records(iter(rows))
+
+    def list_week_lock_in_opportunities(
+        self, league_id: str, fantasy_week: int
+    ) -> tuple[LockInOpportunityRecord, ...]:
+        """Retain eligibility and stable scores independently of recommendation status."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                LIST_WEEK_LOCK_IN_OPPORTUNITIES_SQL, (league_id, fantasy_week)
             ).fetchall()
         return self._records(iter(rows))
 
