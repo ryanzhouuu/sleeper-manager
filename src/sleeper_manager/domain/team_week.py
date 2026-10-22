@@ -10,6 +10,7 @@ from sleeper_manager.domain._planning_validation import (
     _require_unique,
 )
 from sleeper_manager.domain.eligibility import eligible_for_slot
+from sleeper_manager.domain.planning_actions import RecoveryObligation
 from sleeper_manager.domain.planning_evidence import (
     FixedSlot,
     FreshnessSummary,
@@ -51,8 +52,23 @@ class TeamWeekState:
     blocking_reasons: tuple[PlanningReasonCode, ...] = ()
     bench_capacity: int | None = None
     reserve_player_ids: tuple[str, ...] = ()
+    week_ends_at: datetime | None = None
+    recovery_obligations: tuple[RecoveryObligation, ...] = ()
+    recovery_forfeitures: tuple[tuple[str, str], ...] = ()
+    roster_eligibility: tuple[tuple[str, tuple[str, ...]], ...] = ()
 
     def __post_init__(self) -> None:
+        authorized = {
+            key for recovery in self.recovery_obligations for key in recovery.added_player_games
+        }
+        if not set(self.recovery_forfeitures) <= authorized:
+            raise PlanningStateError("Forfeitures require a named recovery obligation")
+        if {player for player, _ in self.recovery_forfeitures} & {
+            row.player_id for row in self.fixed_slots
+        }:
+            raise PlanningStateError("Recovery cannot forfeit accepted locks")
+        if self.week_ends_at is not None:
+            _require_aware(self.week_ends_at, "Fantasy-week end")
         _require_text(self.league_id, "League ID")
         _require_text(self.season, "Season")
         if self.week <= 0:

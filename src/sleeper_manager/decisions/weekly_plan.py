@@ -159,6 +159,8 @@ def build_weekly_plan(
         freshness=state.freshness,
         warnings=state.warnings,
         blocking_reasons=blocking_reasons,
+        recovery_obligations=decision.selected.recovery_obligations,
+        forfeited_opportunities=state.recovery_forfeitures,
     )
 
 
@@ -173,8 +175,9 @@ def _static_plan(
     """Preserve observed and fixed assignments when optimization cannot run."""
 
     observed_players = {assignment.slot_index: assignment.player_id for assignment in observed_view}
-    for fixed in state.fixed_slots:
-        observed_players[fixed.slot_index] = fixed.player_id
+    if status is not PlanStatus.BLOCKED:
+        for fixed in state.fixed_slots:
+            observed_players[fixed.slot_index] = fixed.player_id
     return WeeklyPlan(
         league_id=state.league_id,
         season=state.season,

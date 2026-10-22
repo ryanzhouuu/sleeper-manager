@@ -108,7 +108,11 @@ def complete_assignment(
         )
         filled = tuple(replace(item, score=0.0) for item in matched.assignments)
     completed = tuple(sorted((*placed.values(), *filled), key=lambda item: item.slot_index))
-    active_players = {item.sleeper_player_id for item in state.active_opportunities}
+    active_players = {
+        item.sleeper_player_id
+        for item in state.active_opportunities
+        if (item.sleeper_player_id, item.game_id) not in state.recovery_forfeitures
+    }
     protected = {
         starter.player_id
         for starter in state.observed_starters

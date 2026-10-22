@@ -66,6 +66,10 @@ An active starter must not be treated as locked, but a lineup update must not si
   a bench occupant beyond the observed count. IR players are excluded from swaps.
 - Move search checks at most 10,000 distinct lineup states per candidate. A
   candidate that exceeds that limit is excluded without emitting instructions.
+- A recoverable extra attempt may be explicitly forfeited only by a named
+  recovery obligation. Ordinary active starters and accepted locks retain their
+  existing protections. Unknown bench capacity permits verified atomic swaps,
+  without assuming additional temporary bench space.
 
 Weekly lineup decision traces use schema version 2. Each entry in `moves` includes
 `kind` (`move` or `swap`) and `swap_player_id` (null for a one-player move). For a

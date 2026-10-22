@@ -11,6 +11,7 @@ from enum import StrEnum
 from math import isfinite
 
 from sleeper_manager.decisions.lineup import SlotAssignment
+from sleeper_manager.domain.planning_actions import RecoveryObligation
 
 WEEKLY_PLANNER_VERSION = "weekly-planner-v5"
 DEFAULT_MOVE_LEAD_TIME = timedelta(minutes=10)
@@ -76,6 +77,7 @@ class WeeklyPlanOption:
     marginal_value: float
     move_count: int
     retained_observed_count: int
+    recovery_obligations: tuple[RecoveryObligation, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

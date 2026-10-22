@@ -11,6 +11,8 @@ from sleeper_manager.domain._planning_validation import (
     _require_text,
 )
 from sleeper_manager.domain.lineup_moves import LineupMove, apply_lineup_moves
+from sleeper_manager.domain.lock_in import LockInDecisionKind
+from sleeper_manager.domain.planning_actions import PlannedScoreAction, RecoveryObligation
 from sleeper_manager.domain.planning_evidence import (
     FixedSlot,
     FreshnessSummary,
@@ -53,6 +55,11 @@ class WeeklyPlan:
     freshness: FreshnessSummary = field(default_factory=FreshnessSummary)
     warnings: tuple[PlanningReasonCode, ...] = ()
     blocking_reasons: tuple[PlanningReasonCode, ...] = ()
+    score_actions: tuple[PlannedScoreAction, ...] = ()
+    pre_lock_move_count: int = 0
+    recovery_obligations: tuple[RecoveryObligation, ...] = ()
+    forfeited_opportunities: tuple[tuple[str, str], ...] = ()
+    bench_player_ids: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         _require_text(self.league_id, "Plan league ID")
@@ -100,12 +107,28 @@ class WeeklyPlan:
                     "Observed and desired assignments disagree on a slot position"
                 )
 
+        if not 0 <= self.pre_lock_move_count <= len(self.moves):
+            raise PlanningStateError("Pre-lock moves must be a prefix of the action sequence")
+        pre_lock = apply_lineup_moves(self.moves[: self.pre_lock_move_count], observed_players)
+        for action in self.score_actions:
+            if action.kind is LockInDecisionKind.LOCK:
+                assert action.slot_index is not None
+                if pre_lock.get(action.slot_index) != action.player_id:
+                    raise PlanningStateError("A proposed lock requires its exact pre-lock position")
+                if any(
+                    action.slot_index in (move.source_slot_index, move.target_slot_index)
+                    for move in self.moves[self.pre_lock_move_count :]
+                ):
+                    raise PlanningStateError("Later moves cannot relocate a proposed accepted lock")
         simulated = apply_lineup_moves(self.moves, observed_players)
         if simulated != desired_players:
             raise PlanningStateError("Lineup moves do not produce the desired assignment")
 
         for fixed in self.fixed_slots:
-            if desired_players.get(fixed.slot_index) != fixed.player_id:
+            if (
+                self.status is not PlanStatus.BLOCKED
+                and desired_players.get(fixed.slot_index) != fixed.player_id
+            ):
                 raise PlanningStateError("Desired assignment does not preserve a fixed slot")
 
         locked_indices = {fixed.slot_index for fixed in self.fixed_slots}
@@ -115,9 +138,9 @@ class WeeklyPlan:
 
         if (self.status is PlanStatus.BLOCKED) != bool(self.blocking_reasons):
             raise PlanningStateError("Blocked plans require blocking reasons and vice versa")
-        if self.status is PlanStatus.NO_ACTION and self.moves:
+        if self.status is PlanStatus.NO_ACTION and (self.moves or self.score_actions):
             raise PlanningStateError("No-action plans cannot contain moves")
-        if self.status is PlanStatus.ACTION_REQUIRED and not self.moves:
+        if self.status is PlanStatus.ACTION_REQUIRED and not (self.moves or self.score_actions):
             raise PlanningStateError("Actionable plans require moves")
         if self.status is not PlanStatus.BLOCKED:
             for move in self.moves:
@@ -141,7 +164,24 @@ class WeeklyPlan:
 
     def _material_components(self) -> tuple[object, ...]:
         return (
-            "weekly-plan-material-v2",
+            "weekly-plan-material-v3",
+            self.desired_assignments,
+            tuple(
+                (
+                    row.player_id,
+                    row.game_id,
+                    row.kind.value,
+                    row.slot_index,
+                    row.slot_position,
+                    row.score,
+                    row.deadline,
+                )
+                for row in self.score_actions
+            ),
+            tuple(row.recovery_id for row in self.recovery_obligations),
+            self.forfeited_opportunities,
+            self.bench_player_ids,
+            tuple((row.player_id, row.game_id) for row in self.passed_opportunities),
             self.league_id,
             self.season,
             self.week,
@@ -159,7 +199,8 @@ class WeeklyPlan:
             ),
             tuple(
                 sorted(
-                    (fixed.slot_index, fixed.player_id, fixed.game_id) for fixed in self.fixed_slots
+                    (fixed.slot_index, fixed.player_id, fixed.game_id, fixed.accepted_fantasy_score)
+                    for fixed in self.fixed_slots
                 )
             ),
             self.planner_version,

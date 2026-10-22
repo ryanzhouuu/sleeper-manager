@@ -42,7 +42,8 @@ def plan_moves(
     locked_players = set(fixed.values())
     if any(observed.get(index) != player for index, player in fixed.items()):
         raise WeeklyPlanError("Observed lineup does not preserve a fixed player")
-    positions = {item.player_id: item.eligible_positions for item in state.observed_starters}
+    positions = dict(state.roster_eligibility)
+    positions.update({item.player_id: item.eligible_positions for item in state.observed_starters})
     for opportunity in state.opportunities:
         positions.setdefault(opportunity.sleeper_player_id, opportunity.eligible_positions)
     eligible = {
@@ -57,7 +58,12 @@ def plan_moves(
         player is not None and index not in eligible[player] for index, player in desired.items()
     ):
         raise WeeklyPlanError("Desired player is not eligible for its slot")
-    active_players = {item.sleeper_player_id for item in state.active_opportunities}
+    forfeited = set(state.recovery_forfeitures)
+    active_players = {
+        item.sleeper_player_id
+        for item in state.active_opportunities
+        if (item.sleeper_player_id, item.game_id) not in forfeited
+    }
     protected = frozenset(observed.values()) & (active_players - locked_players)
     if not protected <= set(players):
         raise WeeklyPlanError("Lineup moves would bench an active starter")
@@ -65,7 +71,7 @@ def plan_moves(
     pending_scores = {
         item.sleeper_player_id
         for item in state.completed_opportunities
-        if (item.sleeper_player_id, item.game_id) not in passed
+        if (item.sleeper_player_id, item.game_id) not in passed | forfeited
     }
     protected |= frozenset(observed.values()) & set(players) & (pending_scores - locked_players)
     indices = tuple(sorted(slots.keys() - fixed.keys()))

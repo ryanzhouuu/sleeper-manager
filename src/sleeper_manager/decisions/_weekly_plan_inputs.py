@@ -53,6 +53,8 @@ def active_assignment_candidates(
 
     active_by_player: dict[str, list[GameOpportunity]] = {}
     for opportunity in state.active_opportunities:
+        if (opportunity.sleeper_player_id, opportunity.game_id) in state.recovery_forfeitures:
+            continue
         active_by_player.setdefault(opportunity.sleeper_player_id, []).append(opportunity)
     locked_players = {fixed.player_id for fixed in state.fixed_slots}
     candidates: list[AssignmentCandidate] = []
