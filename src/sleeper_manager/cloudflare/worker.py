@@ -93,6 +93,7 @@ class Default(_WorkerEntrypoint):  # type: ignore[misc]
             D1ManagerStore(self.env.sleeper_manager_state),
             _query_values(request.url),
             now=datetime.now(UTC),
+            env=self.env,
         )
         return Response(form.body, status=form.status, headers=form.headers)
 

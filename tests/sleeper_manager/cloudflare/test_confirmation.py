@@ -106,6 +106,9 @@ def test_post_records_once(store):  # type: ignore[no-untyped-def]
         assert result.status == 200
         assert "Decision saved" in result.body
     assert asyncio.run(store.is_locked("rec"))
+    work = asyncio.run(store.list_scheduled_work())
+    assert len(work) == 1
+    assert work[0].dedupe_key == "manual:ack:rec"
     assert (
         store._database.connection.execute("SELECT COUNT(*) FROM acknowledgements").fetchone()[0]
         == 1

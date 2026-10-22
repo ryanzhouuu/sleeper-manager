@@ -60,3 +60,13 @@ omits ids, tokens, and secrets.
 
 Python Workers require the `python_workers` compatibility flag and are currently
 in beta. Use `uvx --from workers-py pywrangler dev` for local Worker development.
+
+
+## Manager decision history
+
+Apply `0006_manager_decision_changes.sql` before deploying owner controls. Each
+manual correction preserves the previous opportunity state, supersedes outdated
+advice and confirmation links, and creates durable planning work in the same D1
+transaction. Saved corrections survive a queue wake failure; the next cron can
+claim the pending plan. Observed scores and prior acknowledgement rows remain
+available for audit.

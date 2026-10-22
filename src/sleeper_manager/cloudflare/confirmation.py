@@ -11,13 +11,14 @@ from sleeper_manager.cloudflare.form_pages import (
     page,
     same_origin,
 )
+from sleeper_manager.cloudflare.planning_signal import publish_planning_wake
 from sleeper_manager.cloudflare.routes import acknowledge, parse_action
 from sleeper_manager.persistence.manager_store import D1ManagerStore
 from sleeper_manager.persistence.tokens import hash_action_token
 
 
 async def confirmation(
-    request: Any, store: D1ManagerStore, values: dict[str, str], *, now: datetime
+    request: Any, store: D1ManagerStore, values: dict[str, str], *, now: datetime, env: Any = None
 ) -> FormPage:
     """Opening or previewing a URL cannot record a Sleeper action."""
     if request.method == "POST":
@@ -31,6 +32,12 @@ async def confirmation(
             return page("Invalid form", "<p>Open the confirmation link again.</p>", status=400)
         result = await acknowledge(store, values, now=now)
         saved = result.payload["status"] in {"acknowledged", "already_used"}
+        if saved:
+            record = await store.preview_token(hash_action_token(values.get("token", "")))
+            if record is not None:
+                await store.ensure_ack_replan(str(record["recommendation_id"]), now)
+                if env is not None:
+                    await publish_planning_wake(env, now)
         message = "Your decision is recorded." if saved else "This confirmation is unavailable."
         return page(
             "Decision saved" if saved else "Confirmation unavailable",

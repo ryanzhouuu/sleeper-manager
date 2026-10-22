@@ -38,6 +38,7 @@ JOIN acknowledgements a ON a.recommendation_id = r.recommendation_id
 WHERE r.league_id = ?
   AND r.fantasy_week = ?
   AND r.decision_type = ?
+  AND r.status != 'superseded'
 """
 
 ACKNOWLEDGED_DECISIONS_INDEX_SQL = """
