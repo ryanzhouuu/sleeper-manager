@@ -11,6 +11,11 @@ invalid signals and signals older than ten minutes are discarded. Cron republish
 every five minutes, so lost or exhausted transport retries do not erase durable work.
 An enqueue failure leaves work unclaimed. Without a queue binding, local commands
 retain inline execution.
+Unexpected failures after claims release still-owned unfinished work for retry five
+minutes after failure. Cancellation attempts the same cleanup and then propagates;
+failed cleanup propagates for queue redelivery. Hard termination still relies on lease
+expiry. Completion and retry times use the live clock, and ensuring today's daily row
+preserves an existing retry time. Stage/error categories are logged without payloads.
 
 Forecast capture exceeded the Workers
 Free plan's 10 ms CPU allowance before it could write a receipt, so this schedule

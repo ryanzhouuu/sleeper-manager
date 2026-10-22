@@ -212,3 +212,41 @@ def test_failed_collection_remains_durable_for_a_later_queued_wake(monkeypatch) 
         assert (await repository.list_scheduled_work(kind=DueWorkKind.DAILY))[0].attempt_count == 2
 
     asyncio.run(exercise())
+
+
+def test_queued_planning_persists_actual_completion_time(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    async def exercise() -> None:
+        database = FakeD1()
+        await database.exec(D1_SCHEMA)
+        repository = D1StateRepository(database)
+        await _save_policy(repository)
+        sender = RecordingSender()
+        observed = [NOW]
+        monkeypatch.setattr(
+            "sleeper_manager.cloudflare.runtime.build_dispatcher",
+            lambda *args: NotificationDispatcher(sender),
+        )
+
+        async def collect(*args, **kwargs):  # type: ignore[no-untyped-def]
+            observed[0] = NOW + timedelta(minutes=2)
+            return _assembly(decision_time=observed[0])
+
+        monkeypatch.setattr(
+            "sleeper_manager.cloudflare.runtime.collect_cloudflare_planning_inputs", collect
+        )
+        env = SimpleNamespace(
+            ACKNOWLEDGEMENT_BASE_URL="https://example.test/ack",
+            sleeper_manager_state=database,
+        )
+        result = await run_queued_planning(
+            env, None, PlanningWake(NOW).to_body(), clock=lambda: observed[0]
+        )
+        assert result["status"] == "success"
+        daily = (await repository.list_scheduled_work(kind=DueWorkKind.DAILY))[0]
+        assert daily.updated_at == NOW + timedelta(minutes=2)
+        receipt = database.connection.execute(
+            "SELECT attempted_at FROM delivery_attempts"
+        ).fetchone()
+        assert receipt[0] == (NOW + timedelta(minutes=2)).isoformat()
+
+    asyncio.run(exercise())

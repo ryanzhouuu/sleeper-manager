@@ -6,6 +6,7 @@ notification destinations are missing instead of raising.
 
 import asyncio
 import sys
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
@@ -84,13 +85,16 @@ async def run_scheduled(
     scheduled_at: datetime | None = None,
     correlation_id: str | None = None,
     planning_only: bool = False,
+    clock: Callable[[], datetime] | None = None,
 ) -> dict[str, Any]:
     """Run one Worker wake against D1.
 
     Prefer `scheduled_at`, then the Cron controller, then UTC now. Queue consumers
     skip capture and enqueueing; they claim work using their actual execution time.
+    An explicit scheduled time freezes the clock unless a live clock is supplied.
     """
     now = scheduled_at or scheduled_at_from_controller(controller) or datetime.now(UTC)
+    tick = clock or ((lambda: now) if scheduled_at is not None else (lambda: datetime.now(UTC)))
     correlation = correlation_id or uuid4().hex
     acknowledgement_base_url = _value(env, "ACKNOWLEDGEMENT_BASE_URL").rstrip("?")
     if not acknowledgement_base_url:
@@ -130,6 +134,7 @@ async def run_scheduled(
                 repository=repository,
                 policy=policy,
                 scheduled_at=scheduled_at,
+                clock=tick,
                 hybrid_timeout_seconds=600 if planning_only else None,
             )
 
@@ -137,7 +142,7 @@ async def run_scheduled(
         repository,
         dispatcher,
         acknowledgement_base_url=acknowledgement_base_url,
-        clock=lambda: now,
+        clock=tick,
         acknowledgement_kinds=LOCK_IN_ACKNOWLEDGEMENT_KINDS,
     )
     open_sleeper_url = _value(env, "OPEN_SLEEPER_URL", "https://sleeper.com")
@@ -148,7 +153,7 @@ async def run_scheduled(
                     repository,
                     notifications,
                     league_id=_value(env, "SLEEPER_LEAGUE_ID"),
-                    scheduled_at=now,
+                    scheduled_at=tick(),
                     open_sleeper_url=open_sleeper_url,
                 )
         except Exception as error:
@@ -173,7 +178,8 @@ async def run_scheduled(
             scheduled_at=now,
             correlation_id=correlation,
             open_sleeper_url=open_sleeper_url,
-            fetch_game_summary=CloudflareESPNProvider(fetcher, clock=lambda: now).game_summary,
+            fetch_game_summary=CloudflareESPNProvider(fetcher, clock=tick).game_summary,
+            clock=tick,
         )
     return summary.as_dict()
 
@@ -184,9 +190,11 @@ async def run_queued_planning(
     body: object,
     *,
     now: datetime | None = None,
+    clock: Callable[[], datetime] | None = None,
 ) -> dict[str, Any]:
     """Discard invalid/stale signals; retain D1 as the source of due work and retries."""
-    executed_at = now or datetime.now(UTC)
+    executed_at = now or (clock or (lambda: datetime.now(UTC)))()
+    tick = clock or ((lambda: executed_at) if now is not None else (lambda: datetime.now(UTC)))
     try:
         wake = PlanningWake.from_body(body)
     except ValueError:
@@ -194,7 +202,7 @@ async def run_queued_planning(
     if not wake.is_current(executed_at):
         return {"status": "no_action", "detail": "stale_planning_wake"}
     return await asyncio.wait_for(
-        run_scheduled(env, fetcher, scheduled_at=executed_at, planning_only=True),
+        run_scheduled(env, fetcher, scheduled_at=executed_at, planning_only=True, clock=tick),
         timeout=12 * 60,
     )
 

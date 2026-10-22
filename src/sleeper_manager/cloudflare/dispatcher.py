@@ -15,6 +15,7 @@ from typing import Protocol
 from sleeper_manager.cloudflare.planning import CloudflarePlanningAssembly
 from sleeper_manager.cloudflare.planning_schedule import _replace_future_pre_tipoff, _work_id
 from sleeper_manager.cloudflare.postgame_dispatch import dispatch_postgame_work
+from sleeper_manager.cloudflare.scheduled_recovery import recover_claimed_work, scheduled_stage
 from sleeper_manager.cloudflare.scheduler_types import (
     FailureCategory,
     FreshnessDetail,
@@ -112,48 +113,52 @@ async def dispatch_due_work(
     postgame = tuple(item for item in claimed if item.kind is DueWorkKind.POSTGAME)
     retries = tuple(item for item in claimed if item.kind is DueWorkKind.DELIVERY_RETRY)
     attempts: list[WorkAttemptSummary] = []
-    if planning:
-        attempts.extend(
-            await _run_planning(
-                repository,
-                planning,
-                policy=policy,
-                notifications=notifications,
-                collect=collect,
-                scheduled_at=scheduled_at,
-                correlation_id=correlation_id,
-                open_sleeper_url=open_sleeper_url,
-                plan_policy=plan_policy,
-                clock=tick,
-                fetch_game_summary=fetch_game_summary,
+    async with recover_claimed_work(
+        repository, claimed, attempts, correlation_id=correlation_id, clock=tick
+    ):
+        if planning:
+            attempts.extend(
+                await _run_planning(
+                    repository,
+                    planning,
+                    policy=policy,
+                    notifications=notifications,
+                    collect=collect,
+                    scheduled_at=scheduled_at,
+                    correlation_id=correlation_id,
+                    open_sleeper_url=open_sleeper_url,
+                    plan_policy=plan_policy,
+                    clock=tick,
+                    fetch_game_summary=fetch_game_summary,
+                )
             )
-        )
-    if postgame:
-        attempts.extend(
-            await dispatch_postgame_work(
-                repository,
-                postgame,
-                policy=policy,
-                notifications=notifications,
-                collect=collect,
-                fetch_summary=fetch_game_summary,
-                scheduled_at=scheduled_at,
-                correlation_id=correlation_id,
-                open_sleeper_url=open_sleeper_url,
-                clock=tick,
+        if postgame:
+            attempts.extend(
+                await dispatch_postgame_work(
+                    repository,
+                    postgame,
+                    policy=policy,
+                    notifications=notifications,
+                    collect=collect,
+                    fetch_summary=fetch_game_summary,
+                    scheduled_at=scheduled_at,
+                    correlation_id=correlation_id,
+                    open_sleeper_url=open_sleeper_url,
+                    clock=tick,
+                )
             )
-        )
-    for work in retries:
-        attempts.append(
-            await _run_delivery_retry(
-                repository,
-                work,
-                notifications=notifications,
-                scheduled_at=scheduled_at,
-                correlation_id=correlation_id,
-                open_sleeper_url=open_sleeper_url,
+        for work in retries:
+            attempts.append(
+                await _run_delivery_retry(
+                    repository,
+                    work,
+                    notifications=notifications,
+                    scheduled_at=scheduled_at,
+                    correlation_id=correlation_id,
+                    open_sleeper_url=open_sleeper_url,
+                    clock=tick,
+                )
             )
-        )
     return _summary(correlation_id, scheduled_at, len(claimed), tuple(attempts))
 
 
@@ -179,6 +184,9 @@ async def _ensure_daily_work(
         local_time=policy.daily_plan_time,
     )
     key = f"daily:{local_day.isoformat()}"
+    existing = await repository.list_scheduled_work(kind=DueWorkKind.DAILY)
+    if any(work.dedupe_key == key for work in existing):
+        return
     await repository.upsert_scheduled_work(
         ScheduledWorkRecord(
             work_id=_work_id(key),
@@ -220,7 +228,7 @@ async def _run_planning(
         return await _finish_planning(
             repository,
             claimed,
-            scheduled_at=scheduled_at,
+            scheduled_at=clock(),
             correlation_id=correlation_id,
             outcome=ScheduledRunStatus.BLOCKED,
             failure_category=FailureCategory.CONFIGURATION,
@@ -230,7 +238,7 @@ async def _run_planning(
         return await _finish_planning(
             repository,
             claimed,
-            scheduled_at=scheduled_at,
+            scheduled_at=clock(),
             correlation_id=correlation_id,
             outcome=ScheduledRunStatus.FAILED,
             failure_category=FailureCategory.PROVIDER,
@@ -239,55 +247,59 @@ async def _run_planning(
         )
 
     planning_inputs = assembly.evidence.inputs
-    await _replace_future_pre_tipoff(
-        repository,
-        policy,
-        planning_inputs,
-        scheduled_at,
-    )
-    await sync_live_lock_in_opportunities(
-        planning_inputs,
-        repository=repository,
-        observed_at=assembly.evidence.decision_time,
-    )
-    if trigger == "daily" and fetch_game_summary is not None:
-        planning_inputs = await refresh_terminal_lock_in_scores(
+    with scheduled_stage("pre_tipoff_schedule", FailureCategory.PERSISTENCE):
+        await _replace_future_pre_tipoff(
+            repository,
+            policy,
+            planning_inputs,
+            scheduled_at,
+        )
+    with scheduled_stage("lock_in_sync", FailureCategory.PERSISTENCE):
+        await sync_live_lock_in_opportunities(
             planning_inputs,
             repository=repository,
-            fetch_summary=fetch_game_summary,
             observed_at=assembly.evidence.decision_time,
-            poll_id=f"{correlation_id}:daily-refresh",
         )
+    if trigger == "daily" and fetch_game_summary is not None:
+        with scheduled_stage("terminal_score_refresh", FailureCategory.PROVIDER):
+            planning_inputs = await refresh_terminal_lock_in_scores(
+                planning_inputs,
+                repository=repository,
+                fetch_summary=fetch_game_summary,
+                observed_at=assembly.evidence.decision_time,
+                poll_id=f"{correlation_id}:daily-refresh",
+            )
     workflow = run_pre_tipoff_check if trigger == "pre_tipoff" else run_daily_plan
-    result = await workflow(
-        planning_inputs,
-        decision_time=assembly.evidence.decision_time,
-        repository=repository,
-        notifications=notifications,
-        open_sleeper_url=open_sleeper_url,
-        player_names=assembly.player_names,
-        local_timezone=assembly.local_timezone,
-        policy=replace(
-            plan_policy or WeeklyPlanPolicyConfig(),
-            minimum_lock_in_confidence=policy.manager_intent.minimum_confidence,
-        ),
-        clock=clock,
-    )
-    if _delivery_failed(result):
-        await _enqueue_delivery_retry(repository, result, scheduled_at)
-    outcome = _WORKFLOW_STATUS[result.outcome]
-    failure_category = (
-        FailureCategory.DELIVERY if outcome is ScheduledRunStatus.DELIVERY_FAILED else None
-    )
-    return await _finish_planning(
-        repository,
-        claimed,
-        scheduled_at=scheduled_at,
-        correlation_id=correlation_id,
-        outcome=outcome,
-        failure_category=failure_category,
-        result=result,
-    )
+    with scheduled_stage("planning_and_persistence", FailureCategory.INTERNAL_INVARIANT):
+        result = await workflow(
+            planning_inputs,
+            decision_time=assembly.evidence.decision_time,
+            repository=repository,
+            notifications=notifications,
+            open_sleeper_url=open_sleeper_url,
+            player_names=assembly.player_names,
+            local_timezone=assembly.local_timezone,
+            policy=replace(
+                plan_policy or WeeklyPlanPolicyConfig(),
+                minimum_lock_in_confidence=policy.manager_intent.minimum_confidence,
+            ),
+            clock=clock,
+        )
+        if _delivery_failed(result):
+            await _enqueue_delivery_retry(repository, result, clock())
+        outcome = _WORKFLOW_STATUS[result.outcome]
+        failure_category = (
+            FailureCategory.DELIVERY if outcome is ScheduledRunStatus.DELIVERY_FAILED else None
+        )
+        return await _finish_planning(
+            repository,
+            claimed,
+            scheduled_at=clock(),
+            correlation_id=correlation_id,
+            outcome=outcome,
+            failure_category=failure_category,
+            result=result,
+        )
 
 
 async def _run_delivery_retry(
@@ -298,13 +310,14 @@ async def _run_delivery_retry(
     scheduled_at: datetime,
     correlation_id: str,
     open_sleeper_url: str,
+    clock: Callable[[], datetime],
 ) -> WorkAttemptSummary:
     recommendation_id = work.recommendation_id
     if not recommendation_id:
         return await _finish_one(
             repository,
             work,
-            scheduled_at=scheduled_at,
+            scheduled_at=clock(),
             correlation_id=correlation_id,
             outcome=ScheduledRunStatus.FAILED,
             failure_category=FailureCategory.INTERNAL_INVARIANT,
@@ -316,7 +329,7 @@ async def _run_delivery_retry(
         return await _finish_one(
             repository,
             work,
-            scheduled_at=scheduled_at,
+            scheduled_at=clock(),
             correlation_id=correlation_id,
             outcome=ScheduledRunStatus.NO_ACTION,
             status=ScheduledWorkStatus.CANCELED,
@@ -326,7 +339,7 @@ async def _run_delivery_retry(
         return await _finish_one(
             repository,
             work,
-            scheduled_at=scheduled_at,
+            scheduled_at=clock(),
             correlation_id=correlation_id,
             outcome=ScheduledRunStatus.DUPLICATE,
             status=ScheduledWorkStatus.COMPLETED,
@@ -341,12 +354,12 @@ async def _run_delivery_retry(
         return await _finish_one(
             repository,
             work,
-            scheduled_at=scheduled_at,
+            scheduled_at=clock(),
             correlation_id=correlation_id,
             outcome=ScheduledRunStatus.DELIVERY_FAILED,
             failure_category=FailureCategory.DELIVERY,
             status=ScheduledWorkStatus.RETRY,
-            retry_at=scheduled_at + _RETRY_DELAY,
+            retry_at=clock() + _RETRY_DELAY,
             recommendation_id=recommendation_id,
             recommendation_revision=recommendation.revision,
         )
@@ -356,7 +369,7 @@ async def _run_delivery_retry(
     return await _finish_one(
         repository,
         work,
-        scheduled_at=scheduled_at,
+        scheduled_at=clock(),
         correlation_id=correlation_id,
         outcome=outcome,
         status=ScheduledWorkStatus.COMPLETED,
