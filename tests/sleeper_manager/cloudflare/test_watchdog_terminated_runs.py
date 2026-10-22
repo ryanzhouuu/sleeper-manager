@@ -35,7 +35,7 @@ def test_watchdog_alert_precedes_repeated_termination(monkeypatch: pytest.Monkey
 
         async def terminate(*args, **kwargs):  # type: ignore[no-untyped-def]
             calls.append(1)
-            assert len(sender.messages) == (1 if len(calls) >= 3 else 0)
+            assert len(sender.messages) == (1 if len(calls) >= 2 else 0)
             raise Terminated()
 
         monkeypatch.setattr(

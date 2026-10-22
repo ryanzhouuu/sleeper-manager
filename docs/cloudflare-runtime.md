@@ -34,10 +34,13 @@ Candidate stages separate index loading, population preparation, forecast reads,
 each player's partition loading, pool preparation, and projection. Repeated stage pairs
 show batch progress without logging player identities or private provider payloads.
 Before forecast capture or collection, the watchdog checks today's unfinished daily
-work. After two attempts, an expired running lease or a due retry triggers a
+work. If it has not completed fifteen minutes after the manager-local daily schedule,
+missing, pending, retrying, and running work trigger a
 `Daily plan delayed` notification through the configured destinations. Delivery is
 deduplicated per league and manager-local day; unsuccessful delivery can retry.
-Active leases, completed work, and prior-day jobs stay quiet. These operational
+An active retry lease cannot suppress a delay alert. Completed or canceled work
+stays quiet; prior-day and recovery jobs do not satisfy today's daily completion.
+These operational
 records use decision type `daily_plan_delayed`, fantasy week `0`, and player `system`
 to keep them separate from weekly advice. They have no notification actions.
 Watchdog failures are logged without blocking planning.
