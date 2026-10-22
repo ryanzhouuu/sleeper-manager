@@ -51,6 +51,7 @@ class PlanningReasonCode(StrEnum):
     AMBIGUOUS_ELIGIBILITY = "ambiguous_eligibility"
     STALE_SLEEPER_STATE = "stale_sleeper_state"
     STALE_NBA_STATE = "stale_nba_state"
+    INJURY_DATA_UNAVAILABLE = "injury_data_unavailable"
     ACKNOWLEDGEMENT_CONFLICT = "acknowledgement_conflict"
     AMBIGUOUS_EVENT_ORDER = "ambiguous_event_order"
     DEADLINE_ELAPSED = "deadline_elapsed"

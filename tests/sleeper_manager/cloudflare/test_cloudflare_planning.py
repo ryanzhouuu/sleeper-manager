@@ -252,5 +252,7 @@ def test_planning_refreshes_near_expiry_injuries_before_delayed_advice(
         assert quality.retrieved_at == NOW
     else:
         assert quality.state is DataQualityState.ERROR
-        assert PlanningReasonCode.STALE_NBA_STATE in state.blocking_reasons
+        assert build_weekly_plan(state).status is PlanStatus.DEGRADED
+        assert not state.is_blocked
+        assert [reason.value for reason in state.warnings] == ["injury_data_unavailable"]
         assert fetch.paths.count(injury_path) == 2

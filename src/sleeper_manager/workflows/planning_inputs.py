@@ -351,6 +351,9 @@ def _apply_freshness(
             warnings,
         )
     for availability_result in inputs.availability_results:
+        if availability_result.quality.state is DataQualityState.ERROR:
+            warnings.append(PlanningReasonCode.INJURY_DATA_UNAVAILABLE)
+            continue
         _apply_resource_freshness(
             availability_result.quality,
             policy.max_availability_age,

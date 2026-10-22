@@ -65,8 +65,13 @@ resources, invalid JSON, and schema drift fail explicitly; custom base URLs stay
 Each planning run fetches a fresh ESPN injury snapshot, shared by manager and opponent
 collection, and updates the persisted cache with the provider's original timestamps.
 Team rosters and schedules retain their existing cache windows. Injury fetch failures
-remain blocking evidence; planning does not substitute the previous cached snapshot.
-The fifteen-minute injury freshness limit still applies at the final decision cutoff.
+produce the `injury_data_unavailable` warning instead of blocking advice; planning does
+not substitute the previous cached snapshot or treat missing designations as healthy.
+Valid official game reports still apply. Actionable lineup and Lock/Pass notifications
+include a provisional-availability warning, while no-action lineup plans stay quiet.
+Successful but expired injury snapshots still fail the fifteen-minute freshness check
+at the final decision cutoff. Roster, schedule, identity, projection, and deadline
+failures retain their existing blocking rules.
 
 Official game availability uses a Workers-native fetch adapter and the shared PDF
 parser, now included in runtime dependencies. The adapter checks recent publication
