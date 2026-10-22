@@ -135,3 +135,14 @@ def test_worker_get_is_non_mutating(store):  # type: ignore[no-untyped-def]
     result = asyncio.run(worker.fetch(request()))
     assert result.headers["content-type"].startswith("text/html")
     assert not asyncio.run(store.is_locked("rec"))
+
+
+def test_corrected_confirmation_cannot_resurface_an_old_acknowledgement(store):  # type: ignore[no-untyped-def]
+    asyncio.run(confirmation(request("POST"), store, {}, now=NOW))
+    asyncio.run(
+        store._run("UPDATE recommendations SET status='superseded' WHERE recommendation_id='rec'")
+    )
+    for method in ("GET", "POST"):
+        result = asyncio.run(confirmation(request(method), store, VALUES, now=NOW))
+        assert result.status == 409
+        assert "Confirmation replaced" in result.body

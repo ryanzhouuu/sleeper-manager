@@ -33,7 +33,7 @@ def test_get_home_uses_worker_configuration(monkeypatch) -> None:  # type: ignor
 
     monkeypatch.setattr("sleeper_manager.cloudflare.worker.build_home", fake_build_home)
     monkeypatch.setattr(
-        "sleeper_manager.cloudflare.worker.D1StateRepository.initialize",
+        "sleeper_manager.cloudflare.worker.D1ManagerStore.initialize",
         fake_initialize,
     )
     entrypoint = Default()

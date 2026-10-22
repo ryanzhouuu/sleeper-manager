@@ -30,6 +30,14 @@ async def confirmation(
             values = await form_values(request)
         except (ValueError, UnicodeError):
             return page("Invalid form", "<p>Open the confirmation link again.</p>", status=400)
+        raw = values.get("token", "")
+        prior = await store.preview_token(hash_action_token(raw)) if 0 < len(raw) <= 256 else None
+        if prior is not None and prior["status"] == "superseded":
+            return page(
+                "Confirmation replaced",
+                '<p><a href="/manage">Review current decisions</a></p>',
+                status=409,
+            )
         result = await acknowledge(store, values, now=now)
         saved = result.payload["status"] in {"acknowledged", "already_used"}
         if saved:
@@ -53,6 +61,12 @@ async def confirmation(
     record = await store.preview_token(hash_action_token(token))
     if record is None or record["action"] != action.value:
         return page("Confirmation unavailable", "<p>This link is invalid.</p>", status=404)
+    if record["status"] == "superseded":
+        return page(
+            "Confirmation replaced",
+            '<p><a href="/manage">Review current decisions</a></p>',
+            status=409,
+        )
     if record["used_at"] is not None:
         return page("Already recorded", '<p><a href="/manage">Review or correct decisions</a></p>')
     if datetime.fromisoformat(str(record["expires_at"])) <= now:

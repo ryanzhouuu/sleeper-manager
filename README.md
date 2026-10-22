@@ -94,7 +94,11 @@ Daily, pre-tipoff, and postgame runs produce a complete team recommendation from
 the current lineup, confirmed decisions, and retained player-game observations.
 They show every starter slot, bench choices, exact lock positions, ordered actions,
 and recovery deadlines. Locked/Passed buttons still confirm individual actions;
-delivering advice never proves that a swap, lock, or pass occurred.
+delivering advice never proves that a swap, lock, or pass occurred. Confirmation links
+open a review screen; only submitting its form records an action. The dashboard
+links to owner-only controls for recording or correcting each player/game's
+Lock/Pass status. Saving retains correction history and queues a fresh plan; see
+[owner controls](infra/cloudflare/README.md#owner-controls) for access setup.
 
 Stable completed scores remain available for joint comparison with later games.
 Observed bench transitions permanently forfeit that performance; returning the player

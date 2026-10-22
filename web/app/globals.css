@@ -93,6 +93,16 @@ ul {
   white-space: pre-line;
 }
 
+.controls-link {
+  color: var(--accent);
+  text-underline-offset: 0.25em;
+}
+
+.controls-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
 .day {
   display: flex;
   flex-direction: column;

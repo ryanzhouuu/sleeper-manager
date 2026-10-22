@@ -70,3 +70,25 @@ advice and confirmation links, and creates durable planning work in the same D1
 transaction. Saved corrections survive a queue wake failure; the next cron can
 claim the pending plan. Observed scores and prior acknowledgement rows remain
 available for audit.
+
+## Owner controls
+
+`GET /manage` serves the private decision editor linked from the Next.js dashboard.
+Set a high-entropy `MANAGER_ACCESS_KEY` of at least 32 characters as a Worker secret.
+The login form exchanges it for an HttpOnly, Secure, SameSite=Strict cookie scoped
+to `/manage`; rotating the secret invalidates existing sessions. Without this
+secret the editor returns 503. Public `/home` never includes the key or session.
+
+Each completed player/game offers **Not locked yet**, **Locked in Sleeper**, and
+**Passed**. These record actions already performed in Sleeper. Locks require a
+stable eligible score and the player's currently observed starter slot. A saved
+correction preserves prior evidence, expires old confirmation links, and queues a
+new plan. Both pages show that the plan is updating while this work is pending.
+The history lists manual corrections; existing notification acknowledgements
+remain stored separately. A correction cannot restore a performance forfeited by
+a bench transition or an elapsed deadline.
+
+`POST /manage/login`, `/manage/save`, and `/manage/logout` require the same origin.
+Save/logout also require a session-bound CSRF proof. Submitted league, week and
+roster identities are never trusted; scope is resolved from the configured owner.
+The editor records decisions only in the assistant's database, not in Sleeper.

@@ -1,8 +1,7 @@
-"""Cloudflare Worker fetch, Cron, and planning queue entrypoints.
+"""Serve public reads, scoped confirmations, owner controls, Cron, and planning queues.
 
-`fetch` serves `/health`, `/ack`, and `/home`. `scheduled` runs one due-work wake
-and prints the JSON summary. The queue consumer executes durable due work.
-Bindings and secrets come from the Worker env.
+Cron captures forecasts and publishes wakes; queue consumers execute durable due work.
+Bindings and secrets come from the Worker environment.
 """
 
 import json
@@ -11,9 +10,9 @@ from urllib.parse import parse_qs, urlparse
 
 from sleeper_manager.cloudflare.confirmation import confirmation
 from sleeper_manager.cloudflare.home import build_home
+from sleeper_manager.cloudflare.manager_routes import manage
 from sleeper_manager.cloudflare.providers import CloudflareESPNProvider, CloudflareSleeperClient
 from sleeper_manager.cloudflare.runtime import run_queued_planning, run_scheduled
-from sleeper_manager.persistence.d1 import D1StateRepository
 from sleeper_manager.persistence.manager_store import D1ManagerStore
 
 try:
@@ -66,6 +65,9 @@ class Default(_WorkerEntrypoint):  # type: ignore[misc]
         parsed = urlparse(request.url)
         if parsed.path == "/health":
             return Response.json({"status": "ok"})
+        if parsed.path.startswith("/manage"):
+            form = await manage(request, self.env, fetch, now=datetime.now(UTC))
+            return Response(form.body, status=form.status, headers=form.headers)
         if parsed.path == "/home":
             if request.method != "GET":
                 return Response.json({"status": "method_not_allowed"}, status=405)
@@ -73,7 +75,7 @@ class Default(_WorkerEntrypoint):  # type: ignore[misc]
             user_id = _env_value(self.env, "SLEEPER_USER_ID")
             if not league_id or not user_id:
                 return Response.json({"status": "league_unavailable"}, status=503)
-            repository = D1StateRepository(self.env.sleeper_manager_state)
+            repository = D1ManagerStore(self.env.sleeper_manager_state)
             await repository.initialize()
             result = await build_home(
                 sleeper=CloudflareSleeperClient(fetch),

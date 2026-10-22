@@ -50,4 +50,19 @@ describe("HomePage", () => {
     expect(html).not.toContain("column");
     expect(html).toContain("league could not be loaded.");
   });
+
+  it("links to owner controls on the configured Worker", async () => {
+    vi.stubEnv("HOME_URL", "https://worker.test/home");
+    try {
+      loadHome.mockResolvedValue({
+        status: "ok",
+        document: parseHomeDocument(fixture),
+      });
+      const html = await render();
+      expect(html).toContain('href="https://worker.test/manage"');
+      expect(html).toContain("update lock / pass decisions");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });

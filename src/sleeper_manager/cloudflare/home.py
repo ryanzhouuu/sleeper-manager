@@ -153,7 +153,7 @@ async def build_home(
         timezone_name=timezone_name,
         now=now,
     )
-    recommendation = await _recommendation(repository, league_id, week)
+    recommendation = await _recommendation(repository, league_id, week, now=now)
     return RouteResponse(
         200,
         assemble_home(
@@ -415,8 +415,19 @@ async def _recommendation(
     repository: AsyncRuntimeStateRepository,
     league_id: str,
     week: int,
+    *,
+    now: datetime | None = None,
 ) -> tuple[_SectionStatus, str | None, str | None, str | None, datetime | None]:
     try:
+        pending = getattr(repository, "has_pending_manager_plan", None)
+        if pending is not None and now is not None and await pending(now):
+            return (
+                "ready",
+                None,
+                "Updating your plan",
+                "Your decision is saved. A new plan is queued or running; refresh shortly.",
+                None,
+            )
         record = await repository.latest_current_recommendation(
             league_id,
             week,
