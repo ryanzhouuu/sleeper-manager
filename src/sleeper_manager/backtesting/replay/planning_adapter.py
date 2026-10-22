@@ -192,6 +192,7 @@ def team_week_state_from_replay(
                 if player_id in roster_ids
             ),
             observed_starters=observed,
+            roster_eligibility=tuple(sorted(positions_by_player.items())),
             opportunities=tuple(opportunities),
             fixed_slots=fixed_slots,
             passed_opportunities=passed_opportunities,

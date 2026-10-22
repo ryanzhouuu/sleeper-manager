@@ -5,13 +5,13 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime
 
+from sleeper_manager.backtesting.experiments.coordinated_replay import apply_score_actions
 from sleeper_manager.backtesting.experiments.full_advisor_admission import (
     validate_full_advisor_inputs,
 )
 from sleeper_manager.backtesting.experiments.full_advisor_replay_legality import (
     active_target_slots,
     automatic_final_scores,
-    realign_for_lock,
 )
 from sleeper_manager.backtesting.experiments.full_advisor_replay_models import (
     FULL_ADVISOR_EXECUTOR_VERSION,
@@ -39,20 +39,15 @@ from sleeper_manager.backtesting.replay.runner import (
     ReplayEventKind,
 )
 from sleeper_manager.backtesting.replay.state import ReplayState
-from sleeper_manager.decisions.live_lock_in import (
-    LiveLockInPolicyConfig,
-    evaluate_live_lock_in,
-)
-from sleeper_manager.decisions.lock_in import ScoreMaximizingLockInPolicy
-from sleeper_manager.decisions.weekly_plan import build_weekly_plan
+from sleeper_manager.decisions.team_recommendation import build_team_recommendation
 from sleeper_manager.domain.forecast_capture import ForecastCaptureError, ForecastRetrievalResult
-from sleeper_manager.domain.lock_in import LockInEvaluation, LockInEvaluationKind
+from sleeper_manager.domain.lock_in import LockInEvaluation
 from sleeper_manager.domain.planning import (
-    GameOpportunity,
     PlanStatus,
     TeamWeekState,
     WeeklyPlan,
 )
+from sleeper_manager.domain.planning_actions import RecoveryObligation
 from sleeper_manager.workflows.forecast_reader import read_player_forecasts
 
 
@@ -73,12 +68,14 @@ class _FullAdvisorExecutor:
         self.active: dict[str, int] = {}
         self.started: dict[tuple[str, str], StartedPlayerGame] = {}
         self.pending: set[tuple[str, str]] = set()
+        self.forfeited: set[tuple[str, str]] = set()
+        self.recoveries: tuple[RecoveryObligation, ...] = ()
+        self.recovery_failures: tuple[str, ...] = ()
         self.terminal: set[tuple[str, str]] = set()
         self.plans: list[WeeklyPlan] = []
         self.evaluations: list[LockInEvaluation] = []
         self.forecast_reads: list[ForecastRetrievalResult] = []
         self.lineup_traces: list[ReplayLineupTrace] = []
-        self.policy = ScoreMaximizingLockInPolicy(request.lock_in_policy_config)
         self.events = full_advisor_events(self.team_week, request.planning_lead_time)
         self.planning_cutoffs = frozenset(
             full_advisor_planning_cutoffs(self.team_week, request.planning_lead_time)
@@ -91,13 +88,13 @@ class _FullAdvisorExecutor:
         self.week_end = next(
             event.at for event in self.events if event.kind is ReplayEventKind.WEEK_END
         )
+        self.state = replace(self.state, fantasy_week_end=self.week_end)
 
     def run(self) -> FullAdvisorReplayExecution:
         """Advance every event and return a legal model/oracle comparison."""
 
         for event in self.events:
             if event.kind is ReplayEventKind.PLANNING_CUTOFF:
-                self._evaluate_pending(event)
                 self._plan_lineup(event)
             elif event.kind is ReplayEventKind.TIPOFF_BATCH:
                 self._expire_pending(event)
@@ -112,13 +109,24 @@ class _FullAdvisorExecutor:
     def _plan_lineup(self, event: ReplayEvent) -> None:
         """Run the shared weekly planner and apply its desired assignments."""
 
-        self._read_forecasts(event.at)
+        if event.kind is ReplayEventKind.PLANNING_CUTOFF:
+            self._read_forecasts(event.at)
         state = self._planning_state(event.at)
-        plan = build_weekly_plan(
+        config = self.request.weekly_policy_config
+        if event.kind is ReplayEventKind.GAME_FINALIZATION:
+            lock_config = self.request.lock_in_policy_config
+            config = replace(
+                config,
+                scenario_count=lock_config.scenario_count,
+                postgame_scenario_count=lock_config.scenario_count,
+                seed=lock_config.seed,
+                tie_tolerance=lock_config.tie_tolerance,
+            )
+        plan = build_team_recommendation(
             state,
             lead_time=self.request.planning_lead_time,
             policy=replace(
-                self.request.weekly_policy_config,
+                config,
                 minimum_lock_in_confidence=self.request.minimum_confidence,
             ),
         )
@@ -126,11 +134,19 @@ class _FullAdvisorExecutor:
         if plan.status is PlanStatus.BLOCKED:
             reasons = ",".join(reason.value for reason in plan.blocking_reasons)
             raise FullAdvisorReplayError(f"planning_blocked:{reasons}")
-        desired = {
-            assignment.slot_index: assignment.player_id
-            for assignment in plan.desired_assignments
-            if assignment.player_id is not None
-        }
+        self.forfeited.update(plan.forfeited_opportunities)
+        for player, game in plan.forfeited_opportunities:
+            self.active.pop(player, None)
+            self.pending.discard((player, game))
+            self.terminal.add((player, game))
+        self.state, desired, evaluations = apply_score_actions(
+            self.state, plan, self.lineup, event.at
+        )
+        self.evaluations.extend(evaluations)
+        for action in plan.score_actions:
+            key = (action.player_id, action.game_id)
+            self.pending.discard(key)
+            self.terminal.add(key)
         self.active = active_target_slots(
             desired=desired,
             active=self.active,
@@ -138,6 +154,8 @@ class _FullAdvisorExecutor:
             event_id=event.event_id,
         )
         self.lineup = desired
+        self.recoveries = plan.recovery_obligations
+        self.recovery_failures = plan.recovery_failures
         self._trace_lineup(event)
 
     def _read_forecasts(self, cutoff: datetime) -> None:
@@ -191,73 +209,17 @@ class _FullAdvisorExecutor:
         for player_id, _ in keys:
             self.active.pop(player_id, None)
         for key in keys:
-            self.pending.add(key)
-            self._evaluate_key(key, event)
-
-    def _evaluate_pending(self, event: ReplayEvent) -> None:
-        """Re-evaluate prior Wait outcomes before the next lineup decision."""
-
-        for key in sorted(self.pending):
-            self._evaluate_key(key, event)
+            if key not in self.forfeited:
+                self.pending.add(key)
+        if self.pending:
+            self._plan_lineup(event)
 
     def _expire_pending(self, event: ReplayEvent) -> None:
-        """Record unresolved Wait outcomes when their action deadline arrives."""
-
-        for key in sorted(self.pending):
+        """Expire unresolved score options without inventing an executed Pass."""
+        for key in tuple(sorted(self.pending)):
             if self._deadline(self._player_game(key)) <= event.at:
-                self._evaluate_key(key, event)
-
-    def _evaluate_key(self, key: tuple[str, str], event: ReplayEvent) -> None:
-        """Apply one current live evaluation when it becomes actionable."""
-
-        if key in self.terminal:
-            self.pending.discard(key)
-            return
-        player_game = self._player_game(key)
-        state = self._planning_state(event.at)
-        opportunity = self._opportunity(state, key)
-        deadline = self._deadline(player_game)
-        evaluation = evaluate_live_lock_in(
-            state,
-            opportunity,
-            deadline=deadline,
-            manager_policy_version=self.request.policy_name,
-            policy=self.policy,
-            config=LiveLockInPolicyConfig(self.request.minimum_confidence),
-        )
-        self.evaluations.append(evaluation)
-        if evaluation.kind is LockInEvaluationKind.WAIT:
-            return
-        if evaluation.kind is LockInEvaluationKind.UNAVAILABLE:
-            if "deadline_elapsed" in evaluation.reason_codes:
                 self.pending.discard(key)
                 self.terminal.add(key)
-                return
-            reasons = ",".join(evaluation.reason_codes)
-            raise FullAdvisorReplayError(f"lock_in_unavailable:{key[0]}:{key[1]}:{reasons}")
-        self.pending.discard(key)
-        self.terminal.add(key)
-        decision = evaluation.decision
-        if decision is None:
-            return
-        candidate = self.state.candidate_at(player_game, event.at)
-        if candidate is None:
-            raise FullAdvisorReplayError(f"illegal_candidate:{key[0]}:{key[1]}")
-        if evaluation.kind is LockInEvaluationKind.LOCK:
-            assert decision.slot_index is not None
-            self.lineup = realign_for_lock(
-                player_id=key[0],
-                target_slot=decision.slot_index,
-                lineup=self.lineup,
-                active=self.active,
-                replay_state=self.state,
-                team_week=self.team_week,
-            )
-            self.active = {
-                player: slot for slot, player in self.lineup.items() if player in self.active
-            }
-        self.state = self.state.apply_decision(candidate, decision)
-        self._trace_lineup(event)
 
     def _finish(self, event: ReplayEvent) -> FullAdvisorReplayExecution:
         """Assign legal automatic scores, build the oracle, and verify invariants."""
@@ -268,7 +230,7 @@ class _FullAdvisorExecutor:
         automatic = automatic_final_scores(
             team_week=self.team_week,
             replay_state=self.state,
-            started_keys=frozenset(self.started),
+            started_keys=frozenset(self.started) - self.forfeited,
         )
         model = TeamWeekReplayResult(
             league_id=self.team_week.league_id,
@@ -346,7 +308,7 @@ class _FullAdvisorExecutor:
         except HistoricalProjectionSurfaceError as error:
             raise FullAdvisorReplayError(str(error)) from error
         projected_state = replace(source_state, player_games=projected_games)
-        return team_week_state_from_replay(
+        adapted = team_week_state_from_replay(
             projected_state,
             config=ReplayConfig(
                 self.team_week.starter_slots,
@@ -364,6 +326,19 @@ class _FullAdvisorExecutor:
             roster_player_ids=self.team_week.roster_player_ids,
             manager_policy_version=self.request.policy_name,
             input_version=self.input_version,
+        )
+
+        return replace(
+            adapted,
+            week_ends_at=self.week_end,
+            recovery_obligations=self.recoveries if observed else (),
+            recovery_failures=self.recovery_failures if observed else (),
+            opportunities=tuple(
+                replace(game, eligible_slot_indices=(), rostered_at_tipoff=False)
+                if observed and (game.sleeper_player_id, game.game_id) in self.forfeited
+                else game
+                for game in adapted.opportunities
+            ),
         )
 
     def _deadline(self, player_game: ReplayPlayerGame) -> datetime:
@@ -384,13 +359,6 @@ class _FullAdvisorExecutor:
 
         return next(
             item for item in self.state.player_games if (item.sleeper_id, item.game_id) == key
-        )
-
-    def _opportunity(self, state: TeamWeekState, key: tuple[str, str]) -> GameOpportunity:
-        """Resolve the planning opportunity matching one started player-game."""
-
-        return next(
-            item for item in state.opportunities if (item.sleeper_player_id, item.game_id) == key
         )
 
     def _game_start(self, game_id: str) -> datetime:
