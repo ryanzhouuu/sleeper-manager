@@ -54,6 +54,7 @@ class RecoveryObligation:
     created_at: datetime
     input_version: str
     recovery_moves: tuple[LineupMove, ...] = ()
+    bench_capacity_floor: int | None = None
 
     def __post_init__(self) -> None:
         for moment in (self.recovery_at, self.deadline, self.created_at):
@@ -64,6 +65,8 @@ class RecoveryObligation:
             raise PlanningStateError("Recovery requires distinct added player-games")
         if not self.created_at < self.deadline <= self.recovery_at:
             raise PlanningStateError("Recovery must remain possible before its cutoff")
+        if self.bench_capacity_floor is not None and self.bench_capacity_floor < 0:
+            raise PlanningStateError("Observed bench capacity cannot be negative")
         _require_text(self.input_version, "Recovery input version")
 
     @property
@@ -77,6 +80,7 @@ class RecoveryObligation:
                     self.attempt_assignments,
                     self.recovery_at,
                     self.deadline,
+                    self.bench_capacity_floor,
                 )
             ).encode()
         ).hexdigest()

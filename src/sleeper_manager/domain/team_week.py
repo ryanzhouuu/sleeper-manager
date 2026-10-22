@@ -54,6 +54,7 @@ class TeamWeekState:
     reserve_player_ids: tuple[str, ...] = ()
     week_ends_at: datetime | None = None
     recovery_obligations: tuple[RecoveryObligation, ...] = ()
+    recovery_failures: tuple[str, ...] = ()
     recovery_forfeitures: tuple[tuple[str, str], ...] = ()
     roster_eligibility: tuple[tuple[str, tuple[str, ...]], ...] = ()
 

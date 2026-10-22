@@ -1,3 +1,6 @@
+"""Persist idempotent advice and issue confirmations only for explicitly named player actions."""
+
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
@@ -41,6 +44,7 @@ class RecommendationRequest:
     open_sleeper_url: str
     trace_json: str = "{}"
     idempotency_key: str | None = None
+    acknowledgement_targets: tuple[RecommendationRecord, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,7 +169,32 @@ class NotificationLoop:
             or request.decision_type in self._acknowledgement_kinds
         )
         actions: list[NotificationAction] = []
-        if requires_acknowledgements:
+        targets = request.acknowledgement_targets
+        if not targets:
+            payload = json.loads(request.trace_json)
+            target_ids = (
+                payload.get("confirmation_targets", []) if isinstance(payload, dict) else []
+            )
+            restored = []
+            for identity in target_ids:
+                target = await self._repository.get_recommendation(identity)
+                if (
+                    target is not None
+                    and target.status.value == "pending"
+                    and target.league_id == request.league_id
+                    and target.fantasy_week == request.fantasy_week
+                ):
+                    restored.append(target)
+            targets = tuple(restored)
+        if requires_acknowledgements and not targets:
+            targets = (recommendation,)
+        for target in targets:
+            target_name = json.loads(target.trace_json).get("player_name", target.player_id)
+            if (
+                self._acknowledgement_kinds is not None
+                and target.decision_type not in self._acknowledgement_kinds
+            ):
+                continue
             for acknowledgement_action, label in (
                 (AcknowledgementAction.LOCKED, "Locked"),
                 (AcknowledgementAction.PASSED, "Passed"),
@@ -174,15 +203,15 @@ class NotificationLoop:
                 await self._repository.create_action_token(
                     ActionTokenRecord(
                         token_hash=hash_action_token(raw_token),
-                        recommendation_id=recommendation.recommendation_id,
+                        recommendation_id=target.recommendation_id,
                         action=acknowledgement_action,
                         created_at=now,
-                        expires_at=request.deadline,
+                        expires_at=target.deadline or request.deadline,
                     )
                 )
                 actions.append(
                     NotificationAction(
-                        label=label,
+                        label=f"{target_name}: {label}" if len(targets) > 1 else label,
                         url=self._action_url(raw_token, acknowledgement_action),
                         method="POST",
                     )

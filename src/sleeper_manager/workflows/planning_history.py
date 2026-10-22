@@ -44,10 +44,10 @@ def reconcile_player_games(
         if row is None or row.observed_at > decision_time:
             result.append(game)
             continue
-        terminal_lock = row.status in {
-            LockInOpportunityStatus.ACKNOWLEDGED_LOCKED,
-            LockInOpportunityStatus.AUTOMATIC_FINAL,
-        }
+        if game.scheduled_start > decision_time:
+            result.append(game)
+            continue
+        terminal_lock = row.status is LockInOpportunityStatus.ACKNOWLEDGED_LOCKED
         eligible = (
             row.rostered_at_tipoff is True
             and row.status
@@ -73,10 +73,46 @@ def reconcile_player_games(
                 eligible_slot_indices=game.eligible_slot_indices
                 if eligible or game.scheduled_start > decision_time
                 else (),
-                status=PlanningGameStatus.FINAL if score is not None else game.status,
+                status=_retained_status(game, row),
                 completed_fantasy_score=score,
                 finalized_at=row.stabilized_at if score is not None else game.finalized_at,
                 data_quality="retained-roster-observations",
             )
         )
-    return tuple(result)
+    finalized = {
+        game.game_id: game.finalized_at
+        for game in result
+        if game.status is PlanningGameStatus.FINAL
+    }
+    active = {game.game_id for game in result if game.status is PlanningGameStatus.ACTIVE}
+    return tuple(
+        replace(
+            game,
+            status=PlanningGameStatus.FINAL,
+            finalized_at=game.finalized_at or finalized[game.game_id],
+        )
+        if game.game_id in finalized
+        else replace(game, status=PlanningGameStatus.ACTIVE)
+        if game.game_id in active
+        and game.status in {PlanningGameStatus.SCHEDULED, PlanningGameStatus.UNKNOWN}
+        else game
+        for game in result
+    )
+
+
+def _retained_status(game: GameOpportunity, row: PlayerGameEvidence) -> PlanningGameStatus:
+    """Retain verified game progress even while a score is awaiting stabilization."""
+    if row.stable_score is not None or row.status in {
+        LockInOpportunityStatus.FINALIZING,
+        LockInOpportunityStatus.ACTIONABLE,
+        LockInOpportunityStatus.ACKNOWLEDGED_LOCKED,
+        LockInOpportunityStatus.ACKNOWLEDGED_PASSED,
+        LockInOpportunityStatus.AUTOMATIC_FINAL,
+    }:
+        return PlanningGameStatus.FINAL
+    if row.status is LockInOpportunityStatus.ACTIVE and game.status in {
+        PlanningGameStatus.SCHEDULED,
+        PlanningGameStatus.UNKNOWN,
+    }:
+        return PlanningGameStatus.ACTIVE
+    return game.status

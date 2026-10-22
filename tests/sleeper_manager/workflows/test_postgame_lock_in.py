@@ -199,3 +199,35 @@ def test_changed_fingerprint_resets_and_supersedes_unacknowledged_advice(
         assert superseded.status is RecommendationStatus.SUPERSEDED
 
     asyncio.run(exercise())
+
+
+def test_a_summary_received_after_the_deadline_cannot_create_late_advice(tmp_path) -> None:
+    async def exercise() -> None:
+        repository, inputs, notifications, sender = await _prepare(tmp_path)
+        rows = await repository.list_week_lock_in_opportunities("league-1", 1)
+        deadline = min(row.action_deadline for row in rows if row.key.game_id == "g1")
+        summary = _summary_result(
+            _box("401", points=20),
+            _box("402", points=8),
+            retrieved_at=deadline + timedelta(seconds=1),
+        )
+        result = await run_postgame_lock_in(
+            "g1",
+            inputs,
+            decision_time=POSTGAME,
+            repository=repository,
+            notifications=notifications,
+            fetch_summary=_fetcher(summary),
+            runtime_policy=POLICY,
+            open_sleeper_url="https://example.test",
+            poll_id="late-summary",
+        )
+        assert result.outcome == "wait"
+        assert sender.messages == []
+        updated = await repository.get_lock_in_opportunity(
+            LockInOpportunityKey("league-1", 1, 1, "p1", "g1")
+        )
+        assert updated.status is LockInOpportunityStatus.EXPIRED
+        assert updated.consecutive_direct_poll_count == 0
+
+    asyncio.run(exercise())

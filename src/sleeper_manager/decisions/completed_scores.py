@@ -12,7 +12,7 @@ from sleeper_manager.decisions._weekly_plan_inputs import (
     future_opportunities,
     scenario_input,
 )
-from sleeper_manager.decisions._weekly_plan_models import WeeklyPlanError
+from sleeper_manager.decisions._weekly_plan_models import WeeklyPlanDecision, WeeklyPlanError
 from sleeper_manager.decisions._weekly_plan_moves import plan_moves
 from sleeper_manager.decisions.lineup import AssignmentResult, SlotAssignment
 from sleeper_manager.decisions.simulation import generate_projection_scenarios, stable_scenario_seed
@@ -37,6 +37,7 @@ class CompletedPlacement:
     expected_score: float = 0.0
     terminal_scores: tuple[float, ...] = ()
     flexibility: frozenset[int] = frozenset()
+    upcoming_decision: WeeklyPlanDecision | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,13 +193,23 @@ def compare_completed_scores(
                 future_player_sets(inputs, slots, excluded=key[0], slot_mask=key[1]),
             )
         )
+    return select_completed_placement(tuple(evaluated), tie_tolerance, minimum_confidence)
+
+
+def select_completed_placement(
+    options: tuple[CompletedPlacement, ...],
+    tie_tolerance: float,
+    minimum_confidence: float,
+) -> CompletedScoreComparison:
+    """Apply identical confidence, flexibility, and movement preferences to paired continuations."""
+    evaluated = list(options)
     baseline = next(item for item in evaluated if not item.locks)
     selected = baseline
     for item in evaluated:
         confidence = sum(
             a > b + tie_tolerance
             for a, b in zip(item.terminal_scores, baseline.terminal_scores, strict=True)
-        ) / len(scenarios)
+        ) / len(item.terminal_scores)
         if item.locks and confidence < minimum_confidence:
             continue
         if minimum_confidence > 0 and any(
@@ -213,8 +224,9 @@ def compare_completed_scores(
             and selected.locks
             and abs(item.expected_score - selected.expected_score) <= tie_tolerance
         ):
-            if item.flexibility > selected.flexibility or (
-                not selected.flexibility > item.flexibility
+            verified = bool(item.flexibility and selected.flexibility)
+            if (verified and item.flexibility > selected.flexibility) or (
+                not (verified and selected.flexibility > item.flexibility)
                 and (len(item.moves), tuple((row.player_id, row.slot_index) for row in item.locks))
                 < (
                     len(selected.moves),

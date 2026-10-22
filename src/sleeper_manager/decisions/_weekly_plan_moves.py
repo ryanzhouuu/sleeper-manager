@@ -4,6 +4,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 
 from sleeper_manager.decisions._lineup_move_search import LineupMoveSearch
+from sleeper_manager.decisions._weekly_plan_inputs import protected_performances
 from sleeper_manager.decisions._weekly_plan_models import WeeklyPlanError
 from sleeper_manager.domain.eligibility import eligible_for_slot
 from sleeper_manager.domain.planning import (
@@ -59,11 +60,7 @@ def plan_moves(
     ):
         raise WeeklyPlanError("Desired player is not eligible for its slot")
     forfeited = set(state.recovery_forfeitures)
-    active_players = {
-        item.sleeper_player_id
-        for item in state.active_opportunities
-        if (item.sleeper_player_id, item.game_id) not in forfeited
-    }
+    active_players = {item.sleeper_player_id for item in protected_performances(state)}
     protected = frozenset(observed.values()) & (active_players - locked_players)
     if not protected <= set(players):
         raise WeeklyPlanError("Lineup moves would bench an active starter")

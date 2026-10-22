@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from datetime import datetime, tzinfo
 from typing import Literal
 
+from sleeper_manager.decisions.team_recommendation import build_team_recommendation
 from sleeper_manager.decisions.weekly_plan import (
     WeeklyPlanPolicyConfig,
-    build_weekly_plan,
 )
 from sleeper_manager.domain.planning import (
     PlanningReasonCode,
@@ -45,8 +46,10 @@ from sleeper_manager.workflows.plan_rendering import (
 )
 from sleeper_manager.workflows.planning_inputs import (
     LivePlanningInputs,
-    build_live_team_week_state,
 )
+from sleeper_manager.workflows.recommendation_state import refreshed_team_state
+from sleeper_manager.workflows.recovery_schedule import schedule_recovery_checks
+from sleeper_manager.workflows.score_confirmations import prepare_score_confirmations
 
 _WEEKLY_LINEUP_PLACEHOLDER_PLAYER = "weekly-lineup"
 _DEFAULT_POLICY = WeeklyPlanPolicyConfig()
@@ -105,16 +108,34 @@ async def _run_weekly_lineup_workflow(
     local_timezone: tzinfo | None,
     policy: WeeklyPlanPolicyConfig | None,
     clock: Clock | None,
-    trigger: Literal["daily", "pre_tipoff"],
+    trigger: Literal["daily", "pre_tipoff", "postgame"],
+    prepared_plan: WeeklyPlan | None = None,
+    prepared_state: TeamWeekState | None = None,
 ) -> WeeklyLineupWorkflowResult:
     now = (clock or _utc_now)()
     await repository.expire_recommendations(now)
-    state = build_live_team_week_state(inputs, decision_time=decision_time)
-    plan = build_weekly_plan(
-        state,
-        lead_time=inputs.move_lead_time,
-        policy=policy or _DEFAULT_POLICY,
+    state = await refreshed_team_state(inputs, repository, decision_time)
+    plan = (
+        prepared_plan
+        if prepared_plan is not None and prepared_state == state
+        else build_team_recommendation(
+            state,
+            lead_time=inputs.move_lead_time,
+            policy=policy or _DEFAULT_POLICY,
+        )
     )
+    refreshed = await refreshed_team_state(
+        inputs, repository, max(decision_time, (clock or _utc_now)())
+    )
+    if (
+        refreshed.fixed_slots != state.fixed_slots
+        or refreshed.passed_opportunities != state.passed_opportunities
+    ):
+        state = refreshed
+        plan = build_team_recommendation(
+            state, lead_time=inputs.move_lead_time, policy=policy or _DEFAULT_POLICY
+        )
+    await schedule_recovery_checks(repository, plan, now)
     rendered = render_weekly_plan(
         plan,
         player_names=player_names,
@@ -131,6 +152,18 @@ async def _run_weekly_lineup_workflow(
     trace = append_availability_trace(
         serialize_weekly_plan_trace(plan, trigger=trigger), notes, material_hash
     )
+    confirmations = await prepare_score_confirmations(
+        repository,
+        plan,
+        message=rendered.message,
+        trace_json=trace,
+        now=now,
+        player_names=dict(player_names) if player_names else None,
+    )
+    if confirmations:
+        payload = json.loads(trace)
+        payload["confirmation_targets"] = [row.recommendation_id for row in confirmations]
+        trace = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     idempotency_key = await _allocate_idempotency_key(repository, plan, material_hash=material_hash)
     await _supersede_other_pending(
         repository,
@@ -198,6 +231,7 @@ async def _run_weekly_lineup_workflow(
         open_sleeper_url=open_sleeper_url,
         trace_json=trace,
         idempotency_key=idempotency_key,
+        acknowledgement_targets=confirmations,
     )
     result = await notifications.run(request)
     outcome: Literal["notified", "duplicate", "blocked", "delivery_failed"]
@@ -261,8 +295,8 @@ async def _allocate_idempotency_key(
 
 
 def _is_quiet_plan(plan: WeeklyPlan) -> bool:
-    return plan.status is PlanStatus.NO_ACTION or (
-        plan.status is PlanStatus.DEGRADED and not plan.moves
+    return (plan.status is PlanStatus.NO_ACTION and not plan.score_actions) or (
+        plan.status is PlanStatus.DEGRADED and not (plan.moves or plan.score_actions)
     )
 
 
@@ -275,12 +309,17 @@ def _should_notify(plan: WeeklyPlan, deadline: datetime, now: datetime) -> bool:
         return False
     if plan.status is PlanStatus.BLOCKED:
         return not _is_deadline_withdrawal(plan)
-    return plan.status in (PlanStatus.ACTION_REQUIRED, PlanStatus.DEGRADED) and bool(plan.moves)
+    return plan.status in (PlanStatus.ACTION_REQUIRED, PlanStatus.DEGRADED) and bool(
+        plan.moves or plan.score_actions
+    )
 
 
 def _recommendation_deadline(plan: WeeklyPlan, inputs: LivePlanningInputs) -> datetime:
-    if plan.moves:
-        return min(move.deadline for move in plan.moves)
+    if plan.moves or plan.score_actions:
+        return min(
+            [move.deadline for move in plan.moves]
+            + [action.deadline for action in plan.score_actions]
+        )
     return inputs.week_window.ends_at
 
 

@@ -1,10 +1,12 @@
 """Value a bounded observe/Lock/Pass stage before the future assignment approximation."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from math import ceil
 
+from sleeper_manager.decisions._lock_flexibility import future_player_sets
 from sleeper_manager.decisions._weekly_plan_continuations import PreparedContinuationTopology
+from sleeper_manager.decisions._weekly_plan_lock_targets import LockChoices
 from sleeper_manager.decisions.lineup import AssignmentCandidate, AssignmentResult
 from sleeper_manager.decisions.simulation import Scenario, ScenarioInput, SimulationError
 from sleeper_manager.domain.planning import StarterSlot
@@ -35,6 +37,7 @@ class _Choice:
     continuation: _Continuation
     expected_future: float
     thresholds: tuple[tuple[str, float], ...]
+    flexibility: frozenset[int] = frozenset()
 
 
 def recourse_terminal_values(
@@ -49,10 +52,12 @@ def recourse_terminal_values(
     minimum_confidence: float,
     tie_tolerance: float,
     ignored_candidate_ids: frozenset[str] = frozenset(),
+    placement_options: Mapping[AssignmentResult, LockChoices] | None = None,
+    score_samples: dict[AssignmentResult, tuple[float, ...]] | None = None,
 ) -> dict[AssignmentResult, float]:
     """Choose joint batch locks using inner draws, then score them on outer draws.
 
-    Current placements are the modeled lock slots. The stage resolves the batch
+    Supplied placements include executable pre-lock realignment. The stage resolves the batch
     together and leaves later opportunities to the existing hindsight assignment
     approximation; it does not simulate later reforecasting or repeated Waits.
     """
@@ -78,13 +83,27 @@ def recourse_terminal_values(
         )
         for key in set(assignment_keys.values())
     }
+    if placement_options:
+        for assignment, options in placement_options.items():
+            key = assignment_keys[assignment]
+            subsets[key] = tuple(
+                tuple(
+                    _Placement(sample, player, slot_bits[index]) for sample, player, index in choice
+                )
+                for choice in options
+            )
+    continuation_subsets = {subset for options in subsets.values() for subset in options}
+    for subset in tuple(continuation_subsets):
+        continuation_subsets.update(
+            tuple(item for index, item in enumerate(subset) if mask & (1 << index))
+            for mask in range(1 << len(subset))
+        )
     continuations = {
         subset: _Continuation(
             (fixed_players | frozenset(item.player_id for item in subset)) & topology.player_ids,
             topology.full_slot_mask & ~sum(item.slot_bit for item in subset),
         )
-        for options in subsets.values()
-        for subset in options
+        for subset in continuation_subsets
     }
     requested: dict[frozenset[str], frozenset[int]] = {}
     for continuation in continuations.values():
@@ -99,6 +118,12 @@ def recourse_terminal_values(
         for inner_key, scores in inner_scores.items():
             scores.append(tables[inner_key.excluded][inner_key.slot_mask])
     means = {key: sum(scores) / len(scores) for key, scores in inner_scores.items()}
+    flexibility = {
+        child: future_player_sets(
+            future_inputs, open_slots, excluded=child.excluded, slot_mask=child.slot_mask
+        )
+        for child in inner_scores
+    }
     thresholds: dict[tuple[_Continuation, _Continuation], float] = {}
     choices: dict[tuple[_Placement, ...], tuple[_Choice, ...]] = {}
     for key, subsets_for_assignment in subsets.items():
@@ -125,11 +150,18 @@ def recourse_terminal_values(
                     )
                 gates.append((item.sample_id, thresholds[edge]))
             prepared.append(
-                _Choice(tuple(item.sample_id for item in subset), child, means[child], tuple(gates))
+                _Choice(
+                    tuple(item.sample_id for item in subset),
+                    child,
+                    means[child],
+                    tuple(gates),
+                    flexibility[child],
+                )
             )
         choices[key] = tuple(prepared)
     fixed_score = sum(item.score for item in fixed_assignments)
     totals = {key: 0.0 for key in choices}
+    samples: dict[tuple[_Placement, ...], list[float]] = {key: [] for key in choices}
     for scenario in scenarios:
         sampled = dict(scenario.values)
         tables = topology.best_scores_by_excluded_players(sampled, requested)
@@ -147,12 +179,25 @@ def recourse_terminal_values(
                     sampled.get(candidate_id, 0) for candidate_id in choice.sample_ids
                 )
                 value = current_score + choice.expected_future
-                if value > best_score + tie_tolerance:
+                if value > best_score + tie_tolerance or (
+                    best.sample_ids
+                    and abs(value - best_score) <= tie_tolerance
+                    and choice.flexibility
+                    and best.flexibility
+                    and choice.flexibility > best.flexibility
+                ):
                     best, best_score, retained_score = choice, value, current_score
             continuation = best.continuation
-            totals[key] += (
+            terminal = (
                 fixed_score + retained_score + tables[continuation.excluded][continuation.slot_mask]
             )
+            totals[key] += terminal
+            if score_samples is not None:
+                samples[key].append(terminal)
+    if score_samples is not None:
+        score_samples.update(
+            {assignment: tuple(samples[key]) for assignment, key in assignment_keys.items()}
+        )
     return {
         assignment: round(totals[key] / len(scenarios), 6)
         for assignment, key in assignment_keys.items()

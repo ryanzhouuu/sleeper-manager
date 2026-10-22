@@ -34,7 +34,7 @@ def test_trace_preserves_swap_participants_and_action_type() -> None:
 
     trace = json.loads(serialize_weekly_plan_trace(plan))
 
-    assert trace["schema_version"] == 2
+    assert trace["schema_version"] == 3
     assert trace["moves"] == [
         {
             "kind": "swap",

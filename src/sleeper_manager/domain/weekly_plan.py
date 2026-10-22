@@ -58,6 +58,7 @@ class WeeklyPlan:
     score_actions: tuple[PlannedScoreAction, ...] = ()
     pre_lock_move_count: int = 0
     recovery_obligations: tuple[RecoveryObligation, ...] = ()
+    recovery_failures: tuple[str, ...] = ()
     forfeited_opportunities: tuple[tuple[str, str], ...] = ()
     bench_player_ids: tuple[str, ...] = ()
 
@@ -180,6 +181,7 @@ class WeeklyPlan:
             ),
             tuple(row.recovery_id for row in self.recovery_obligations),
             self.forfeited_opportunities,
+            self.recovery_failures,
             self.bench_player_ids,
             tuple((row.player_id, row.game_id) for row in self.passed_opportunities),
             self.league_id,

@@ -111,7 +111,7 @@ def test_postgame_lock_advice_survives_injury_fetch_failure(tmp_path: Path) -> N
                 player_names={"p1": "Ann", "p2": "Ben"},
             )
 
-        locks = [message for message in sender.messages if message.title == "Lock Ann?"]
+        locks = [message for message in sender.messages if "Then lock Ann" in message.message]
         assert len(locks) == 1
         assert "injury updates are unavailable" in locks[0].message.lower()
         assert "provisional" in locks[0].message.lower()

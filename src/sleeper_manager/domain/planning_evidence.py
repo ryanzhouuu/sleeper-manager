@@ -52,6 +52,10 @@ class PlanningReasonCode(StrEnum):
     ACKNOWLEDGEMENT_CONFLICT = "acknowledgement_conflict"
     AMBIGUOUS_EVENT_ORDER = "ambiguous_event_order"
     DEADLINE_ELAPSED = "deadline_elapsed"
+    SEARCH_LIMIT = "search_limit"
+    LOW_CONFIDENCE = "low_confidence"
+    RECOVERY_WINDOW_CLOSED = "recovery_window_closed"
+    MISSING_TIPOFF_EVIDENCE = "missing_tipoff_evidence"
 
 
 @dataclass(frozen=True, slots=True)

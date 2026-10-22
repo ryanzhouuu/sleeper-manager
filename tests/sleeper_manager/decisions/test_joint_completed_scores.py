@@ -114,3 +114,21 @@ def test_a_completed_bench_player_does_not_become_lockable() -> None:
     game = _completed("bench", 100, indices=(0,))
     state = _state((game,), starter_slots=(StarterSlot(0, "UTIL"),))
     assert compare_completed_scores(state, scenario_count=8).selected.locks == ()
+
+
+def test_equal_values_preserve_verified_future_flexibility_before_fewer_moves() -> None:
+    guard = _completed("guard", 30, indices=(0, 1))
+    center = _opportunity(
+        "center", "future", NOW + timedelta(days=1), ("C",), ((0, 1),), eligible_slot_indices=(1,)
+    )
+    state = replace(
+        _state(
+            (guard, center),
+            starter_slots=(StarterSlot(0, "PG"), StarterSlot(1, "UTIL")),
+            observed=(ObservedStarter(1, "guard", ("PG",)),),
+        ),
+        bench_capacity=1,
+    )
+    selected = compare_completed_scores(state, scenario_count=8).selected
+    assert selected.locks[0].slot_index == 0
+    assert len(selected.moves) == 1

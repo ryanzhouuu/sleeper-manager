@@ -8,6 +8,8 @@ from sleeper_manager.domain.planning import GameOpportunity, TeamWeekState
 
 def feasible_lock_slot_indices(state: TeamWeekState, game: GameOpportunity) -> frozenset[int]:
     """Allow active starter realignment, while preserving fixed slots and tipoff eligibility."""
+    if game.sleeper_player_id in state.reserve_player_ids:
+        return frozenset()
     if any(row.player_id == game.sleeper_player_id for row in state.observed_starters):
         return frozenset(
             lock.slot_index

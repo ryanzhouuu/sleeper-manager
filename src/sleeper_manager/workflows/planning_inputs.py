@@ -277,7 +277,7 @@ def build_live_team_week_state(
                     membership_segment=None,
                     eligible_slot_indices=eligible_slot_indices,
                     eligible_positions=positions,
-                    rostered_at_tipoff=True,
+                    rostered_at_tipoff=True if game.start_time > decision_time else None,
                     availability_status=availability_status,
                     availability_evidence_at=availability_evidence_at,
                     projection=snapshot,
@@ -303,6 +303,20 @@ def build_live_team_week_state(
         blocking,
     )
 
+    unknown_tipoff = any(
+        game.rostered_at_tipoff is None
+        and game.scheduled_start <= decision_time
+        and game.sleeper_player_id in {row.player_id for row in observed}
+        and game.sleeper_player_id not in {row.player_id for row in fixed_slots}
+        and not any(
+            later.sleeper_player_id == game.sleeper_player_id
+            and game.scheduled_start < later.scheduled_start <= decision_time
+            for later in reconciled_games
+        )
+        for game in reconciled_games
+    )
+    if unknown_tipoff:
+        warnings.append(PlanningReasonCode.MISSING_TIPOFF_EVIDENCE)
     reasons = _unique_reasons(blocking)
     warning_reasons = tuple(reason for reason in _unique_reasons(warnings) if reason not in reasons)
     try:
@@ -316,6 +330,8 @@ def build_live_team_week_state(
             roster_player_ids=tuple(dict.fromkeys(roster_player_ids)),
             bench_capacity=sum(slot.position == "BN" for slot in profile.roster_slots),
             reserve_player_ids=roster.reserve_ids if roster is not None else (),
+            week_ends_at=inputs.week_window.ends_at,
+            roster_eligibility=tuple(sorted(positions_by_player.items())),
             observed_starters=observed,
             opportunities=reconciled_games,
             fixed_slots=fixed_slots,
@@ -328,7 +344,11 @@ def build_live_team_week_state(
             freshness=_freshness_summary(inputs),
             eligibility_quality=(
                 PlanningQuality.PARTIAL
-                if reasons or _missing_eligibility(roster_player_ids, positions_by_player)
+                if reasons
+                or unknown_tipoff
+                or _missing_eligibility(roster_player_ids, positions_by_player)
+                else PlanningQuality.BEST_KNOWN_CONSTRAINTS_ORACLE
+                if inputs.player_game_evidence
                 else PlanningQuality.EXACT
             ),
             exclusions=reasons,
