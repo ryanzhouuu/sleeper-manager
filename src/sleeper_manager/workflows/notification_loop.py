@@ -216,7 +216,9 @@ class NotificationLoop:
                     NotificationAction(
                         label=f"{target_name}: {label}" if len(targets) > 1 else label,
                         url=self._action_url(raw_token, acknowledgement_action),
-                        method="POST",
+                        method="GET",
+                        kind="view",
+                        clear=False,
                     )
                 )
         notification = Notification(

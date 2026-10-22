@@ -4,7 +4,7 @@ from typing import Any
 
 import httpx
 
-from sleeper_manager.notifications.base import Notification
+from sleeper_manager.notifications.base import Notification, ntfy_action
 from sleeper_manager.notifications.parts import ntfy_parts
 
 
@@ -48,16 +48,7 @@ class NtfySender:
         if notification.click_url:
             payload["click"] = notification.click_url
         if notification.actions:
-            payload["actions"] = [
-                {
-                    "action": "http",
-                    "label": action.label,
-                    "url": action.url,
-                    "method": action.method,
-                    "clear": action.clear,
-                }
-                for action in notification.actions
-            ]
+            payload["actions"] = [ntfy_action(action) for action in notification.actions]
 
         headers = {}
         if self._access_token:

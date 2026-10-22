@@ -4,7 +4,7 @@ import asyncio
 import json
 from typing import Any
 
-from sleeper_manager.notifications.base import Notification
+from sleeper_manager.notifications.base import Notification, ntfy_action
 
 
 class CloudflareNtfySender:
@@ -27,16 +27,7 @@ class CloudflareNtfySender:
         if notification.click_url:
             payload["click"] = notification.click_url
         if notification.actions:
-            payload["actions"] = [
-                {
-                    "action": "http",
-                    "label": action.label,
-                    "url": action.url,
-                    "method": action.method,
-                    "clear": action.clear,
-                }
-                for action in notification.actions
-            ]
+            payload["actions"] = [ntfy_action(action) for action in notification.actions]
         headers = {"content-type": "application/json"}
         if self._access_token:
             headers["authorization"] = f"Bearer {self._access_token}"
