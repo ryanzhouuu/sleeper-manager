@@ -44,6 +44,11 @@ HTTP failure; recording retry guidance does not change the scheduled retry polic
 Each planning consumer claims due daily, pre-tipoff, postgame, or delivery-retry work. Daily and
 pre-tipoff wakes run the weekly lineup planner at most once and refresh live Lock-In
 opportunity rows.
+Pre-tipoff watches cover only the current fantasy week. Unchanged watches do not
+write or reset retry timing. Each reconciliation cancels at most 50 obsolete future
+watches, so legacy rows retire gradually without a large cleanup burst.
+D1 schedule upserts retry recognized transient connection/reset failures at most
+twice with short jittered backoff. Work claims and other writes do not gain those retries.
 Postgame wakes fetch ESPN game summaries directly, stabilize finals, and may send
 Lock, Pass, or unavailable-warning notifications. Lineup notifications include
 advice without action links.

@@ -15,6 +15,7 @@ from sleeper_manager.persistence.base import (
 from sleeper_manager.workflows.planning_inputs import LivePlanningInputs
 
 _CRON_INTERVAL = timedelta(minutes=5)
+_MAX_OBSOLETE_CANCELLATIONS = 50
 
 
 async def _replace_future_pre_tipoff(
@@ -23,17 +24,20 @@ async def _replace_future_pre_tipoff(
     inputs: LivePlanningInputs,
     scheduled_at: datetime,
 ) -> None:
-    """Replace future watches from the latest roster schedule without reviving closed work."""
+    """Reconcile this week's watches and gradually retire obsolete future rows."""
     wanted = {
         game.provider_id: game
         for game in _roster_games(inputs)
-        if game.start_time > scheduled_at and game.status is GameStatus.SCHEDULED
+        if game.start_time > scheduled_at
+        and game.status is GameStatus.SCHEDULED
+        and inputs.week_window.contains(game.start_time)
     }
-    existing = await repository.list_scheduled_work(
-        kind=DueWorkKind.PRE_TIPOFF,
-        statuses=(ScheduledWorkStatus.PENDING, ScheduledWorkStatus.RETRY),
-    )
+    existing = await repository.list_scheduled_work(kind=DueWorkKind.PRE_TIPOFF)
+    by_key = {work.dedupe_key: work for work in existing}
+    canceled = 0
     for work in existing:
+        if work.status not in (ScheduledWorkStatus.PENDING, ScheduledWorkStatus.RETRY):
+            continue
         if work.game_id in wanted:
             continue
         if work.due_at <= scheduled_at and (work.deadline is None or work.deadline <= scheduled_at):
@@ -41,14 +45,27 @@ async def _replace_future_pre_tipoff(
         await repository.upsert_scheduled_work(
             replace(work, status=ScheduledWorkStatus.CANCELED, updated_at=scheduled_at)
         )
+        canceled += 1
+        if canceled >= _MAX_OBSOLETE_CANCELLATIONS:
+            break
     for game in wanted.values():
         key = f"pre_tipoff:{game.provider_id}"
+        due_at = game.start_time - policy.move_lead_time - _CRON_INTERVAL
+        previous = by_key.get(key)
+        if previous is not None:
+            if previous.status in (ScheduledWorkStatus.RUNNING, ScheduledWorkStatus.COMPLETED):
+                continue
+            if previous.deadline == game.start_time and (
+                previous.status is ScheduledWorkStatus.RETRY
+                or (previous.status is ScheduledWorkStatus.PENDING and previous.due_at == due_at)
+            ):
+                continue
         await repository.upsert_scheduled_work(
             ScheduledWorkRecord(
                 work_id=_work_id(key),
                 dedupe_key=key,
                 kind=DueWorkKind.PRE_TIPOFF,
-                due_at=game.start_time - policy.move_lead_time - _CRON_INTERVAL,
+                due_at=due_at,
                 status=ScheduledWorkStatus.PENDING,
                 game_id=game.provider_id,
                 deadline=game.start_time,
