@@ -1,6 +1,6 @@
 """Validate reported Sleeper actions without treating advice or delivery as execution."""
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
 from enum import StrEnum
 
@@ -13,6 +13,13 @@ class ManagerAction(StrEnum):
     NOT_LOCKED = "not_locked"
     LOCKED = "locked"
     PASSED = "passed"
+
+
+@dataclass(frozen=True)
+class ManagerEdit:
+    current: LockInOpportunityRecord
+    action: ManagerAction
+    actual_slot: tuple[int, str] | None
 
 
 def reported_decision(

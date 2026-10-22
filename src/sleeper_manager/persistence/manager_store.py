@@ -19,11 +19,23 @@ from sleeper_manager.persistence.manager_sql import (
     SUPERSEDE_DECISIONS,
     UPDATE_DECISION,
 )
-from sleeper_manager.workflows.manager_decisions import ManagerAction, reported_decision
+from sleeper_manager.workflows.manager_decisions import (
+    ManagerAction,
+    ManagerEdit,
+    reported_decision,
+)
 
 
 class D1ManagerStore(D1StateRepository):
     """Reuse D1 decoding without expanding the scheduler repository's interface."""
+
+    async def save_decisions(
+        self, edits: tuple[ManagerEdit, ...], *, batch_id: str, now: datetime
+    ) -> bool:
+        """Save one submitted set atomically and queue one plan for the resulting state."""
+        from sleeper_manager.persistence.manager_batch import save_manager_batch
+
+        return await save_manager_batch(self, edits, batch_id=batch_id, now=now)
 
     async def preview_token(self, token_hash: str) -> dict[str, object] | None:
         """Read a scoped token and its message without consuming it."""
