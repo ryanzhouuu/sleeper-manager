@@ -103,7 +103,7 @@ def test_save_corrects_false_lock_and_shows_replan_pending(environment, store): 
     assert response.status == 303
     assert row(store).acknowledged_action is None
     editor = asyncio.run(manage(owner_request(), environment, None, now=NOW))
-    assert "Not locked yet" in editor.body
+    assert "Recorded: <strong>Wait</strong>" in editor.body
     assert "A new plan is queued or running" in editor.body
     assert "Correction history" in editor.body
     assert "32.80 pts" in editor.body
@@ -203,3 +203,52 @@ def test_expired_access_key_and_bad_login_reveal_no_decisions(environment):  # t
     assert response.status == 403 and "Player name" not in response.body
     environment.MANAGER_ACCESS_KEY = ""
     assert asyncio.run(manage(owner_request(), environment, None, now=NOW)).status == 503
+
+
+def batch_request(action="not_locked", **overrides):  # type: ignore[no-untyped-def]
+    session = issue_session(SECRET, NOW)
+    return owner_request(
+        "/manage/save",
+        method="POST",
+        session=session,
+        values={
+            "csrf": csrf_proof(SECRET, session),
+            "batch_id": CHANGE_ID,
+            "count": "1",
+            "player_id_0": "player",
+            "game_id_0": "game",
+            "version_0": "0",
+            "action_0": action,
+            **overrides,
+        },
+    )
+
+
+def test_shared_form_saves_changed_actions_and_queues_one_plan(environment, store):  # type: ignore[no-untyped-def]
+    response = asyncio.run(manage(batch_request(), environment, None, now=NOW))
+    assert response.status == 303
+    assert row(store).acknowledged_action is None
+    assert len(asyncio.run(store.list_scheduled_work())) == 1
+
+
+def test_unchanged_shared_form_does_not_enqueue_or_audit(environment, store):  # type: ignore[no-untyped-def]
+    response = asyncio.run(manage(batch_request("locked"), environment, None, now=NOW))
+    assert response.status == 303
+    assert asyncio.run(store.list_scheduled_work()) == ()
+    assert asyncio.run(store.decision_history("league", 1, 1)) == []
+
+
+@pytest.mark.parametrize(
+    "fields,status",
+    [
+        ({"version_0": "9"}, 409),
+        ({"count": "17"}, 400),
+        ({"player_id_0": "other"}, 400),
+        ({"action_0": "invalid"}, 400),
+        ({"csrf": "wrong"}, 403),
+    ],
+)
+def test_invalid_batch_form_changes_nothing(environment, store, fields, status):  # type: ignore[no-untyped-def]
+    assert asyncio.run(manage(batch_request(**fields), environment, None, now=NOW)).status == status
+    assert row(store).acknowledged_action == "locked"
+    assert asyncio.run(store.list_scheduled_work()) == ()

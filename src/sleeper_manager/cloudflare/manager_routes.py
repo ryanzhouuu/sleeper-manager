@@ -17,6 +17,7 @@ from sleeper_manager.cloudflare.manager_auth import (
     valid_csrf,
 )
 from sleeper_manager.cloudflare.manager_context import load_manager_context
+from sleeper_manager.cloudflare.manager_submission import save_manager_form
 from sleeper_manager.cloudflare.manager_views import editor_page, login_page
 from sleeper_manager.cloudflare.planning_signal import publish_planning_wake
 from sleeper_manager.persistence.lock_in_opportunities import LockInOpportunityKey
@@ -79,6 +80,18 @@ async def manage(request: Any, env: Any, fetcher: Any, *, now: datetime) -> Form
             status=503,
         )
     if request.method == "POST":
+        if "batch_id" in values:
+            try:
+                saved, changed = await save_manager_form(values, store, context, now)
+            except (KeyError, ValueError) as error:
+                return page("Decision not saved", f"<p>{escape(str(error))}</p>", status=400)
+            if not saved:
+                return page(
+                    "Decision changed", "<p>Reload and review the latest status.</p>", status=409
+                )
+            if changed:
+                await publish_planning_wake(env, now)
+            return _redirect("/manage")
         try:
             action = ManagerAction(values.get("action", ""))
             change_id = UUID(values["change_id"]).hex

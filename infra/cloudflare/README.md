@@ -73,14 +73,21 @@ available for audit.
 
 ## Owner controls
 
+The editor lists each player's newest verified, finalized performance while it is
+still lockable. Advisor Lock/Pass/Wait and recorded Wait/Locked/Passed are separate:
+a recommendation never records an action. Choose actions across the cards, then
+use the shared **Save changes and update plan** button. A stale selection rejects
+the entire save; successful saves retain correction history and queue one plan.
+Confirmed locks remain visible with correction controls. Expired or forfeited
+scores move to history with an automatic outcome and reason.
+
 `GET /manage` serves the private decision editor linked from the Next.js dashboard.
 Set a high-entropy `MANAGER_ACCESS_KEY` of at least 32 characters as a Worker secret.
 The login form exchanges it for an HttpOnly, Secure, SameSite=Strict cookie scoped
 to `/manage`; rotating the secret invalidates existing sessions. Without this
 secret the editor returns 503. Public `/home` never includes the key or session.
 
-Each completed player/game offers **Not locked yet**, **Locked in Sleeper**, and
-**Passed**. These record actions already performed in Sleeper. Locks require a
+Choices record actions already performed in Sleeper. Locks require a
 stable eligible score and the player's currently observed starter slot. A saved
 correction preserves prior evidence, expires old confirmation links, and queues a
 new plan. Both pages show that the plan is updating while this work is pending.

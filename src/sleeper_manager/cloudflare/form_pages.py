@@ -14,7 +14,8 @@ background:#11161d;border:1px solid #8baac6;padding:.6rem;max-width:100%}button{
 cursor:pointer}button:focus-visible,input:focus-visible,select:focus-visible{
 outline:2px solid #e5eaf0;outline-offset:3px}small{color:#b2c0cd}pre{white-space:pre-wrap}
 .notice{border-left:3px solid #8baac6;padding:.75rem}.actions{display:flex;gap:.75rem;
-flex-wrap:wrap}details{margin-top:1rem}li{margin:.5rem 0}
+flex-wrap:wrap}details{margin-top:1rem}li{margin:.5rem 0}fieldset{border:0;padding:0;margin:0}
+.choice{display:inline-flex;align-items:center;gap:.4rem;margin-right:1rem}
 """
 
 
@@ -78,7 +79,7 @@ async def form_values(request: Any) -> dict[str, str]:
                 raise ValueError("Form too large")
     finally:
         reader.releaseLock()
-    values = parse_qs(chunks.decode("utf-8"), keep_blank_values=True, max_num_fields=20)
+    values = parse_qs(chunks.decode("utf-8"), keep_blank_values=True, max_num_fields=70)
     if any(len(items) != 1 for items in values.values()):
         raise ValueError("Duplicate fields")
     return {key: items[0] for key, items in values.items()}

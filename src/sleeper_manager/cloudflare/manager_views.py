@@ -8,10 +8,15 @@ from zoneinfo import ZoneInfo
 
 from sleeper_manager.cloudflare.form_pages import FormPage, hidden, page
 from sleeper_manager.cloudflare.manager_context import ManagerContext
+from sleeper_manager.cloudflare.manager_games import (
+    lockable_games,
+    recommendation_for,
+    recorded_state,
+)
 from sleeper_manager.persistence.base import RecommendationRecord
 from sleeper_manager.persistence.lock_in_opportunities import LockInOpportunityRecord
 
-LABELS = {"not_locked": "Not locked yet", "locked": "Locked in Sleeper", "passed": "Passed"}
+LABELS = {"not_locked": "Wait", "locked": "Locked in Sleeper", "passed": "Passed"}
 
 
 def login_page(*, rejected: bool = False) -> FormPage:
@@ -32,15 +37,21 @@ def _moment(value: datetime, context: ManagerContext) -> str:
 
 
 def decision_card(
-    record: LockInOpportunityRecord, context: ManagerContext, csrf: str, reported: str | None
+    record: LockInOpportunityRecord,
+    context: ManagerContext,
+    index: int,
+    *,
+    now: datetime,
+    plan: RecommendationRecord | None,
 ) -> str:
     """A game's score is observed evidence, never an editable input."""
     key = record.key
     name = context.names.get(key.player_id, key.player_id)
-    action = record.acknowledged_action or reported
-    current = LABELS.get(action or "", "Not reported")
+    action = record.acknowledged_action or "not_locked"
     options = "".join(
-        f'<option value="{value}"{" selected" if value == action else ""}>{label}</option>'
+        f'<label class="choice"><input type="radio" name="action_{index}" '
+        f'value="{value}"{" checked" if value == action else ""}>'
+        f"{'&#128274; ' if value == 'locked' else ''}{label}</label>"
         for value, label in LABELS.items()
     )
     score = (
@@ -55,15 +66,13 @@ def decision_card(
     return (
         f"<section><h2>{escape(name)}</h2><p>{escape(_moment(record.scheduled_start, context))}"
         f" · game {escape(key.game_id)}</p><p>{score} · {escape(placement)}</p>"
-        f"<p>Recorded status: <strong>{current}</strong></p>"
-        '<form method="post" action="/manage/save">'
-        + hidden("csrf", csrf)
-        + hidden("player_id", key.player_id)
-        + hidden("game_id", key.game_id)
-        + hidden("version", record.row_version)
-        + hidden("change_id", uuid4().hex)
-        + f'<label>What have you done in Sleeper? <select name="action">{options}</select></label>'
-        '<button type="submit">Save and update plan</button></form></section>'
+        f"<p>Lock window ends: {escape(_moment(record.action_deadline, context))}</p>"
+        f"<p>Advisor: <strong>{recommendation_for(record, plan, now)}</strong><br>"
+        f"Recorded: <strong>{recorded_state(record, now)}</strong></p>"
+        + hidden(f"player_id_{index}", key.player_id)
+        + hidden(f"game_id_{index}", key.game_id)
+        + hidden(f"version_{index}", record.row_version)
+        + f"<fieldset><legend>What have you done in Sleeper?</legend>{options}</fieldset></section>"
     )
 
 
@@ -78,10 +87,6 @@ def editor_page(
     plan: RecommendationRecord | None,
 ) -> FormPage:
     """Keep recorded actions separate from advice and expose previous values for corrections."""
-    latest = {
-        (str(row["player_id"]), str(row["game_id"])): str(row["action"])
-        for row in reversed(history)
-    }
     if pending:
         summary = '<p class="notice">Decision saved. A new plan is queued or running. '
         summary += '<a href="/manage">Refresh to check the result</a>.</p>'
@@ -91,10 +96,41 @@ def editor_page(
         )
     else:
         summary = "<p>A new plan has not completed yet.</p>"
-    cards = "".join(
-        decision_card(row, context, csrf, latest.get((row.key.player_id, row.key.game_id)))
+    active = lockable_games(records, context, now)
+    corrections = tuple(row for row in records if row.acknowledged_action)
+    advice = None if pending else plan
+    cards = (
+        "".join(
+            decision_card(row, context, i, now=now, plan=advice) for i, row in enumerate(active)
+        )
+        or "<section>No lockable games to review yet.</section>"
+    )
+    if corrections:
+        cards += "<details><summary>Locked this week / correct a recorded action</summary>"
+        cards += "<p>Correct a recorded action only if the saved record is wrong.</p>"
+        cards += (
+            "".join(
+                decision_card(row, context, i, now=now, plan=advice)
+                for i, row in enumerate(corrections, start=len(active))
+            )
+            + "</details>"
+        )
+    if active or corrections:
+        cards = (
+            '<form method="post" action="/manage/save">'
+            + hidden("csrf", csrf)
+            + hidden("batch_id", uuid4().hex)
+            + hidden("count", len(active) + len(corrections))
+            + cards
+            + '<button type="submit">Save changes and update plan</button></form>'
+        )
+    visible = {row.key for row in (*active, *corrections)}
+    past = "".join(
+        f"<li>{escape(context.names.get(row.key.player_id, row.key.player_id))} · "
+        f"{escape(_moment(row.scheduled_start, context))} · {row.stable_score:.2f} pts<br>"
+        f"{recorded_state(row, now)}</li>"
         for row in records
-        if row.scheduled_start <= now or row.acknowledged_action
+        if row.key not in visible and row.stable_score is not None
     )
     entries = []
     for row in history:
@@ -112,7 +148,8 @@ def editor_page(
         "<p>Record only actions you have already performed in Sleeper. "
         "Saving here updates the assistant's plan; it does not change Sleeper.</p>"
         + summary
-        + (cards or "<section>No completed games to review yet.</section>")
+        + cards
+        + (f"<details><summary>Past games</summary><ul>{past}</ul></details>" if past else "")
         + "<details><summary>Correction history</summary><ul>"
         + ("".join(entries) or "<li>No manual corrections yet.</li>")
         + '</ul></details><form method="post" action="/manage/logout">'

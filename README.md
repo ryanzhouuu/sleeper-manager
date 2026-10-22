@@ -98,7 +98,11 @@ delivering advice never proves that a swap, lock, or pass occurred. Discord link
 and ntfy confirmation buttons open a review screen; only submitting its form records
 an action. The dashboard
 links to owner-only controls for recording or correcting each player/game's
-Lock/Pass status. Saving retains correction history and queues a fresh plan; see
+Lock/Pass status. The editor shows each player's latest finalized, still-lockable game,
+with the advisor's recommendation separate from the recorded Wait/Locked/Passed state.
+Select actions across games and save once to queue one plan for the complete set.
+Expired or forfeited performances move to history with their reason; confirmed locks
+remain visible. Saving retains correction history and queues a fresh plan; see
 [owner controls](infra/cloudflare/README.md#owner-controls) for access setup.
 
 Stable completed scores remain available for joint comparison with later games.

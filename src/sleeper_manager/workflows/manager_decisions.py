@@ -42,6 +42,12 @@ def reported_decision(
         elif current.scheduled_start > now:
             status = LockInOpportunityStatus.SCHEDULED
     else:
+        if current.status in {
+            LockInOpportunityStatus.INELIGIBLE,
+            LockInOpportunityStatus.EXPIRED,
+            LockInOpportunityStatus.RECONCILIATION_REQUIRED,
+        }:
+            raise ValueError("This performance is not eligible to be locked or passed.")
         if current.scheduled_start >= now or current.stable_score is None:
             raise ValueError("A stable completed game score is required.")
         if now >= current.action_deadline:

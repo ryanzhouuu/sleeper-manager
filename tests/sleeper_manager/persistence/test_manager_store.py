@@ -168,6 +168,8 @@ def test_rejected_transaction_rolls_back_audit_decision_and_replan(store):  # ty
         ({"scheduled_start": NOW + timedelta(hours=1)}, (0, "PF")),
         ({"rostered_at_tipoff": False}, (0, "PF")),
         ({"action_deadline": NOW}, (0, "PF")),
+        ({"status": LockInOpportunityStatus.INELIGIBLE}, (0, "PF")),
+        ({"status": LockInOpportunityStatus.RECONCILIATION_REQUIRED}, (0, "PF")),
         ({}, None),
         ({}, (0, "PG")),
     ],
