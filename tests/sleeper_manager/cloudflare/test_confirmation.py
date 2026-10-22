@@ -96,6 +96,7 @@ def test_get_and_preview_never_consume_token(store):  # type: ignore[no-untyped-
         assert '<form method="post"' in result.body
         assert "&lt;script&gt;" in result.body
         assert result.headers["cache-control"] == "no-store"
+        assert result.headers["referrer-policy"] == "same-origin"
     row = asyncio.run(store.preview_token(hash_action_token(TOKEN)))
     assert row["used_at"] is None
 
@@ -115,7 +116,9 @@ def test_post_records_once(store):  # type: ignore[no-untyped-def]
     )
 
 
-@pytest.mark.parametrize("origin", [None, "https://evil.test", "https://worker.test.evil.test"])
+@pytest.mark.parametrize(
+    "origin", [None, "null", "https://evil.test", "https://worker.test.evil.test"]
+)
 def test_cross_site_post_does_not_consume(store, origin):  # type: ignore[no-untyped-def]
     result = asyncio.run(confirmation(request("POST", origin), store, {}, now=NOW))
     assert result.status == 403

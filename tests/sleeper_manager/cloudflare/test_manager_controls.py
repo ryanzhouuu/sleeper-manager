@@ -67,6 +67,17 @@ def test_public_access_gets_login_without_private_data(environment):  # type: ig
     assert "Owner access" in response.body
     assert "Player name" not in response.body and "32.80" not in response.body
     assert "set-cookie" not in response.headers
+    assert response.headers["referrer-policy"] == "same-origin"
+
+
+@pytest.mark.parametrize("origin", [None, "null", "https://evil.test"])
+def test_login_rejects_untrusted_origin_even_with_valid_key(environment, origin):  # type: ignore[no-untyped-def]
+    login = owner_request("/manage/login", method="POST", values={"password": SECRET})
+    login.headers["origin"] = origin
+    response = asyncio.run(manage(login, environment, None, now=NOW))
+    assert response.status == 403
+    assert "set-cookie" not in response.headers
+    assert "Request rejected" in response.body
 
 
 def test_login_issues_secure_cookie_and_logout_clears_it(environment):  # type: ignore[no-untyped-def]

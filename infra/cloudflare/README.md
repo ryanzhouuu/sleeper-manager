@@ -89,6 +89,8 @@ remain stored separately. A correction cannot restore a performance forfeited by
 a bench transition or an elapsed deadline.
 
 `POST /manage/login`, `/manage/save`, and `/manage/logout` require the same origin.
+Form pages use `Referrer-Policy: same-origin` to preserve browser POST origins
+while withholding referrers from external sites.
 Save/logout also require a session-bound CSRF proof. Submitted league, week and
 roster identities are never trusted; scope is resolved from the configured owner.
 The editor records decisions only in the assistant's database, not in Sleeper.

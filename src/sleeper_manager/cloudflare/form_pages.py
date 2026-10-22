@@ -38,7 +38,8 @@ def page(title: str, content: str, *, status: int = 200) -> FormPage:
         {
             "content-type": "text/html; charset=utf-8",
             "cache-control": "no-store",
-            "referrer-policy": "no-referrer",
+            # no-referrer turns browser form POST origins into "null".
+            "referrer-policy": "same-origin",
             "x-content-type-options": "nosniff",
             "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; "
             "form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
