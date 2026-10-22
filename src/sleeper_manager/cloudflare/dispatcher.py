@@ -284,6 +284,9 @@ async def _run_planning(
                 minimum_lock_in_confidence=policy.manager_intent.minimum_confidence,
             ),
             clock=clock,
+            daily_confirmation=any(
+                work.kind is DueWorkKind.DAILY and work.local_day is not None for work in claimed
+            ),
         )
         if _delivery_failed(result):
             await _enqueue_delivery_retry(repository, result, clock())

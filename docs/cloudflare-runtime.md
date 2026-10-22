@@ -40,9 +40,8 @@ missing, pending, retrying, and running work trigger a
 deduplicated per league and manager-local day; unsuccessful delivery can retry.
 An active retry lease cannot suppress a delay alert. Completed or canceled work
 stays quiet; prior-day and recovery jobs do not satisfy today's daily completion.
-These operational
-records use decision type `daily_plan_delayed`, fantasy week `0`, and player `system`
-to keep them separate from weekly advice. They have no notification actions.
+These operational records use decision type `daily_plan_delayed`, fantasy week `0`,
+and player `system` to keep them separate from weekly advice. They have no notification actions.
 Watchdog failures are logged without blocking planning.
 Failed ntfy deliveries retain the HTTP status, a numeric provider error code from a
 small JSON response, and numeric `Retry-After` guidance when present. Response text,
@@ -59,7 +58,11 @@ D1 schedule upserts retry recognized transient connection/reset failures at most
 twice with short jittered backoff. Work claims and other writes do not gain those retries.
 Postgame wakes fetch ESPN game summaries directly, stabilize finals, and may send
 Lock, Pass, or unavailable-warning notifications. Lineup notifications include
-advice without action links.
+advice without action links. Scheduled daily no-change results send one
+`daily_plan_completed` confirmation per manager-local day, including when daily and
+pre-tipoff work coalesce. The confirmation preserves availability warnings, uses
+normal delivery claims and retries, and expires at local midnight or fantasy-week
+end, whichever comes first. Other unchanged pre-tipoff results stay quiet.
 Lock-In notifications include Locked and Passed acknowledgement links. Notifications
 do not append an Open Sleeper link. The `test-notification`
 command remains a local diagnostic and is never invoked from `scheduled()`.
@@ -81,7 +84,8 @@ Team rosters and schedules retain their existing cache windows. Injury fetch fai
 produce the `injury_data_unavailable` warning instead of blocking advice; planning does
 not substitute the previous cached snapshot or treat missing designations as healthy.
 Valid official game reports still apply. Actionable lineup and Lock/Pass notifications
-include a provisional-availability warning, while no-action lineup plans stay quiet.
+include a provisional-availability warning. Daily no-change confirmations preserve
+the same warnings; other no-action lineup plans stay quiet.
 Successful but expired injury snapshots still fail the fifteen-minute freshness check
 at the final decision cutoff. Roster, schedule, identity, projection, and deadline
 failures retain their existing blocking rules.

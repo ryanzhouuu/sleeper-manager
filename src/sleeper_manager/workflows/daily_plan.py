@@ -32,6 +32,7 @@ from sleeper_manager.workflows.availability_advice import (
     state_availability_notes,
 )
 from sleeper_manager.workflows.availability_rendering import state_availability_summary
+from sleeper_manager.workflows.daily_completion import notify_daily_completion
 from sleeper_manager.workflows.notification_loop import (
     Clock,
     NotificationLoop,
@@ -82,7 +83,9 @@ async def run_daily_plan(
     local_timezone: tzinfo | None = None,
     policy: WeeklyPlanPolicyConfig | None = None,
     clock: Clock | None = None,
+    daily_confirmation: bool = False,
 ) -> WeeklyLineupWorkflowResult:
+    """Optionally confirm scheduled daily completion even when advice requires no action."""
     return await _run_weekly_lineup_workflow(
         inputs,
         decision_time=decision_time,
@@ -94,6 +97,7 @@ async def run_daily_plan(
         policy=policy,
         clock=clock,
         trigger="daily",
+        daily_confirmation=daily_confirmation,
     )
 
 
@@ -111,6 +115,7 @@ async def _run_weekly_lineup_workflow(
     trigger: Literal["daily", "pre_tipoff", "postgame"],
     prepared_plan: WeeklyPlan | None = None,
     prepared_state: TeamWeekState | None = None,
+    daily_confirmation: bool = False,
 ) -> WeeklyLineupWorkflowResult:
     now = (clock or _utc_now)()
     await repository.expire_recommendations(now)
@@ -185,6 +190,22 @@ async def _run_weekly_lineup_workflow(
             deadline=inputs.week_window.ends_at,
             now=now,
         )
+        if daily_confirmation:
+            completed = await notify_daily_completion(
+                recommendation,
+                notifications,
+                now=(clock or _utc_now)(),
+                local_timezone=local_timezone,
+                open_sleeper_url=open_sleeper_url,
+            )
+            if completed is not None:
+                return WeeklyLineupWorkflowResult(
+                    "notified" if completed.status == "created" else completed.status,
+                    plan,
+                    completed.recommendation,
+                    completed.notification,
+                    completed.delivery,
+                )
         return WeeklyLineupWorkflowResult("no_action", plan, recommendation, None, None)
 
     if plan.status is PlanStatus.BLOCKED and _is_deadline_withdrawal(plan):

@@ -23,7 +23,10 @@ from sleeper_manager.persistence.tokens import generate_action_token, hash_actio
 from sleeper_manager.workflows.plan_rendering import WEEKLY_LINEUP_DECISION_TYPE
 
 DAILY_PLAN_DELAYED_KIND = "daily_plan_delayed"
-_UNACKNOWLEDGEABLE_KINDS = frozenset({WEEKLY_LINEUP_DECISION_TYPE, DAILY_PLAN_DELAYED_KIND})
+DAILY_PLAN_COMPLETED_KIND = "daily_plan_completed"
+_UNACKNOWLEDGEABLE_KINDS = frozenset(
+    {WEEKLY_LINEUP_DECISION_TYPE, DAILY_PLAN_DELAYED_KIND, DAILY_PLAN_COMPLETED_KIND}
+)
 
 
 class Clock(Protocol):

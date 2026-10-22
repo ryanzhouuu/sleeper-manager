@@ -26,7 +26,9 @@ async def run_pre_tipoff_check(
     local_timezone: tzinfo | None = None,
     policy: WeeklyPlanPolicyConfig | None = None,
     clock: Clock | None = None,
+    daily_confirmation: bool = False,
 ) -> WeeklyLineupWorkflowResult:
+    """Confirm no-change completion only when this wake also owns today's daily work."""
     return await _run_weekly_lineup_workflow(
         inputs,
         decision_time=decision_time,
@@ -38,6 +40,7 @@ async def run_pre_tipoff_check(
         policy=policy,
         clock=clock,
         trigger="pre_tipoff",
+        daily_confirmation=daily_confirmation,
     )
 
 

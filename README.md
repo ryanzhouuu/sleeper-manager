@@ -112,8 +112,10 @@ lock detection.
 Large deliveries use ordered message parts to preserve the whole
 recommendation and its confirmations within [Discord's content limit](https://docs.discord.com/developers/resources/webhook#execute-webhook)
 and [ntfy's message/action limits](https://docs.ntfy.sh/publish/#limitations).
-Unchanged successful deliveries stay quiet. A failed multipart delivery retries
-as a whole, so already received parts can repeat after a partial transport failure.
+Scheduled daily runs send one confirmation per manager-local day when no changes
+are needed, including availability warnings. Unchanged pre-tipoff results stay quiet.
+A failed multipart delivery retries as a whole, so already received parts can repeat
+after a partial transport failure.
 
 Lineup and Lock/Pass messages show the expected weekly team total assuming the
 recommendation is followed, including locked scores and modeled remaining slots.
