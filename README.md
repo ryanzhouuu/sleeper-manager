@@ -95,7 +95,8 @@ the current lineup, confirmed decisions, and retained player-game observations.
 They show every starter slot, bench choices, exact lock positions, ordered actions,
 and recovery deadlines. Locked/Passed buttons still confirm individual actions;
 delivering advice never proves that a swap, lock, or pass occurred. Discord links
-and ntfy confirmation buttons open a review screen; only submitting its form records an action. The dashboard
+and ntfy confirmation buttons open a review screen; only submitting its form records
+an action. The dashboard
 links to owner-only controls for recording or correcting each player/game's
 Lock/Pass status. Saving retains correction history and queues a fresh plan; see
 [owner controls](infra/cloudflare/README.md#owner-controls) for access setup.

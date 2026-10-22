@@ -1,3 +1,5 @@
+"""Shared message records and action serialization for notification adapters."""
+
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -36,6 +38,3 @@ class Notification:
 
 class NotificationSender(Protocol):
     async def send(self, notification: Notification) -> None: ...
-
-
-"""Delivery-neutral message actions distinguish browser review from background requests."""
