@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from urllib.parse import parse_qs, urlparse
 
 from sleeper_manager.cloudflare.confirmation import confirmation
+from sleeper_manager.cloudflare.form_pages import json_page
 from sleeper_manager.cloudflare.home import build_home
 from sleeper_manager.cloudflare.manager_routes import manage
 from sleeper_manager.cloudflare.providers import CloudflareESPNProvider, CloudflareSleeperClient
@@ -67,6 +68,8 @@ class Default(_WorkerEntrypoint):  # type: ignore[misc]
             return Response.json({"status": "ok"})
         if parsed.path.startswith("/manage"):
             form = await manage(request, self.env, fetch, now=datetime.now(UTC))
+            if request.headers.get("accept") == "application/json":
+                form = json_page(form)
             return Response(form.body, status=form.status, headers=form.headers)
         if parsed.path == "/home":
             if request.method != "GET":
@@ -97,6 +100,8 @@ class Default(_WorkerEntrypoint):  # type: ignore[misc]
             now=datetime.now(UTC),
             env=self.env,
         )
+        if request.headers.get("accept") == "application/json":
+            form = json_page(form)
         return Response(form.body, status=form.status, headers=form.headers)
 
     async def scheduled(self, controller, env, ctx):  # type: ignore[no-untyped-def]

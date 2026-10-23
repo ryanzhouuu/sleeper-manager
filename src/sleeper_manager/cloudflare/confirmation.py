@@ -51,6 +51,11 @@ async def confirmation(
             "Decision saved" if saved else "Confirmation unavailable",
             f'<p>{message}</p><p><a href="/manage">Review or correct decisions</a></p>',
             status=result.status_code,
+            data={
+                "status": "message",
+                "title": "Decision saved" if saved else "Confirmation unavailable",
+                "message": message,
+            },
         )
     if request.method != "GET":
         return page("Method not allowed", "", status=405)
@@ -94,4 +99,14 @@ async def confirmation(
         + hidden("action", action.value)
         + f'<button type="submit">{label}</button></form>'
         '<p><a href="/manage">Review or correct decisions</a></p>',
+        data={
+            "status": "confirmation",
+            "heading": "Confirm your Sleeper lock" if locked else "Record your decision to pass",
+            "title": str(record["title"]),
+            "message": str(record["message"]),
+            "instruction": instruction + " This page does not change your Sleeper lineup.",
+            "label": label,
+            "token": token,
+            "action": action.value,
+        },
     )

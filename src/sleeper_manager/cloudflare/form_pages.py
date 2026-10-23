@@ -1,6 +1,7 @@
 """Small server-rendered forms shared by owner controls and scoped confirmations."""
 
-from dataclasses import dataclass, field
+import json
+from dataclasses import dataclass, field, replace
 from html import escape
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -72,9 +73,17 @@ class FormPage:
     body: str
     status: int = 200
     headers: dict[str, str] = field(default_factory=dict)
+    data: dict[str, object] = field(default_factory=dict)
 
 
-def page(title: str, content: str, *, status: int = 200, heading: bool = True) -> FormPage:
+def page(
+    title: str,
+    content: str,
+    *,
+    status: int = 200,
+    heading: bool = True,
+    data: dict[str, object] | None = None,
+) -> FormPage:
     """Content is already escaped markup; never cache credentials or decision forms."""
     return FormPage(
         '<!doctype html><html lang="en"><meta charset="utf-8">'
@@ -93,6 +102,16 @@ def page(title: str, content: str, *, status: int = 200, heading: bool = True) -
             "img-src https://a.espncdn.com; "
             "form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
         },
+        data if data is not None else {"status": "message", "title": title},
+    )
+
+
+def json_page(form: FormPage) -> FormPage:
+    """Expose the explicit document rather than HTML to the same authenticated route callers."""
+    return replace(
+        form,
+        body=json.dumps(form.data, allow_nan=False),
+        headers={**form.headers, "content-type": "application/json; charset=utf-8"},
     )
 
 

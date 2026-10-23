@@ -92,7 +92,16 @@ async def manage(request: Any, env: Any, fetcher: Any, *, now: datetime) -> Form
             try:
                 saved, changed = await save_manager_form(values, store, context, now)
             except (KeyError, ValueError) as error:
-                return page("Decision not saved", f"<p>{escape(str(error))}</p>", status=400)
+                return page(
+                    "Decision not saved",
+                    f"<p>{escape(str(error))}</p>",
+                    status=400,
+                    data={
+                        "status": "message",
+                        "title": "Decision not saved",
+                        "message": str(error),
+                    },
+                )
             if not saved:
                 return page(
                     "Decision changed", "<p>Reload and review the latest status.</p>", status=409
@@ -124,7 +133,12 @@ async def manage(request: Any, env: Any, fetcher: Any, *, now: datetime) -> Form
                 actual_slot=context.actual_slot(key.player_id),
             )
         except (KeyError, ValueError) as error:
-            return page("Decision not saved", f"<p>{escape(str(error))}</p>", status=400)
+            return page(
+                "Decision not saved",
+                f"<p>{escape(str(error))}</p>",
+                status=400,
+                data={"status": "message", "title": "Decision not saved", "message": str(error)},
+            )
         if not saved:
             return page(
                 "Decision changed",

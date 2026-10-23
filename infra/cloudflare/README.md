@@ -93,6 +93,12 @@ The login form exchanges it for an HttpOnly, Secure, SameSite=Strict cookie scop
 to `/manage`; rotating the secret invalidates existing sessions. Without this
 secret the editor returns 503. Public `/home` never includes the key or session.
 
+The existing `/manage` and `/ack` routes also accept `Accept: application/json` for
+the Next.js UI. JSON uses the same owner authentication, CSRF, token validation,
+version checks, and no-store policy as HTML. Editor documents contain private row
+versions, CSRF proofs, and correction history; fetch them only on the server or
+through the authenticated same-origin UI. Opening a JSON confirmation is read-only.
+
 Wait leaves the game undecided. Locked confirms a lock already performed in Sleeper.
 Pass records the manager's decision not to lock; the player may stay starting or
 be substituted, and no Sleeper action is required to record that decision. Locks require a

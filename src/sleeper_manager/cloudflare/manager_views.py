@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from sleeper_manager.cloudflare.form_pages import FormPage, hidden, page
 from sleeper_manager.cloudflare.home_document import player_image_url, team_image_url
 from sleeper_manager.cloudflare.manager_context import ManagerContext
+from sleeper_manager.cloudflare.manager_document import editor_document
 from sleeper_manager.cloudflare.manager_games import (
     lockable_games,
     recommendation_for,
@@ -31,6 +32,7 @@ def login_page(*, rejected: bool = False) -> FormPage:
         'autocomplete="current-password" maxlength="256"></label>'
         '<button type="submit">Continue</button></form></section>',
         status=403 if rejected else 200,
+        data={"status": "login", "rejected": rejected},
     )
 
 
@@ -211,4 +213,5 @@ def editor_page(
         + hidden("csrf", csrf)
         + '<button type="submit">Sign out ↗</button></form></footer>',
         heading=False,
+        data=editor_document(context, records, history, csrf, now=now, pending=pending, plan=plan),
     )

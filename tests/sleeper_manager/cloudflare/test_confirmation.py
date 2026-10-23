@@ -1,6 +1,7 @@
 """A link preview cannot acknowledge an action; only an explicit form submission can."""
 
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import urlencode
@@ -8,6 +9,7 @@ from urllib.parse import urlencode
 import pytest
 
 from sleeper_manager.cloudflare.confirmation import confirmation
+from sleeper_manager.cloudflare.form_pages import json_page
 from sleeper_manager.cloudflare.worker import Default
 from sleeper_manager.persistence.base import (
     AcknowledgementAction,
@@ -181,3 +183,17 @@ def test_corrected_confirmation_cannot_resurface_an_old_acknowledgement(store): 
         result = asyncio.run(confirmation(request(method), store, VALUES, now=NOW))
         assert result.status == 409
         assert "Confirmation replaced" in result.body
+
+
+def test_confirmation_document_preserves_explicit_submission_and_token_checks(store):  # type: ignore[no-untyped-def]
+    preview = asyncio.run(confirmation(request(), store, VALUES, now=NOW))
+    document = json.loads(json_page(preview).body)
+    assert document["status"] == "confirmation"
+    assert document["token"] == TOKEN and document["action"] == "locked"
+    assert document["message"] == "A <script> must be escaped"
+    assert "Save only after locking" in document["instruction"]
+    assert not asyncio.run(store.is_locked("rec"))
+    rejected = asyncio.run(confirmation(request("POST", "https://evil.test"), store, {}, now=NOW))
+    assert rejected.status == 403
+    assert json.loads(json_page(rejected).body)["title"] == "Confirmation rejected"
+    assert not asyncio.run(store.is_locked("rec"))
