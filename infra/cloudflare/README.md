@@ -4,6 +4,9 @@ This directory contains the state and forecast D1 migrations for the Python Work
 canonical Wrangler configuration is `wrangler.toml` at the repository root so
 `pywrangler` can discover it from the project root.
 
+The deployed Worker is `locksmith`. D1 databases and the planning queue use the
+resource names recorded in that configuration.
+
 ## First deployment
 
 From the repository root:
