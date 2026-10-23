@@ -95,6 +95,8 @@ Plans carry the saved-decision version used during computation; old advice stays
 unavailable after a failed or expired job. **Retry plan** queues another attempt
 without changing recorded actions. Concurrent decision edits reject obsolete
 plan publication at the database boundary.
+A plan matching the latest saved-decision version is displayed even when an older
+planning job still holds a lease.
 The history lists manual corrections; existing notification acknowledgements
 remain stored separately. A correction cannot restore a performance forfeited by
 a bench transition or an elapsed deadline.

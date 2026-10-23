@@ -67,6 +67,15 @@ def test_new_plan_must_include_latest_saved_decision_version(store):  # type: ig
     )
 
 
+def test_current_plan_is_visible_even_while_an_older_replan_lease_remains(store):  # type: ignore[no-untyped-def]
+    correct(store)
+    version = asyncio.run(store.decision_state_version("league", 1))
+    assert asyncio.run(store.create_recommendation(replace(plan(version), title="Fresh plan")))
+    assert asyncio.run(store.has_pending_manager_plan(NOW))
+    result = asyncio.run(_recommendation(store, "league", 1, now=NOW))
+    assert result[2] == "Fresh plan"
+
+
 def test_stale_plan_cannot_be_published_after_a_concurrent_save(store):  # type: ignore[no-untyped-def]
     captured = asyncio.run(store.decision_state_version("league", 1))
     correct(store)

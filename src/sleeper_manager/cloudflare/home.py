@@ -419,8 +419,20 @@ async def _recommendation(
     now: datetime | None = None,
 ) -> tuple[_SectionStatus, str | None, str | None, str | None, datetime | None]:
     try:
+        record = await repository.latest_current_recommendation(
+            league_id,
+            week,
+            decision_type=_WEEKLY_LINEUP,
+        )
+        if (
+            record is not None
+            and now is not None
+            and record.deadline is not None
+            and record.deadline <= now
+        ):
+            record = None
         pending = getattr(repository, "has_pending_manager_plan", None)
-        if pending is not None and now is not None and await pending(now):
+        if record is None and pending is not None and now is not None and await pending(now):
             return (
                 "ready",
                 None,
@@ -428,11 +440,6 @@ async def _recommendation(
                 "Your decision is saved. A new plan is queued or running; refresh shortly.",
                 None,
             )
-        record = await repository.latest_current_recommendation(
-            league_id,
-            week,
-            decision_type=_WEEKLY_LINEUP,
-        )
     except Exception:
         return "unavailable", None, None, None, None
     if record is None:
@@ -446,8 +453,6 @@ async def _recommendation(
                 "Open owner controls to retry.",
                 None,
             )
-        return "empty", None, None, None, None
-    if record.deadline is not None and now is not None and record.deadline <= now:
         return "empty", None, None, None, None
     return (
         "ready",

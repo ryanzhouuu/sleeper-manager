@@ -136,10 +136,12 @@ async def manage(request: Any, env: Any, fetcher: Any, *, now: datetime) -> Form
     records = await store.list_week_lock_in_opportunities(context.league_id, context.week)
     owned = tuple(row for row in records if row.key.roster_id == context.roster_id)
     history = await store.decision_history(context.league_id, context.week, context.roster_id)
-    pending = await store.has_pending_manager_plan(now)
     plan = await store.latest_current_recommendation(
         context.league_id, context.week, decision_type="weekly_lineup"
     )
+    if plan is not None and plan.deadline is not None and plan.deadline <= now:
+        plan = None
+    pending = plan is None and await store.has_pending_manager_plan(now)
     return editor_page(
         context, owned, history, csrf_proof(secret, session), now=now, pending=pending, plan=plan
     )
