@@ -62,7 +62,13 @@ def recommendation_for(
         return "Unavailable"
 
 
-def recorded_state(row: LockInOpportunityRecord, now: datetime) -> str:
+def recorded_state(
+    row: LockInOpportunityRecord,
+    now: datetime,
+    *,
+    context: ManagerContext | None = None,
+    records: tuple[LockInOpportunityRecord, ...] = (),
+) -> str:
     """Expiry and forfeiture are automatic outcomes, not user-reported Pass actions."""
     if row.status is Status.ACKNOWLEDGED_LOCKED:
         return "Locked in Sleeper"
@@ -74,4 +80,14 @@ def recorded_state(row: LockInOpportunityRecord, now: datetime) -> str:
         return "Automatic final score"
     if now >= row.action_deadline or row.status is Status.EXPIRED:
         return "Passed · lock window closed"
+    if context is not None and context.actual_slot(row.key.player_id) is None:
+        return "Passed · eligibility lost" if row.rostered_at_tipoff is True else "Not lockable"
+    if any(
+        other.key.player_id == row.key.player_id
+        and row.scheduled_start < other.scheduled_start <= now
+        for other in records
+    ):
+        return "Passed · next game started"
+    if row.rostered_at_tipoff is not True or row.status is Status.RECONCILIATION_REQUIRED:
+        return "Eligibility unverified"
     return "Wait"

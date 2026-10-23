@@ -7,7 +7,11 @@ from datetime import timedelta
 import pytest
 
 from sleeper_manager.cloudflare.manager_context import ManagerContext
-from sleeper_manager.cloudflare.manager_games import lockable_games, recommendation_for
+from sleeper_manager.cloudflare.manager_games import (
+    lockable_games,
+    recommendation_for,
+    recorded_state,
+)
 from sleeper_manager.cloudflare.manager_views import editor_page
 from sleeper_manager.domain.lock_in import LockInOpportunityStatus as Status
 from sleeper_manager.persistence.base import RecommendationRecord
@@ -105,3 +109,14 @@ def test_confirmed_locks_remain_visible_with_an_explicit_correction_control(stor
     assert "Locked this week" in html
     assert "Locked in Sleeper" in html
     assert "Correct a recorded action" in html
+
+
+def test_live_bench_or_next_start_cannot_leave_an_ineligible_game_waiting_for_a_poll(store):  # type: ignore[no-untyped-def]
+    current = game(store)
+    bench = replace(CONTEXT, starters=("other",))
+    assert recorded_state(current, NOW, context=bench) == "Passed · eligibility lost"
+    newer = replace(
+        current, key=replace(KEY, game_id="next"), scheduled_start=NOW - timedelta(hours=1)
+    )
+    assert recorded_state(current, NOW, records=(newer,)) == "Passed · next game started"
+    assert current.acknowledged_action is None

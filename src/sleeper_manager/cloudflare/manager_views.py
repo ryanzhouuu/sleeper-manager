@@ -134,7 +134,7 @@ def editor_page(
     past = "".join(
         f"<li>{escape(context.names.get(row.key.player_id, row.key.player_id))} · "
         f"{escape(_moment(row.scheduled_start, context))} · {row.stable_score:.2f} pts<br>"
-        f"{recorded_state(row, now)}</li>"
+        f"{recorded_state(row, now, context=context, records=records)}</li>"
         for row in records
         if row.key not in visible and row.stable_score is not None
     )
