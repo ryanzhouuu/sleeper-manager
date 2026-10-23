@@ -1,0 +1,375 @@
+.controls-page {
+  max-width: 48rem;
+  gap: 1.25rem;
+}
+.controls-page nav {
+  font-size: 0.8rem;
+  margin-bottom: 0.5rem;
+}
+.control-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.control-heading h1,
+.control-title {
+  font-size: 1.4rem;
+  font-weight: 500;
+}
+.control-heading p {
+  font-size: 0.75rem;
+}
+.control-muted,
+.controls-page small {
+  color: #94a5b6;
+}
+.controls-page button,
+.controls-page input {
+  font: inherit;
+  color: inherit;
+}
+.controls-page button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 44px;
+  padding: 0.65rem 1rem;
+  border: 1px solid #b7d7ec;
+  border-radius: 6px;
+  background: #b7d7ec;
+  color: #12212d;
+  cursor: pointer;
+}
+.controls-page button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.controls-page :focus-visible {
+  outline: 2px solid #edf3f8;
+  outline-offset: 4px;
+}
+.controls-page pre {
+  margin: 0.75rem 0 0;
+  white-space: pre-wrap;
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.control-login {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.control-login label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  color: #94a5b6;
+}
+.control-login input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0.7rem;
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  background: var(--background);
+}
+.control-login button {
+  align-self: flex-start;
+}
+.control-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  color: #b7d7ec;
+  min-height: 1.5rem;
+}
+.control-spinner {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  border: 2px solid #344758;
+  border-top-color: #b7d7ec;
+  border-radius: 50%;
+  animation: control-spin 0.8s linear infinite;
+}
+@keyframes control-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .control-spinner {
+    animation: none;
+    border-color: #b7d7ec;
+    border-style: dotted;
+  }
+}
+.control-notice {
+  border-left: 2px solid var(--accent);
+  padding: 0.75rem 1rem;
+  font-size: 0.85rem;
+}
+.control-plan {
+  padding-bottom: 1.2rem;
+  border-bottom: 1px solid var(--rule);
+}
+.control-plan > p + p,
+.control-plan form {
+  margin-top: 0.6rem;
+  font-size: 0.8rem;
+}
+.control-fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+.control-section-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #94a5b6;
+  font-size: 0.8rem;
+}
+.control-section-title span {
+  color: #d8e6f2;
+  background: #293746;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
+.decision-card {
+  border: 1px solid #2d3946;
+  border-radius: 10px;
+  background: #19222c;
+  padding: 1rem;
+  margin-top: 0.75rem;
+}
+.decision-head,
+.decision-identity,
+.decision-states,
+.decision-states > span {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+.decision-head {
+  justify-content: space-between;
+  align-items: flex-start;
+}
+.decision-identity {
+  min-width: 0;
+}
+.decision-identity h3 {
+  font-weight: 500;
+  color: #edf3f8;
+}
+.decision-portrait {
+  border-radius: 50%;
+  object-fit: cover;
+  object-position: top;
+  background: #283543;
+  flex: none;
+}
+.decision-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.2rem;
+  font-size: 0.75rem;
+}
+.decision-meta img {
+  object-fit: contain;
+}
+.decision-score {
+  font-size: 1.65rem;
+  line-height: 1.15;
+  text-align: right;
+  flex: none;
+}
+.decision-score small {
+  display: block;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+}
+.decision-states {
+  justify-content: space-between;
+  margin: 1rem 0 0.75rem;
+  font-size: 0.75rem;
+}
+.decision-states > span {
+  gap: 0.4rem;
+}
+.control-chip {
+  border-radius: 4px;
+  padding: 0.18rem 0.4rem;
+  color: #a8bfda;
+  background: #253140;
+}
+.control-chip--lock {
+  color: #8bd6b0;
+  background: #20372f;
+}
+.control-chip--pass {
+  color: #e4bd7c;
+  background: #382f24;
+}
+.control-chip--alert {
+  color: #d6a4a4;
+  background: #372b30;
+}
+.decision-choices {
+  display: flex;
+  gap: 0.4rem;
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+.decision-choice {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.decision-choice input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+.decision-option {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  min-height: 44px;
+  border: 1px solid #344252;
+  border-radius: 6px;
+  color: #9dadbe;
+  background: #141c25;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.decision-option:hover {
+  border-color: #70849a;
+}
+.decision-choice input:checked + .decision-option {
+  border-color: #a8bfda;
+  color: #e3edf7;
+  background: #29394b;
+}
+.decision-choice input[value="locked"]:checked + .decision-option {
+  border-color: #8bd6b0;
+  color: #8bd6b0;
+  background: #20372f;
+}
+.decision-choice input[value="passed"]:checked + .decision-option {
+  border-color: #e4bd7c;
+  color: #e4bd7c;
+  background: #382f24;
+}
+.decision-choice input:focus-visible + .decision-option {
+  outline: 2px solid #edf3f8;
+  outline-offset: 3px;
+}
+.control-icon {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.decision-deadline {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.7rem;
+  color: #94a5b6;
+  font-size: 0.7rem;
+}
+.control-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.control-save-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.8rem 0 0.5rem;
+  margin-top: 1rem;
+  border-top: 1px solid var(--rule);
+  background: #11161df5;
+}
+.control-save-bar small {
+  font-size: 0.7rem;
+}
+.controls-page details {
+  margin-top: 0.3rem;
+}
+.controls-page summary {
+  min-height: 32px;
+  cursor: pointer;
+  color: var(--accent);
+}
+.controls-page li {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+}
+.control-help {
+  color: #94a5b6;
+  font-size: 0.8rem;
+}
+.control-help p {
+  margin-top: 0.5rem;
+}
+.control-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+}
+.controls-page .control-text-button {
+  background: none;
+  border: 0;
+  color: var(--accent);
+  padding: 0.5rem 0;
+}
+@media (max-width: 420px) {
+  .controls-page {
+    padding: 1.2rem 0.8rem;
+  }
+  .control-heading {
+    flex-wrap: wrap;
+    gap: 0.3rem;
+  }
+  .decision-card {
+    padding: 0.8rem;
+  }
+  .decision-identity h3 {
+    font-size: 0.9rem;
+  }
+  .decision-states {
+    gap: 0.4rem;
+  }
+  .control-save-bar {
+    gap: 0.5rem;
+  }
+  .control-save-bar small {
+    max-width: 8rem;
+  }
+}
