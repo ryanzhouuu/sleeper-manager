@@ -15,6 +15,7 @@ from sleeper_manager.persistence.lock_in_opportunities import LockInOpportunityR
 from sleeper_manager.workflows.daily_plan import _run_weekly_lineup_workflow
 from sleeper_manager.workflows.notification_loop import NotificationLoop
 from sleeper_manager.workflows.planning_inputs import LivePlanningInputs
+from sleeper_manager.workflows.planning_policy import LIVE_PLAN_POLICY
 from sleeper_manager.workflows.postgame_types import PostgameLockInResult
 from sleeper_manager.workflows.postgame_warnings import blocked_postgame_advice
 
@@ -34,8 +35,10 @@ async def deliver_coordinated_postgame(
 ) -> PostgameLockInResult:
     """Refresh the whole team instead of composing independent player optimizations."""
     config = WeeklyPlanPolicyConfig(
-        scenario_count=policy.config.scenario_count if policy else 2000,
-        postgame_scenario_count=policy.config.scenario_count if policy else 128,
+        scenario_count=policy.config.scenario_count if policy else LIVE_PLAN_POLICY.scenario_count,
+        postgame_scenario_count=(
+            policy.config.scenario_count if policy else LIVE_PLAN_POLICY.postgame_scenario_count
+        ),
         seed=policy.config.seed if policy else 0,
         minimum_lock_in_confidence=runtime_policy.manager_intent.minimum_confidence,
     )

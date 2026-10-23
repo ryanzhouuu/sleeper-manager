@@ -45,6 +45,7 @@ from sleeper_manager.workflows.forecast_collection import (
     capture_scheduled_forecast,
 )
 from sleeper_manager.workflows.notification_loop import NotificationLoop
+from sleeper_manager.workflows.planning_policy import LIVE_PLAN_POLICY
 from sleeper_manager.workflows.postgame_lock_in import LOCK_IN_ACKNOWLEDGEMENT_KINDS
 
 
@@ -179,6 +180,7 @@ async def run_scheduled(
             correlation_id=correlation,
             open_sleeper_url=open_sleeper_url,
             fetch_game_summary=CloudflareESPNProvider(fetcher, clock=tick).game_summary,
+            plan_policy=LIVE_PLAN_POLICY,
             clock=tick,
         )
     return summary.as_dict()
