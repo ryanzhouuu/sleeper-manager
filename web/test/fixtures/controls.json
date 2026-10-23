@@ -1,0 +1,31 @@
+{
+  "status": "ready",
+  "week": 1,
+  "timezone": "America/Chicago",
+  "csrf": "test-csrf-proof",
+  "batch_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "request_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "pending": false,
+  "plan": { "title": "Team plan", "message": "Review your latest game." },
+  "active": [
+    {
+      "player_id": "player",
+      "game_id": "game",
+      "version": 0,
+      "name": "Example Player",
+      "placement": "PF",
+      "start": "2026-10-22T00:00:00+00:00",
+      "deadline": "2026-10-24T00:00:00+00:00",
+      "score": 32.8,
+      "action": "not_locked",
+      "advisor": "Pass",
+      "saved": "Wait",
+      "portrait_url": null,
+      "team": "NOP",
+      "team_image_url": "https://a.espncdn.com/i/teamlogos/nba/500/no.png"
+    }
+  ],
+  "saved": [],
+  "past": [],
+  "history": []
+}
