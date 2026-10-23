@@ -78,6 +78,7 @@ still lockable. Advisor Lock/Pass/Wait and recorded Wait/Locked/Passed are separ
 a recommendation never records a decision. Choose decisions across the cards, then
 use the shared **Save & replan** button. Plan and Saved chips distinguish advice
 from recorded state; the full recommendation and help stay in expandable details.
+Cards reuse the home page's cached ESPN player portraits and NBA team logos.
 A stale selection rejects
 the entire save; successful saves retain correction history and queue one plan.
 Confirmed locks remain visible with correction controls. Expired or forfeited

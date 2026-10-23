@@ -1,12 +1,17 @@
 """Resolve editor scope from the configured Sleeper owner, never submitted identity fields."""
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-from sleeper_manager.cloudflare.home_identities import load_player_identities
-from sleeper_manager.cloudflare.providers import CloudflareSleeperClient
+from sleeper_manager.cloudflare.home_document import HomeIdentity
+from sleeper_manager.cloudflare.home_identities import (
+    fill_espn_ids,
+    load_player_identities,
+    remember_identities,
+)
+from sleeper_manager.cloudflare.providers import CloudflareESPNProvider, CloudflareSleeperClient
 from sleeper_manager.integrations.sleeper.schemas import (
     SleeperLeaguePayload,
     SleeperRosterPayload,
@@ -24,6 +29,7 @@ class ManagerContext:
     starters: tuple[str, ...]
     names: dict[str, str]
     timezone: str
+    identities: dict[str, HomeIdentity] = field(default_factory=dict)
 
     def actual_slot(self, player_id: str) -> tuple[int, str] | None:
         """Only an observed current starting slot can support a reported lock."""
@@ -56,5 +62,12 @@ async def load_manager_context(
         raise ValueError("Starter alignment unavailable")
     timezone = str(getattr(env, "TIMEZONE", "America/Chicago"))
     loaded = await load_player_identities(sleeper, store, timezone_name=timezone, now=now)
-    names = {key: value.name or key for key, value in loaded[0].items()} if loaded else {}
-    return ManagerContext(league_id, week, owned[0].roster_id, positions, starters, names, timezone)
+    identities, cached = loaded if loaded is not None else ({}, False)
+    if loaded is not None and not cached:
+        espn = CloudflareESPNProvider(fetcher, clock=lambda: now)
+        if await fill_espn_ids(espn, identities, owned[0].players):
+            await remember_identities(store, identities, timezone_name=timezone, now=now)
+    names = {key: value.name or key for key, value in identities.items()}
+    return ManagerContext(
+        league_id, week, owned[0].roster_id, positions, starters, names, timezone, identities
+    )

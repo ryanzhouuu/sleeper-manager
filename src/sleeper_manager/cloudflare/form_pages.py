@@ -56,6 +56,10 @@ justify-content:center;min-width:1.3rem;height:1.3rem;border-radius:4px;backgrou
 color:#d8e6f2;font-size:.7rem}.manager-footer{display:flex;justify-content:space-between;
 align-items:center;margin-top:1.5rem;font-size:.75rem}.manager-footer form{margin:0}
 .manager-footer button{border:0;background:none;color:#94a5b6;padding:.5rem}
+.player-heading{display:flex;align-items:center;gap:.65rem;min-width:0}
+.player-portrait{width:44px;height:44px;border-radius:50%;object-fit:cover;object-position:top;
+background:#283543;flex:none}.team-mark{width:18px;height:18px;object-fit:contain;flex:none}
+.game-meta{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap}.game-score{flex:none}
 @media(max-width:420px){main{padding:1.2rem .8rem}.game-card{padding:.8rem}.game-state{
 gap:.4rem}.game-head h2{font-size:.9rem}.save-bar{gap:.5rem}.save-bar small{max-width:8rem}}
 """
@@ -86,6 +90,7 @@ def page(title: str, content: str, *, status: int = 200, heading: bool = True) -
             "referrer-policy": "same-origin",
             "x-content-type-options": "nosniff",
             "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; "
+            "img-src https://a.espncdn.com; "
             "form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
         },
     )

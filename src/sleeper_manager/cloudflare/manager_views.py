@@ -7,6 +7,7 @@ from uuid import uuid4
 from zoneinfo import ZoneInfo
 
 from sleeper_manager.cloudflare.form_pages import FormPage, hidden, page
+from sleeper_manager.cloudflare.home_document import player_image_url, team_image_url
 from sleeper_manager.cloudflare.manager_context import ManagerContext
 from sleeper_manager.cloudflare.manager_games import (
     lockable_games,
@@ -76,11 +77,28 @@ def decision_card(
     slot = context.actual_slot(key.player_id)
     placement = slot[1] if slot else "Bench / reserve"
     deadline = escape(_moment(record.action_deadline, context))
+    identity = context.identities.get(key.player_id)
+    portrait_url = player_image_url(identity.espn_id) if identity else None
+    logo_url = team_image_url(identity.nba_team) if identity else None
+    portrait = (
+        f'<img class="player-portrait" src="{escape(portrait_url)}" alt="" '
+        'width="44" height="44" loading="lazy" decoding="async" referrerpolicy="no-referrer">'
+        if portrait_url
+        else ""
+    )
+    logo = (
+        f'<img class="team-mark" src="{escape(logo_url)}" '
+        f'alt="{escape(identity.nba_team or "")}" title="{escape(identity.nba_team or "")}" '
+        'width="18" height="18" loading="lazy" decoding="async" referrerpolicy="no-referrer">'
+        if logo_url and identity
+        else ""
+    )
     return (
         f'<section class="game-card" aria-label="{escape(name)}">'
-        f'<div class="game-head"><div><h2>{escape(name)}</h2><p class="game-meta">'
+        f'<div class="game-head"><div class="player-heading">{portrait}'
+        f'<div><h2>{escape(name)}</h2><p class="game-meta">{logo}'
         f"{escape(placement)} · {escape(_moment(record.scheduled_start, context, compact=True))}"
-        f'</p></div><div class="game-score">{score}<small>PTS</small></div></div>'
+        f'</p></div></div><div class="game-score">{score}<small>PTS</small></div></div>'
         '<div class="game-state"><div class="state-group"><span class="muted">Plan</span>'
         + _badge(recommendation_for(record, plan, now), "Advisor")
         + '</div><div class="state-group"><span class="muted">Saved</span>'

@@ -7,6 +7,7 @@ from html.parser import HTMLParser
 
 import pytest
 
+from sleeper_manager.cloudflare.home_document import HomeIdentity
 from sleeper_manager.cloudflare.manager_context import ManagerContext
 from sleeper_manager.cloudflare.manager_games import (
     lockable_games,
@@ -162,3 +163,24 @@ def test_compact_cards_escape_names_in_headings_and_accessible_labels(store):  #
     assert "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;" in html
     assert 'aria-label="Advisor: Unavailable"' in html
     assert 'value="not_locked" checked' in html
+
+
+@pytest.mark.parametrize("espn_id", ("55", None))
+def test_cards_reuse_home_image_urls_with_optional_portraits(store, espn_id):  # type: ignore[no-untyped-def]
+    context = replace(
+        CONTEXT, identities={"player": HomeIdentity("player", "Player", "NOP", espn_id)}
+    )
+    result = editor_page(context, (game(store),), [], "csrf", now=NOW, pending=False, plan=None)
+    markup = Markup()
+    markup.feed(result.body)
+    images = [attrs for tag, attrs in markup.elements if tag == "img"]
+    assert len(images) == (2 if espn_id else 1)
+    assert images[-1]["src"] == "https://a.espncdn.com/i/teamlogos/nba/500/no.png"
+    assert images[-1]["alt"] == "NOP"
+    if espn_id:
+        assert images[0]["src"] == "https://a.espncdn.com/i/headshots/nba/players/full/55.png"
+        assert images[0]["alt"] == ""
+    assert all(image["loading"] == "lazy" for image in images)
+    assert all(image["referrerpolicy"] == "no-referrer" for image in images)
+    assert "img-src https://a.espncdn.com;" in result.headers["content-security-policy"]
+    assert "default-src 'none';" in result.headers["content-security-policy"]
