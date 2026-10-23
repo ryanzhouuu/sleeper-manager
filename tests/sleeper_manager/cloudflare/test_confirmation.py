@@ -10,6 +10,7 @@ import pytest
 from sleeper_manager.cloudflare.confirmation import confirmation
 from sleeper_manager.cloudflare.worker import Default
 from sleeper_manager.persistence.base import (
+    AcknowledgementAction,
     ActionTokenRecord,
     RecommendationRecord,
     RecommendationStatus,
@@ -73,8 +74,6 @@ def store():  # type: ignore[no-untyped-def]
             )
         )
     )
-    from sleeper_manager.persistence.base import AcknowledgementAction
-
     asyncio.run(
         repo.create_action_token(
             ActionTokenRecord(
@@ -97,8 +96,41 @@ def test_get_and_preview_never_consume_token(store):  # type: ignore[no-untyped-
         assert "&lt;script&gt;" in result.body
         assert result.headers["cache-control"] == "no-store"
         assert result.headers["referrer-policy"] == "same-origin"
+        assert "Save only after locking this game in Sleeper." in result.body
     row = asyncio.run(store.preview_token(hash_action_token(TOKEN)))
     assert row["used_at"] is None
+
+
+def test_pass_records_a_choice_without_claiming_a_sleeper_action(store):  # type: ignore[no-untyped-def]
+    token = "pass-test-token"
+    values = {"token": token, "action": "passed"}
+    asyncio.run(
+        store.create_action_token(
+            ActionTokenRecord(
+                token_hash=hash_action_token(token),
+                recommendation_id="rec",
+                action=AcknowledgementAction.PASSED,
+                created_at=NOW,
+                expires_at=NOW + timedelta(hours=1),
+            )
+        )
+    )
+    preview = asyncio.run(confirmation(request(values=values), store, values, now=NOW))
+    assert "Choose not to lock this game" in preview.body
+    assert "You may keep the player starting or substitute them." in preview.body
+    assert "No action in Sleeper is required." in preview.body
+    assert "Save only after" not in preview.body
+    assert asyncio.run(store.preview_token(hash_action_token(token)))["used_at"] is None
+
+    saved = asyncio.run(confirmation(request("POST", values=values), store, {}, now=NOW))
+    assert saved.status == 200
+    assert not asyncio.run(store.is_locked("rec"))
+    assert (
+        store._database.connection.execute(
+            "SELECT action FROM acknowledgements WHERE recommendation_id='rec'"
+        ).fetchone()[0]
+        == "passed"
+    )
 
 
 def test_post_records_once(store):  # type: ignore[no-untyped-def]

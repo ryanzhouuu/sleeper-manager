@@ -45,6 +45,6 @@ def test_discord_advice_omits_sleeper_navigation_and_retains_acknowledgements(
             assert content == f"**{advice.title}**\n{advice.message}"
         else:
             assert "[Locked](https://example.test/ack?" in content
-            assert "[Passed](https://example.test/ack?" in content
+            assert "[Pass](https://example.test/ack?" in content
 
     asyncio.run(exercise())

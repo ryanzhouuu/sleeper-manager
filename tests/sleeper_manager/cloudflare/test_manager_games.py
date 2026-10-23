@@ -86,6 +86,11 @@ def test_advice_pass_does_not_change_default_wait_or_lock_selection(store):  # t
     assert html.count("Save changes and update plan") == 1
     assert html.count('action="/manage/save"') == 1
     assert 'name="batch_id"' in html
+    assert "Wait</strong> leaves this game undecided" in html
+    assert "confirms a lock you already made in Sleeper" in html
+    assert "records your decision not to lock this game" in html
+    assert "the player may stay starting or be substituted" in html
+    assert "What have you done in Sleeper?" not in html
 
 
 def test_wait_requires_a_current_valid_plan_and_missing_advice_is_unavailable(store):  # type: ignore[no-untyped-def]
@@ -108,7 +113,7 @@ def test_confirmed_locks_remain_visible_with_an_explicit_correction_control(stor
     html = editor_page(CONTEXT, (row(store),), [], "csrf", now=NOW, pending=False, plan=plan()).body
     assert "Locked this week" in html
     assert "Locked in Sleeper" in html
-    assert "Correct a recorded action" in html
+    assert "Correct a recorded decision" in html
 
 
 def test_live_bench_or_next_start_cannot_leave_an_ineligible_game_waiting_for_a_poll(store):  # type: ignore[no-untyped-def]

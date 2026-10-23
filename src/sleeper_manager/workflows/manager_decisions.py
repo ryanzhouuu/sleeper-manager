@@ -1,4 +1,4 @@
-"""Validate reported Sleeper actions without treating advice or delivery as execution."""
+"""Validate manager choices and reported locks without treating advice as execution."""
 
 from dataclasses import dataclass, replace
 from datetime import datetime

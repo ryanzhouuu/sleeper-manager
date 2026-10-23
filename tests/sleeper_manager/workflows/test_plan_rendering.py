@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from sleeper_manager.domain.lock_in import LockInDecisionKind
 from sleeper_manager.domain.planning import (
     LineupMove,
     PlanConfidence,
@@ -14,6 +15,7 @@ from sleeper_manager.domain.planning import (
     PlanStatus,
     WeeklyPlan,
 )
+from sleeper_manager.domain.planning_actions import PlannedScoreAction
 from sleeper_manager.workflows.plan_rendering import render_weekly_plan
 
 NOW = datetime(2026, 1, 5, 12, tzinfo=UTC)
@@ -67,6 +69,18 @@ def test_action_required_messages_lead_with_the_imperative() -> None:
         "Expected weekly total: 104.8 pts.\nChange versus current lineup: +4.8 pts."
     )
     assert sections[-1] == "Complete before Mon 6:50 AM CST."
+
+
+def test_pass_advice_describes_a_decision_with_optional_substitution() -> None:
+    plan = _plan(
+        score_actions=(PlannedScoreAction("p1", "game", LockInDecisionKind.PASS, 20.0, DEADLINE),),
+    )
+
+    message = render_weekly_plan(plan, player_names=NAMES).message
+
+    assert "Pass on Bob's 20.00 pts: choose not to lock this game." in message
+    assert "The player may stay starting or be substituted." in message
+    assert "confirm only after doing so in Sleeper" not in message
 
 
 def test_bench_moves_and_swaps_render_in_order() -> None:

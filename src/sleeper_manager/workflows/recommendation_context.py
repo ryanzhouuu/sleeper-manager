@@ -10,7 +10,7 @@ from sleeper_manager.domain.planning import PlanStatus, WeeklyPlan
 def score_action_phrases(
     plan: WeeklyPlan, names: Mapping[str, str] | None, kind: LockInDecisionKind | None = None
 ) -> list[str]:
-    """Place irreversible actions after every required starter realignment."""
+    """Place locks after starter realignment and distinguish Pass from a Sleeper action."""
     labels = slot_labels(plan)
     phrases = []
     for action in plan.score_actions:
@@ -24,8 +24,8 @@ def score_action_phrases(
             )
         else:
             phrases.append(
-                f"Pass {player}'s {action.score:.2f} pts for now; "
-                "confirm only after doing so in Sleeper."
+                f"Pass on {player}'s {action.score:.2f} pts: choose not to lock this game. "
+                "The player may stay starting or be substituted."
             )
     return phrases
 
@@ -68,7 +68,7 @@ def full_recommendation_context(
         )
     if plan.passed_opportunities:
         parts.append(
-            "Confirmed passes: "
+            "Decided not to lock: "
             + ", ".join(
                 f"{labels.get(row.player_id, row.player_id)} (game {row.game_id})"
                 for row in plan.passed_opportunities

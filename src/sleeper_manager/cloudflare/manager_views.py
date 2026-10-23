@@ -72,7 +72,7 @@ def decision_card(
         + hidden(f"player_id_{index}", key.player_id)
         + hidden(f"game_id_{index}", key.game_id)
         + hidden(f"version_{index}", record.row_version)
-        + f"<fieldset><legend>What have you done in Sleeper?</legend>{options}</fieldset></section>"
+        + f"<fieldset><legend>Your decision for this game</legend>{options}</fieldset></section>"
     )
 
 
@@ -86,7 +86,7 @@ def editor_page(
     pending: bool,
     plan: RecommendationRecord | None,
 ) -> FormPage:
-    """Keep recorded actions separate from advice and expose previous values for corrections."""
+    """Keep recorded decisions separate from advice and expose previous values for corrections."""
     if pending:
         summary = '<p class="notice">Decision saved. A new plan is queued or running. '
         summary += '<a href="/manage">Refresh to check the result</a>.</p>'
@@ -112,8 +112,8 @@ def editor_page(
         or "<section>No lockable games to review yet.</section>"
     )
     if corrections:
-        cards += "<details><summary>Locked this week / correct a recorded action</summary>"
-        cards += "<p>Correct a recorded action only if the saved record is wrong.</p>"
+        cards += "<details><summary>Locked this week / correct a recorded decision</summary>"
+        cards += "<p>Correct a recorded decision only if the saved record is wrong.</p>"
         cards += (
             "".join(
                 decision_card(row, context, i, now=now, plan=advice)
@@ -151,8 +151,11 @@ def editor_page(
         )
     return page(
         f"Your decisions · week {context.week}",
-        "<p>Record only actions you have already performed in Sleeper. "
-        "Saving here updates the assistant's plan; it does not change Sleeper.</p>"
+        "<p><strong>Wait</strong> leaves this game undecided. "
+        "<strong>Locked</strong> confirms a lock you already made in Sleeper. "
+        "<strong>Passed</strong> records your decision not to lock this game; "
+        "the player may stay starting or be substituted. "
+        "Saving updates the assistant's plan; it does not change your Sleeper lineup.</p>"
         + summary
         + cards
         + (f"<details><summary>Past games</summary><ul>{past}</ul></details>" if past else "")

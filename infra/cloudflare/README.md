@@ -75,7 +75,7 @@ available for audit.
 
 The editor lists each player's newest verified, finalized performance while it is
 still lockable. Advisor Lock/Pass/Wait and recorded Wait/Locked/Passed are separate:
-a recommendation never records an action. Choose actions across the cards, then
+a recommendation never records a decision. Choose decisions across the cards, then
 use the shared **Save changes and update plan** button. A stale selection rejects
 the entire save; successful saves retain correction history and queue one plan.
 Confirmed locks remain visible with correction controls. Expired or forfeited
@@ -87,7 +87,9 @@ The login form exchanges it for an HttpOnly, Secure, SameSite=Strict cookie scop
 to `/manage`; rotating the secret invalidates existing sessions. Without this
 secret the editor returns 503. Public `/home` never includes the key or session.
 
-Choices record actions already performed in Sleeper. Locks require a
+Wait leaves the game undecided. Locked confirms a lock already performed in Sleeper.
+Pass records the manager's decision not to lock; the player may stay starting or
+be substituted, and no Sleeper action is required to record that decision. Locks require a
 stable eligible score and the player's currently observed starter slot. A saved
 correction preserves prior evidence, expires old confirmation links, and queues a
 new plan. Both pages show that the plan is updating while this work is pending.

@@ -200,7 +200,7 @@ class NotificationLoop:
                 continue
             for acknowledgement_action, label in (
                 (AcknowledgementAction.LOCKED, "Locked"),
-                (AcknowledgementAction.PASSED, "Passed"),
+                (AcknowledgementAction.PASSED, "Pass"),
             ):
                 raw_token = generate_action_token()
                 await self._repository.create_action_token(

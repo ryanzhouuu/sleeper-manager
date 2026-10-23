@@ -114,10 +114,16 @@ def _evaluation_message(evaluation: LockInEvaluation) -> str:
     assert evaluation.confidence is not None
     assert evaluation.decision is not None
     alternative = "pass" if evaluation.kind is LockInEvaluationKind.LOCK else "lock"
+    instruction = (
+        "Lock the game in Sleeper, then confirm it."
+        if evaluation.kind is LockInEvaluationKind.LOCK
+        else "Record your decision not to lock this game. "
+        "You may keep the player starting or substitute them."
+    )
     return (
         f"Observed game score: {evaluation.observed_score:.2f} pts.\n\n"
         f"Expected weekly total: {evaluation.decision.expected_terminal_score:.1f} pts.\n"
         f"Alternative ({alternative}): {evaluation.alternative_expected_score:.1f} pts.\n\n"
         f"Confidence: {evaluation.confidence:.0%}. "
-        "Complete the action in Sleeper, then acknowledge it."
+        f"{instruction}"
     )

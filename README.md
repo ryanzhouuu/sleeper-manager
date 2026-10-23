@@ -93,14 +93,17 @@ remain in the stored recommendation trace.
 Daily, pre-tipoff, and postgame runs produce a complete team recommendation from
 the current lineup, confirmed decisions, and retained player-game observations.
 They show every starter slot, bench choices, exact lock positions, ordered actions,
-and recovery deadlines. Locked/Passed buttons still confirm individual actions;
-delivering advice never proves that a swap, lock, or pass occurred. Discord links
+and recovery deadlines. Locked confirms a lock already made in Sleeper; Pass records
+the manager's decision not to lock that game. Passing allows the planner to substitute
+the player without requiring a substitution. Delivering advice never records a
+decision or proves that a lineup move or lock occurred. Discord links
 and ntfy confirmation buttons open a review screen; only submitting its form records
-an action. The dashboard
+a decision. The dashboard
 links to owner-only controls for recording or correcting each player/game's
 Lock/Pass status. The editor shows each player's latest finalized, still-lockable game,
 with the advisor's recommendation separate from the recorded Wait/Locked/Passed state.
-Select actions across games and save once to queue one plan for the complete set.
+Wait leaves a game undecided. Select decisions across games and save once to queue
+one plan for the complete set.
 Expired or forfeited performances move to history with their reason; confirmed locks
 remain visible. Saving retains correction history and queues a fresh plan; see
 [owner controls](infra/cloudflare/README.md#owner-controls) for access setup.

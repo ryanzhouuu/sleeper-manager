@@ -172,7 +172,7 @@ def test_configured_acknowledgement_kinds_keep_creating_actions(tmp_path) -> Non
     assert result.notification is not None
     assert [action.label for action in result.notification.actions] == [
         "Locked",
-        "Passed",
+        "Pass",
     ]
 
 

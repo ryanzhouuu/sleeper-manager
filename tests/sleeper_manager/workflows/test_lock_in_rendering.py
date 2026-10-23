@@ -58,7 +58,12 @@ def test_actionable_messages_show_selected_and_alternative_team_totals(
     assert f"Alternative ({alternative}): 337.8 pts." in message
     assert "Observed game score: 35.00 pts." in message
     assert "Confidence: 85%." in message
-    assert "Complete the action in Sleeper, then acknowledge it." in message
+    if kind is LockInEvaluationKind.LOCK:
+        assert "Lock the game in Sleeper, then confirm it." in message
+    else:
+        assert "Record your decision not to lock this game." in message
+        assert "You may keep the player starting or substitute them." in message
+        assert "then confirm it" not in message
 
 
 def test_unavailable_advice_does_not_invent_a_weekly_estimate() -> None:

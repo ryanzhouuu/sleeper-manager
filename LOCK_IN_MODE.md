@@ -11,7 +11,11 @@ In Lock-In Mode, only **one NBA game per player per week** counts toward your fa
 After a player completes a game, you can either:
 
 1. **Lock in** that game's fantasy score.
-2. **Pass** and wait for a later game that week.
+2. Choose **not to lock** that game, which the advisor calls **Pass**.
+
+Pass is a manager decision, not an action in Sleeper. It allows the planner to
+consider substituting the player, but the player may also stay in the starting
+lineup. **Wait** means the manager has not decided whether to lock or pass yet.
 
 ## How locking in works
 

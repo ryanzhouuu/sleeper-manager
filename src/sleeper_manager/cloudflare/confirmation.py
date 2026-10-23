@@ -20,7 +20,7 @@ from sleeper_manager.persistence.tokens import hash_action_token
 async def confirmation(
     request: Any, store: D1ManagerStore, values: dict[str, str], *, now: datetime, env: Any = None
 ) -> FormPage:
-    """Opening or previewing a URL cannot record a Sleeper action."""
+    """Opening or previewing a URL cannot record a manager decision."""
     if request.method == "POST":
         if not same_origin(request):
             return page(
@@ -75,12 +75,19 @@ async def confirmation(
         )
     if record["status"] != "pending":
         return page("Confirmation replaced", "<p>Use your latest recommendation.</p>", status=409)
-    label = "I locked this game in Sleeper" if action.value == "locked" else "I passed this game"
+    locked = action.value == "locked"
+    label = "I locked this game in Sleeper" if locked else "Choose not to lock this game"
+    instruction = (
+        "Save only after locking this game in Sleeper."
+        if locked
+        else "Pass records your decision not to lock this game. "
+        "You may keep the player starting or substitute them. No action in Sleeper is required."
+    )
     return page(
-        "Confirm your Sleeper action",
+        "Confirm your Sleeper lock" if locked else "Record your decision to pass",
         f"<section><h2>{escape(str(record['title']))}</h2>"
         f"<pre>{escape(str(record['message']))}</pre></section>"
-        "<p>Save only after performing this action in Sleeper. "
+        f"<p>{instruction} "
         "This page does not change your Sleeper lineup.</p>"
         '<form method="post" action="/ack">'
         + hidden("token", token)
