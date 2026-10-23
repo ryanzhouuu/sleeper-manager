@@ -83,6 +83,31 @@ describe("server-to-Worker controls", () => {
     expect(options?.body).toBe("csrf=test&action=locked");
   });
 
+  it("validates the public host when Next.js constructs an internal request URL", async () => {
+    fetchMock.mockResolvedValue(Response.json({ status: "saved" }));
+    const request = new Request("http://internal:3000/manage/api/save", {
+      method: "POST",
+      body: "csrf=proof",
+      headers: {
+        host: "app.test",
+        "x-forwarded-host": "app.test",
+        "x-forwarded-proto": "https",
+        origin: "https://app.test",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+    });
+    expect((await forwardControl(request, "/manage/save")).status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("still rejects a different host behind a reverse proxy", async () => {
+    const request = post("https://evil.test");
+    request.headers.set("x-forwarded-host", "app.test");
+    request.headers.set("x-forwarded-proto", "https");
+    expect((await forwardControl(request, "/manage/save")).status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("preserves stale save status for the UI without retrying the write", async () => {
     fetchMock.mockResolvedValue(
       Response.json(

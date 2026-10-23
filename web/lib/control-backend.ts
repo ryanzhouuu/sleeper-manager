@@ -109,6 +109,28 @@ async function formBody(request: Request): Promise<string> {
 }
 
 /** Validate the Vercel browser origin before translating it to the Worker's origin. */
+function sameOrigin(request: Request): boolean {
+  try {
+    const origin = new URL(request.headers.get("origin") ?? "");
+    const url = new URL(request.url);
+    const host =
+      request.headers.get("x-forwarded-host")?.split(",")[0].trim() ??
+      request.headers.get("host") ??
+      url.host;
+    const protocol =
+      request.headers.get("x-forwarded-proto")?.split(",")[0].trim() ??
+      url.protocol.slice(0, -1);
+    return (
+      ["http:", "https:"].includes(origin.protocol) &&
+      origin.origin === request.headers.get("origin") &&
+      origin.host === host &&
+      origin.protocol === `${protocol}:`
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function forwardControl(
   request: Request,
   path: WorkerPath,
@@ -119,7 +141,7 @@ export async function forwardControl(
       { status: "message", title: "Method not allowed" },
       { status: 405, headers: RESPONSE_HEADERS },
     );
-  if (post && request.headers.get("origin") !== new URL(request.url).origin)
+  if (post && !sameOrigin(request))
     return Response.json(
       { status: "message", title: "Request rejected" },
       { status: 403, headers: RESPONSE_HEADERS },
