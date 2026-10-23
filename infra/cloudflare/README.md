@@ -90,7 +90,8 @@ scores move to history with an automatic outcome and reason.
 The [Next.js app](../../web/README.md) serves the dashboard, `/manage` editor, and
 `/ack` confirmation pages on one Vercel origin. The Worker retains the same routes
 for existing direct links and provides their JSON data to Next.js server routes.
-Set a high-entropy `MANAGER_ACCESS_KEY` of at least 32 characters as a Worker secret.
+Set a non-empty `MANAGER_ACCESS_KEY` as a Worker secret. Any non-empty length is
+accepted; a long, randomly generated key is recommended.
 The login form exchanges it for an HttpOnly, Secure, SameSite=Strict cookie scoped
 to `/manage`; rotating the secret invalidates existing sessions. Without this
 secret the editor returns 503. Public `/home` never includes the key or session.

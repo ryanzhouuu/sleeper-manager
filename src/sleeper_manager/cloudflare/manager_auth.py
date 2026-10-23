@@ -15,8 +15,8 @@ def _sign(secret: str, message: str) -> str:
 
 
 def password_matches(provided: str, secret: str) -> bool:
-    """Hash both values before comparison; absent/short configured keys fail closed."""
-    return len(secret) >= 32 and hmac.compare_digest(
+    """Hash both values before comparison; an unconfigured key fails closed."""
+    return bool(secret) and hmac.compare_digest(
         hashlib.sha256(provided.encode()).digest(), hashlib.sha256(secret.encode()).digest()
     )
 
@@ -29,7 +29,7 @@ def issue_session(secret: str, now: datetime) -> str:
 
 def read_session(cookie: str, secret: str, now: datetime) -> str | None:
     """A password rotation invalidates every prior cookie and CSRF proof."""
-    if len(secret) < 32 or len(cookie) > 4096:
+    if not secret or len(cookie) > 4096:
         return None
     try:
         cookies = SimpleCookie()

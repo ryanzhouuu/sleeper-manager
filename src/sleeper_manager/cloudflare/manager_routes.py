@@ -41,7 +41,7 @@ async def manage(request: Any, env: Any, fetcher: Any, *, now: datetime) -> Form
     if request.method not in {"GET", "POST"}:
         return page("Method not allowed", "", status=405)
     secret = str(getattr(env, "MANAGER_ACCESS_KEY", ""))
-    if len(secret) < 32:
+    if not secret:
         return page(
             "Owner controls unavailable", "<p>Owner access has not been configured.</p>", status=503
         )

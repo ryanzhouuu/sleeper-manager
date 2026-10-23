@@ -12,6 +12,7 @@ from sleeper_manager.cloudflare.manager_auth import (
     SESSION_SECONDS,
     csrf_proof,
     issue_session,
+    password_matches,
     read_session,
     session_cookie,
 )
@@ -80,8 +81,13 @@ def test_login_rejects_untrusted_origin_even_with_valid_key(environment, origin)
     assert "Request rejected" in response.body
 
 
-def test_login_issues_secure_cookie_and_logout_clears_it(environment):  # type: ignore[no-untyped-def]
-    login = owner_request("/manage/login", method="POST", values={"password": SECRET})
+@pytest.mark.parametrize("secret", ["x", "short-owner-key", SECRET])
+def test_login_issues_secure_cookie_and_logout_clears_it(environment, secret):  # type: ignore[no-untyped-def]
+    environment.MANAGER_ACCESS_KEY = secret
+    public = request()
+    public.url = "https://worker.test/manage"
+    assert asyncio.run(manage(public, environment, None, now=NOW)).status == 200
+    login = owner_request("/manage/login", method="POST", values={"password": secret})
     response = asyncio.run(manage(login, environment, None, now=NOW))
     assert response.status == 303
     cookie = response.headers["set-cookie"]
@@ -91,7 +97,7 @@ def test_login_issues_secure_cookie_and_logout_clears_it(environment):  # type: 
     logout = owner_request(
         "/manage/logout",
         method="POST",
-        values={"csrf": csrf_proof(SECRET, session)},
+        values={"csrf": csrf_proof(secret, session)},
         session=session,
     )
     response = asyncio.run(manage(logout, environment, None, now=NOW))
@@ -156,14 +162,24 @@ def test_queue_failure_preserves_saved_decision_and_durable_work(environment, st
     assert asyncio.run(store.has_pending_manager_plan(NOW))
 
 
-def test_owner_cookie_rejects_tampering_expiry_and_rotation():
-    session = issue_session(SECRET, NOW)
+@pytest.mark.parametrize("secret", ["x", "short-owner-key", SECRET])
+def test_owner_cookie_rejects_tampering_expiry_and_rotation(secret):  # type: ignore[no-untyped-def]
+    session = issue_session(secret, NOW)
     cookie = f"{COOKIE_NAME}={session}"
-    assert read_session(cookie, SECRET, NOW) == session
-    assert read_session(cookie, SECRET + "rotated", NOW) is None
-    assert read_session(cookie, SECRET, NOW + timedelta(seconds=SESSION_SECONDS)) is None
-    assert read_session(f"{COOKIE_NAME}={session}altered", SECRET, NOW) is None
-    assert read_session(session_cookie(""), SECRET, NOW) is None
+    assert read_session(cookie, secret, NOW) == session
+    assert read_session(cookie, secret + "rotated", NOW) is None
+    assert read_session(cookie, secret, NOW + timedelta(seconds=SESSION_SECONDS)) is None
+    assert read_session(f"{COOKIE_NAME}={session}altered", secret, NOW) is None
+    assert read_session(session_cookie(""), secret, NOW) is None
+
+
+@pytest.mark.parametrize("secret", ["x", "short-owner-key", SECRET])
+def test_access_key_requires_exact_nonempty_match(secret):  # type: ignore[no-untyped-def]
+    assert password_matches(secret, secret)
+    assert not password_matches(secret + "wrong", secret)
+    assert not password_matches("", secret)
+    assert not password_matches("", "")
+    assert read_session(session_cookie(issue_session("", NOW)), "", NOW) is None
 
 
 def test_public_home_hides_old_advice_while_correction_is_pending(store):  # type: ignore[no-untyped-def]
