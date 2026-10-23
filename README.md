@@ -103,7 +103,8 @@ links to owner-only controls for recording or correcting each player/game's
 Lock/Pass status. The editor shows each player's latest finalized, still-lockable game,
 with the advisor's recommendation separate from the recorded Wait/Locked/Passed state.
 Wait leaves a game undecided. Select decisions across games and save once to queue
-one plan for the complete set.
+one plan for the complete set with **Save & replan**. Compact icon controls keep
+Plan and Saved states separate; full advice and help are expandable.
 Expired or forfeited performances move to history with their reason; confirmed locks
 remain visible. Saving retains correction history and queues a fresh plan; see
 [owner controls](infra/cloudflare/README.md#owner-controls) for access setup.

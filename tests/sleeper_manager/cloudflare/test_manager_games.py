@@ -3,6 +3,7 @@
 import json
 from dataclasses import replace
 from datetime import timedelta
+from html.parser import HTMLParser
 
 import pytest
 
@@ -79,17 +80,16 @@ def plan(**overrides):  # type: ignore[no-untyped-def]
 def test_advice_pass_does_not_change_default_wait_or_lock_selection(store):  # type: ignore[no-untyped-def]
     current = game(store)
     html = editor_page(CONTEXT, (current,), [], "csrf", now=NOW, pending=False, plan=plan()).body
-    assert "Advisor: <strong>Pass</strong>" in html
-    assert "Recorded: <strong>Wait</strong>" in html
+    assert 'aria-label="Advisor: Pass"' in html
+    assert 'aria-label="Recorded: Wait"' in html
     assert 'value="not_locked" checked' in html
     assert 'value="locked"' in html
-    assert html.count("Save changes and update plan") == 1
+    assert html.count("Save &amp; replan") == 1
     assert html.count('action="/manage/save"') == 1
     assert 'name="batch_id"' in html
-    assert "Wait</strong> leaves this game undecided" in html
-    assert "confirms a lock you already made in Sleeper" in html
-    assert "records your decision not to lock this game" in html
-    assert "the player may stay starting or be substituted" in html
+    assert "Wait</strong> · Undecided" in html
+    assert "Already locked in Sleeper" in html
+    assert "Choose not to lock. Substitution optional" in html
     assert "What have you done in Sleeper?" not in html
 
 
@@ -111,9 +111,9 @@ def test_expired_games_move_to_history_without_claiming_a_manual_pass(store):  #
 
 def test_confirmed_locks_remain_visible_with_an_explicit_correction_control(store):  # type: ignore[no-untyped-def]
     html = editor_page(CONTEXT, (row(store),), [], "csrf", now=NOW, pending=False, plan=plan()).body
-    assert "Locked this week" in html
+    assert "Saved decisions · 1" in html
     assert "Locked in Sleeper" in html
-    assert "Correct a recorded decision" in html
+    assert "Edit to correct a saved decision" in html
 
 
 def test_live_bench_or_next_start_cannot_leave_an_ineligible_game_waiting_for_a_poll(store):  # type: ignore[no-untyped-def]
@@ -125,3 +125,40 @@ def test_live_bench_or_next_start_cannot_leave_an_ineligible_game_waiting_for_a_
     )
     assert recorded_state(current, NOW, records=(newer,)) == "Passed · next game started"
     assert current.acknowledged_action is None
+
+
+class Markup(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.elements: list[tuple[str, dict[str, str | None]]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.elements.append((tag, dict(attrs)))
+
+
+def test_compact_controls_keep_native_labels_and_details_closed(store):  # type: ignore[no-untyped-def]
+    html = editor_page(
+        CONTEXT, (game(store),), [], "csrf", now=NOW, pending=False, plan=plan()
+    ).body
+    markup = Markup()
+    markup.feed(html)
+    radios = [
+        attrs for tag, attrs in markup.elements if tag == "input" and attrs.get("type") == "radio"
+    ]
+    assert [attrs["aria-label"] for attrs in radios] == ["Wait", "Locked in Sleeper", "Passed"]
+    assert [attrs["value"] for attrs in radios] == ["not_locked", "locked", "passed"]
+    assert sum(tag == "h1" for tag, _ in markup.elements) == 1
+    assert all("open" not in attrs for tag, attrs in markup.elements if tag == "details")
+    assert all(attrs.get("aria-hidden") == "true" for tag, attrs in markup.elements if tag == "svg")
+    assert "Current advice" in html
+    assert 'aria-label="Advisor: Pass"' in html
+    assert 'aria-label="Recorded: Wait"' in html
+
+
+def test_compact_cards_escape_names_in_headings_and_accessible_labels(store):  # type: ignore[no-untyped-def]
+    context = replace(CONTEXT, names={"player": '<img src=x onerror="alert(1)">'})
+    html = editor_page(context, (game(store),), [], "csrf", now=NOW, pending=False, plan=None).body
+    assert "<img" not in html
+    assert "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;" in html
+    assert 'aria-label="Advisor: Unavailable"' in html
+    assert 'value="not_locked" checked' in html

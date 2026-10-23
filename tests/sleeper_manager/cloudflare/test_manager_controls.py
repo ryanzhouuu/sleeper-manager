@@ -103,10 +103,10 @@ def test_save_corrects_false_lock_and_shows_replan_pending(environment, store): 
     assert response.status == 303
     assert row(store).acknowledged_action is None
     editor = asyncio.run(manage(owner_request(), environment, None, now=NOW))
-    assert "Recorded: <strong>Wait</strong>" in editor.body
-    assert "A new plan is queued or running" in editor.body
-    assert "Correction history" in editor.body
-    assert "32.80 pts" in editor.body
+    assert 'aria-label="Recorded: Wait"' in editor.body
+    assert "Updating plan" in editor.body
+    assert "<summary>History</summary>" in editor.body
+    assert '<div class="game-score">32.80<small>PTS</small>' in editor.body
     assert '<form method="post" action="/manage/save">' in editor.body
 
 

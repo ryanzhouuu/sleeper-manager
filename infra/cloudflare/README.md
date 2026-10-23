@@ -76,7 +76,9 @@ available for audit.
 The editor lists each player's newest verified, finalized performance while it is
 still lockable. Advisor Lock/Pass/Wait and recorded Wait/Locked/Passed are separate:
 a recommendation never records a decision. Choose decisions across the cards, then
-use the shared **Save changes and update plan** button. A stale selection rejects
+use the shared **Save & replan** button. Plan and Saved chips distinguish advice
+from recorded state; the full recommendation and help stay in expandable details.
+A stale selection rejects
 the entire save; successful saves retain correction history and queue one plan.
 Confirmed locks remain visible with correction controls. Expired or forfeited
 scores move to history with an automatic outcome and reason.

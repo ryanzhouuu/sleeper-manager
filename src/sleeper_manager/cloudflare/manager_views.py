@@ -13,6 +13,7 @@ from sleeper_manager.cloudflare.manager_games import (
     recommendation_for,
     recorded_state,
 )
+from sleeper_manager.cloudflare.manager_icons import icon
 from sleeper_manager.persistence.base import RecommendationRecord
 from sleeper_manager.persistence.lock_in_opportunities import LockInOpportunityRecord
 
@@ -32,8 +33,20 @@ def login_page(*, rejected: bool = False) -> FormPage:
     )
 
 
-def _moment(value: datetime, context: ManagerContext) -> str:
-    return value.astimezone(ZoneInfo(context.timezone)).strftime("%a %b %d, %I:%M %p %Z")
+def _moment(value: datetime, context: ManagerContext, *, compact: bool = False) -> str:
+    return value.astimezone(ZoneInfo(context.timezone)).strftime(
+        "%a %I:%M %p" if compact else "%a %b %d, %I:%M %p %Z"
+    )
+
+
+def _badge(state: str, source: str) -> str:
+    label = state.split(" · ")[0].replace("Locked in Sleeper", "Locked")
+    tone = {"Lock": "lock", "Locked": "lock", "Pass": "pass", "Passed": "pass", "Wait": "wait"}
+    kind = tone.get(label, "alert")
+    return (
+        f'<span class="chip chip--{kind}" aria-label="{escape(source)}: {escape(state)}" '
+        f'title="{escape(state)}">{icon(kind)}{escape(label)}</span>'
+    )
 
 
 def decision_card(
@@ -49,30 +62,39 @@ def decision_card(
     name = context.names.get(key.player_id, key.player_id)
     action = record.acknowledged_action or "not_locked"
     options = "".join(
-        f'<label class="choice"><input type="radio" name="action_{index}" '
+        f'<label class="choice" title="{escape(LABELS[value])}">'
+        f'<input type="radio" name="action_{index}" aria-label="{escape(LABELS[value])}" '
         f'value="{value}"{" checked" if value == action else ""}>'
-        f"{'&#128274; ' if value == 'locked' else ''}{label}</label>"
-        for value, label in LABELS.items()
+        f'<span class="option">{icon(symbol)}{label}</span></label>'
+        for value, symbol, label in (
+            ("not_locked", "wait", "Wait"),
+            ("locked", "lock", "Lock"),
+            ("passed", "pass", "Pass"),
+        )
     )
-    score = (
-        "Score not verified yet"
-        if record.stable_score is None
-        else f"{record.stable_score:.2f} pts"
-    )
+    score = "—" if record.stable_score is None else f"{record.stable_score:.2f}"
     slot = context.actual_slot(key.player_id)
-    placement = (
-        f"Current slot: {slot[1]} (#{slot[0] + 1})" if slot else "Currently on bench/reserve"
-    )
+    placement = slot[1] if slot else "Bench / reserve"
+    deadline = escape(_moment(record.action_deadline, context))
     return (
-        f"<section><h2>{escape(name)}</h2><p>{escape(_moment(record.scheduled_start, context))}"
-        f" · game {escape(key.game_id)}</p><p>{score} · {escape(placement)}</p>"
-        f"<p>Lock window ends: {escape(_moment(record.action_deadline, context))}</p>"
-        f"<p>Advisor: <strong>{recommendation_for(record, plan, now)}</strong><br>"
-        f"Recorded: <strong>{recorded_state(record, now)}</strong></p>"
+        f'<section class="game-card" aria-label="{escape(name)}">'
+        f'<div class="game-head"><div><h2>{escape(name)}</h2><p class="game-meta">'
+        f"{escape(placement)} · {escape(_moment(record.scheduled_start, context, compact=True))}"
+        f'</p></div><div class="game-score">{score}<small>PTS</small></div></div>'
+        '<div class="game-state"><div class="state-group"><span class="muted">Plan</span>'
+        + _badge(recommendation_for(record, plan, now), "Advisor")
+        + '</div><div class="state-group"><span class="muted">Saved</span>'
+        + _badge(recorded_state(record, now), "Recorded")
+        + "</div></div>"
         + hidden(f"player_id_{index}", key.player_id)
         + hidden(f"game_id_{index}", key.game_id)
         + hidden(f"version_{index}", record.row_version)
-        + f"<fieldset><legend>Your decision for this game</legend>{options}</fieldset></section>"
+        + f'<fieldset><legend class="sr-only">Your choice for {escape(name)}</legend>'
+        f'<div class="choices">{options}</div></fieldset>'
+        f'<p class="game-deadline" title="Lock window ends: {deadline}">'
+        f'{icon("wait")}<span class="sr-only">Lock window ends </span>'
+        f'<time datetime="{record.action_deadline.isoformat()}">'
+        f"{escape(_moment(record.action_deadline, context, compact=True))}</time></p></section>"
     )
 
 
@@ -88,15 +110,15 @@ def editor_page(
 ) -> FormPage:
     """Keep recorded decisions separate from advice and expose previous values for corrections."""
     if pending:
-        summary = '<p class="notice">Decision saved. A new plan is queued or running. '
-        summary += '<a href="/manage">Refresh to check the result</a>.</p>'
+        summary = '<p class="notice">↻ Updating plan · <a href="/manage">Refresh</a></p>'
     elif plan:
         summary = (
-            f"<section><h2>{escape(plan.title)}</h2><pre>{escape(plan.message)}</pre></section>"
+            '<details class="plan-details"><summary>Team plan</summary>'
+            f"<h2>{escape(plan.title)}</h2><pre>{escape(plan.message)}</pre></details>"
         )
     else:
         summary = (
-            '<p class="notice">A current plan is unavailable. Your decisions are saved.</p>'
+            '<p class="notice">⚠ Plan unavailable</p>'
             '<form method="post" action="/manage/replan">'
             + hidden("csrf", csrf)
             + hidden("request_id", uuid4().hex)
@@ -109,11 +131,11 @@ def editor_page(
         "".join(
             decision_card(row, context, i, now=now, plan=advice) for i, row in enumerate(active)
         )
-        or "<section>No lockable games to review yet.</section>"
+        or '<section class="game-card muted">No lockable games yet.</section>'
     )
     if corrections:
-        cards += "<details><summary>Locked this week / correct a recorded decision</summary>"
-        cards += "<p>Correct a recorded decision only if the saved record is wrong.</p>"
+        cards += f"<details><summary>Saved decisions · {len(corrections)}</summary>"
+        cards += '<p class="muted">Edit to correct a saved decision.</p>'
         cards += (
             "".join(
                 decision_card(row, context, i, now=now, plan=advice)
@@ -127,8 +149,10 @@ def editor_page(
             + hidden("csrf", csrf)
             + hidden("batch_id", uuid4().hex)
             + hidden("count", len(active) + len(corrections))
+            + f'<h2 class="section-heading">To review <span class="count">{len(active)}</span></h2>'
             + cards
-            + '<button type="submit">Save changes and update plan</button></form>'
+            + '<div class="save-bar"><small>Updates your plan</small>'
+            '<button type="submit">Save &amp; replan ' + icon("arrow") + "</button></div></form>"
         )
     visible = {row.key for row in (*active, *corrections)}
     past = "".join(
@@ -149,19 +173,24 @@ def editor_page(
             f"{escape(LABELS.get(previous_action, previous_action))} → "
             f"{LABELS[str(row['action'])]}<br><small>{escape(moment)}</small></li>"
         )
+    timezone = escape(now.astimezone(ZoneInfo(context.timezone)).tzname() or "")
     return page(
         f"Your decisions · week {context.week}",
-        "<p><strong>Wait</strong> leaves this game undecided. "
-        "<strong>Locked</strong> confirms a lock you already made in Sleeper. "
-        "<strong>Passed</strong> records your decision not to lock this game; "
-        "the player may stay starting or be substituted. "
-        "Saving updates the assistant's plan; it does not change your Sleeper lineup.</p>"
+        '<header class="manager-head"><h1>Game decisions</h1>'
+        f'<p class="muted">W{context.week} · {timezone}</p></header>'
         + summary
         + cards
         + (f"<details><summary>Past games</summary><ul>{past}</ul></details>" if past else "")
-        + "<details><summary>Correction history</summary><ul>"
+        + "<details><summary>History</summary><ul>"
         + ("".join(entries) or "<li>No manual corrections yet.</li>")
-        + '</ul></details><form method="post" action="/manage/logout">'
+        + '</ul></details><details class="manager-help"><summary>How it works</summary>'
+        f"<p>{icon('wait')} <strong>Wait</strong> · Undecided.</p>"
+        f"<p>{icon('lock')} <strong>Lock</strong> · Already locked in Sleeper.</p>"
+        f"<p>{icon('pass')} <strong>Pass</strong> · Choose not to lock. Substitution optional.</p>"
+        "<p>Saving updates the plan, not your Sleeper lineup.</p></details>"
+        '<footer class="manager-footer"><span class="muted">Sleeper · Lock-In</span>'
+        '<form method="post" action="/manage/logout">'
         + hidden("csrf", csrf)
-        + '<button type="submit">Sign out</button></form>',
+        + '<button type="submit">Sign out ↗</button></form></footer>',
+        heading=False,
     )
