@@ -1,4 +1,4 @@
-/** Link to the owner editor on the same Worker that supplies the public document. */
+/** Keep owner navigation on the app origin when a valid backend is configured. */
 export function managerControlsUrl(homeUrl: string | undefined): string | null {
   if (!homeUrl) return null;
   try {
@@ -10,7 +10,7 @@ export function managerControlsUrl(homeUrl: string | undefined): string | null {
     ) {
       return null;
     }
-    return new URL("/manage", url.origin).href;
+    return "/manage";
   } catch {
     return null;
   }

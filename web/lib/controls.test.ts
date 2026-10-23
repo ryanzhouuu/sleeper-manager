@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { managerControlsUrl } from "./controls";
 
 describe("managerControlsUrl", () => {
-  it("links to owner controls without forwarding query parameters", () => {
+  it("keeps owner controls on the app origin without forwarding query parameters", () => {
     expect(managerControlsUrl("https://worker.test/home?x=private")).toBe(
-      "https://worker.test/manage",
+      "/manage",
     );
   });
 

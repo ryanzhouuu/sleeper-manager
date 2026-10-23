@@ -87,7 +87,9 @@ the entire save; successful saves retain correction history and queue one plan.
 Confirmed locks remain visible with correction controls. Expired or forfeited
 scores move to history with an automatic outcome and reason.
 
-`GET /manage` serves the private decision editor linked from the Next.js dashboard.
+The [Next.js app](../../web/README.md) serves the dashboard, `/manage` editor, and
+`/ack` confirmation pages on one Vercel origin. The Worker retains the same routes
+for existing direct links and provides their JSON data to Next.js server routes.
 Set a high-entropy `MANAGER_ACCESS_KEY` of at least 32 characters as a Worker secret.
 The login form exchanges it for an HttpOnly, Secure, SameSite=Strict cookie scoped
 to `/manage`; rotating the secret invalidates existing sessions. Without this

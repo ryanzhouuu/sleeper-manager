@@ -109,6 +109,11 @@ Expired or forfeited performances move to history with their reason; confirmed l
 remain visible. Saving retains correction history and queues a fresh plan; see
 [owner controls](infra/cloudflare/README.md#owner-controls) for access setup.
 
+The Next.js dashboard, owner editor, and notification confirmation pages deploy
+together on Vercel; Python planning, scheduling, and persistence stay on Cloudflare.
+See [web deployment](web/README.md) for the project root, environment variable, and
+notification callback setup.
+
 Stable completed scores remain available for joint comparison with later games.
 Observed bench transitions permanently forfeit that performance; returning the player
 to a starting slot does not restore it. An extra attempt is preferred at equal

@@ -51,7 +51,7 @@ describe("HomePage", () => {
     expect(html).toContain("league could not be loaded.");
   });
 
-  it("links to owner controls on the configured Worker", async () => {
+  it("links to owner controls on the same app origin", async () => {
     vi.stubEnv("HOME_URL", "https://worker.test/home");
     try {
       loadHome.mockResolvedValue({
@@ -59,7 +59,7 @@ describe("HomePage", () => {
         document: parseHomeDocument(fixture),
       });
       const html = await render();
-      expect(html).toContain('href="https://worker.test/manage"');
+      expect(html).toContain('href="/manage"');
       expect(html).toContain("update lock / pass decisions");
     } finally {
       vi.unstubAllEnvs();
