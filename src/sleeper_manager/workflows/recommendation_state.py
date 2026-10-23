@@ -8,8 +8,12 @@ from pydantic import TypeAdapter
 
 from sleeper_manager.domain.planning import PlanningReasonCode, TeamWeekState
 from sleeper_manager.domain.planning_actions import RecoveryObligation
+from sleeper_manager.persistence.acknowledgements import ACKNOWLEDGEMENT_PROVENANCE
 from sleeper_manager.persistence.base import AsyncStateRepository
-from sleeper_manager.workflows.lock_in_evidence import merge_lock_in_opportunity_evidence
+from sleeper_manager.workflows.lock_in_evidence import (
+    LOCK_IN_OPPORTUNITY_PROVENANCE,
+    merge_lock_in_opportunity_evidence,
+)
 from sleeper_manager.workflows.planning_history import player_game_evidence
 from sleeper_manager.workflows.planning_inputs import LivePlanningInputs, build_live_team_week_state
 
@@ -28,7 +32,11 @@ async def refreshed_team_state(
     )
     load = getattr(repository, "list_week_lock_in_opportunities", None)
     history = await load(profile.league_id, inputs.week_window.week) if load else ()
-    by_key = {(row.player_id, row.game_id): row for row in inputs.acknowledgements}
+    by_key = {
+        (row.player_id, row.game_id): row
+        for row in inputs.acknowledgements
+        if row.provenance not in {ACKNOWLEDGEMENT_PROVENANCE, LOCK_IN_OPPORTUNITY_PROVENANCE}
+    }
     by_key.update({(row.player_id, row.game_id): row for row in acknowledgements})
     refreshed = replace(
         inputs,

@@ -8,7 +8,6 @@ from dataclasses import dataclass, replace
 from datetime import datetime, tzinfo
 from typing import Literal
 
-from sleeper_manager.decisions.team_recommendation import build_team_recommendation
 from sleeper_manager.decisions.weekly_plan import (
     WeeklyPlanPolicyConfig,
 )
@@ -32,6 +31,7 @@ from sleeper_manager.workflows.availability_advice import (
     state_availability_notes,
 )
 from sleeper_manager.workflows.availability_rendering import state_availability_summary
+from sleeper_manager.workflows.current_team_plan import build_current_team_plan
 from sleeper_manager.workflows.daily_completion import notify_daily_completion
 from sleeper_manager.workflows.notification_loop import (
     Clock,
@@ -48,7 +48,6 @@ from sleeper_manager.workflows.plan_rendering import (
 from sleeper_manager.workflows.planning_inputs import (
     LivePlanningInputs,
 )
-from sleeper_manager.workflows.recommendation_state import refreshed_team_state
 from sleeper_manager.workflows.recovery_schedule import schedule_recovery_checks
 from sleeper_manager.workflows.score_confirmations import prepare_score_confirmations
 
@@ -119,27 +118,15 @@ async def _run_weekly_lineup_workflow(
 ) -> WeeklyLineupWorkflowResult:
     now = (clock or _utc_now)()
     await repository.expire_recommendations(now)
-    state = await refreshed_team_state(inputs, repository, decision_time)
-    plan = (
-        prepared_plan
-        if prepared_plan is not None and prepared_state == state
-        else build_team_recommendation(
-            state,
-            lead_time=inputs.move_lead_time,
-            policy=policy or _DEFAULT_POLICY,
-        )
+    plan, state, version = await build_current_team_plan(
+        inputs,
+        repository,
+        decision_time,
+        policy or _DEFAULT_POLICY,
+        clock or _utc_now,
+        prepared_plan=prepared_plan,
+        prepared_state=prepared_state,
     )
-    refreshed = await refreshed_team_state(
-        inputs, repository, max(decision_time, (clock or _utc_now)())
-    )
-    if (
-        refreshed.fixed_slots != state.fixed_slots
-        or refreshed.passed_opportunities != state.passed_opportunities
-    ):
-        state = refreshed
-        plan = build_team_recommendation(
-            state, lead_time=inputs.move_lead_time, policy=policy or _DEFAULT_POLICY
-        )
     await schedule_recovery_checks(repository, plan, now)
     rendered = render_weekly_plan(
         plan,
@@ -157,6 +144,10 @@ async def _run_weekly_lineup_workflow(
     trace = append_availability_trace(
         serialize_weekly_plan_trace(plan, trigger=trigger), notes, material_hash
     )
+    if version is not None:
+        trace = json.dumps(
+            {**json.loads(trace), "manager_decision_version": version}, sort_keys=True
+        )
     confirmations = await prepare_score_confirmations(
         repository,
         plan,

@@ -91,11 +91,15 @@ Choices record actions already performed in Sleeper. Locks require a
 stable eligible score and the player's currently observed starter slot. A saved
 correction preserves prior evidence, expires old confirmation links, and queues a
 new plan. Both pages show that the plan is updating while this work is pending.
+Plans carry the saved-decision version used during computation; old advice stays
+unavailable after a failed or expired job. **Retry plan** queues another attempt
+without changing recorded actions. Concurrent decision edits reject obsolete
+plan publication at the database boundary.
 The history lists manual corrections; existing notification acknowledgements
 remain stored separately. A correction cannot restore a performance forfeited by
 a bench transition or an elapsed deadline.
 
-`POST /manage/login`, `/manage/save`, and `/manage/logout` require the same origin.
+`POST /manage/login`, `/manage/save`, `/manage/replan`, and `/manage/logout` require the same origin.
 Form pages use `Referrer-Policy: same-origin` to preserve browser POST origins
 while withholding referrers from external sites.
 Save/logout also require a session-bound CSRF proof. Submitted league, week and

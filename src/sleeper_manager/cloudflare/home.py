@@ -436,6 +436,18 @@ async def _recommendation(
     except Exception:
         return "unavailable", None, None, None, None
     if record is None:
+        revision = getattr(repository, "decision_state_version", None)
+        if revision is not None and await revision(league_id, week) not in (None, "0:0"):
+            return (
+                "ready",
+                None,
+                "Plan update unavailable",
+                "Your decisions are saved. A current plan has not completed. "
+                "Open owner controls to retry.",
+                None,
+            )
+        return "empty", None, None, None, None
+    if record.deadline is not None and now is not None and record.deadline <= now:
         return "empty", None, None, None, None
     return (
         "ready",

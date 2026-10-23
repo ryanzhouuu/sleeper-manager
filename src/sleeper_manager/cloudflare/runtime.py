@@ -38,8 +38,8 @@ from sleeper_manager.domain.runtime_policy import RuntimePolicy
 from sleeper_manager.integrations.nba.cached_provider import AsyncCachedNBAProvider
 from sleeper_manager.notifications.dispatcher import NotificationDispatcher
 from sleeper_manager.persistence.base import AsyncRuntimeStateRepository
-from sleeper_manager.persistence.d1 import D1StateRepository
 from sleeper_manager.persistence.forecast_d1 import D1ForecastArchiveRepository
+from sleeper_manager.persistence.manager_store import D1ManagerStore
 from sleeper_manager.workflows.forecast_collection import (
     CaptureOnlyForecastPolicy,
     capture_scheduled_forecast,
@@ -118,7 +118,7 @@ async def run_scheduled(
             detail="notifications_not_configured",
         ).as_dict()
 
-    repository = D1StateRepository(env.sleeper_manager_state)
+    repository = D1ManagerStore(env.sleeper_manager_state)
     await repository.initialize()
 
     async def collect(

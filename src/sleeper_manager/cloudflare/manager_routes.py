@@ -36,7 +36,7 @@ def _redirect(location: str, cookie: str | None = None) -> FormPage:
 async def manage(request: Any, env: Any, fetcher: Any, *, now: datetime) -> FormPage:
     """Public access reveals only a login form; edits are owner-scoped and protected by CSRF."""
     path = urlparse(str(request.url)).path
-    if path not in {"/manage", "/manage/login", "/manage/save", "/manage/logout"}:
+    if path not in {"/manage", "/manage/login", "/manage/save", "/manage/logout", "/manage/replan"}:
         return page("Not found", "", status=404)
     if request.method not in {"GET", "POST"}:
         return page("Method not allowed", "", status=405)
@@ -67,6 +67,14 @@ async def manage(request: Any, env: Any, fetcher: Any, *, now: datetime) -> Form
             return page("Session changed", "<p>Reload the page and try again.</p>", status=403)
         if path == "/manage/logout":
             return _redirect("/manage", session_cookie("", expired=True))
+        if path == "/manage/replan":
+            try:
+                request_id = UUID(values["request_id"]).hex
+            except (ValueError, KeyError):
+                return page("Invalid retry", "<p>Reload the owner controls.</p>", status=400)
+            await D1ManagerStore(env.sleeper_manager_state).retry_manager_plan(request_id, now)
+            await publish_planning_wake(env, now)
+            return _redirect("/manage")
         if path != "/manage/save":
             return page("Method not allowed", "", status=405)
     store = D1ManagerStore(env.sleeper_manager_state)

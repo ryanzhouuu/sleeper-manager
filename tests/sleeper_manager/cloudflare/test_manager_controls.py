@@ -252,3 +252,21 @@ def test_invalid_batch_form_changes_nothing(environment, store, fields, status):
     assert asyncio.run(manage(batch_request(**fields), environment, None, now=NOW)).status == status
     assert row(store).acknowledged_action == "locked"
     assert asyncio.run(store.list_scheduled_work()) == ()
+
+
+def test_retry_plan_preserves_decisions_and_is_idempotent(environment, store):  # type: ignore[no-untyped-def]
+    session = issue_session(SECRET, NOW)
+    req = owner_request(
+        "/manage/replan",
+        method="POST",
+        session=session,
+        values={
+            "csrf": csrf_proof(SECRET, session),
+            "request_id": CHANGE_ID,
+        },
+    )
+    assert asyncio.run(manage(req, environment, None, now=NOW)).status == 303
+    assert asyncio.run(manage(req, environment, None, now=NOW)).status == 303
+    assert len(asyncio.run(store.list_scheduled_work())) == 1
+    assert row(store).acknowledged_action == "locked"
+    assert asyncio.run(store.decision_history("league", 1, 1)) == []

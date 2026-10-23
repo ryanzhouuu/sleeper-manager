@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from hashlib import sha256
 from uuid import uuid4
 
+from sleeper_manager.persistence.base import RecommendationRecord
 from sleeper_manager.persistence.d1 import D1StateRepository
 from sleeper_manager.persistence.lock_in_opportunities import (
     LockInOpportunityRecord,
@@ -28,6 +29,31 @@ from sleeper_manager.workflows.manager_decisions import (
 
 class D1ManagerStore(D1StateRepository):
     """Reuse D1 decoding without expanding the scheduler repository's interface."""
+
+    async def decision_state_version(self, league_id: str, week: int) -> str | None:
+        from sleeper_manager.persistence.manager_freshness import decision_version
+
+        return await decision_version(self, league_id, week)
+
+    async def create_recommendation(self, recommendation: RecommendationRecord) -> bool:
+        from sleeper_manager.persistence.manager_freshness import create_current_plan
+
+        return await create_current_plan(self, recommendation)
+
+    async def latest_current_recommendation(
+        self, league_id: str, fantasy_week: int, *, decision_type: str
+    ) -> RecommendationRecord | None:
+        """Failed replans cannot revive advice from an earlier decision version."""
+        from sleeper_manager.persistence.manager_freshness import plan_matches_version
+
+        record = await super().latest_current_recommendation(
+            league_id, fantasy_week, decision_type=decision_type
+        )
+        if record is not None and decision_type == "weekly_lineup":
+            version = await self.decision_state_version(league_id, fantasy_week)
+            if not plan_matches_version(record, version):
+                return None
+        return record
 
     async def save_decisions(
         self, edits: tuple[ManagerEdit, ...], *, batch_id: str, now: datetime
@@ -197,3 +223,8 @@ class D1ManagerStore(D1StateRepository):
             now.isoformat(),
             now.isoformat(),
         )
+
+    async def retry_manager_plan(self, request_id: str, now: datetime) -> None:
+        """A repeated retry form has one durable work identity, even if the queue is unavailable."""
+        if not await self.has_pending_manager_plan(now):
+            await self.ensure_ack_replan(f"manager-retry:{request_id}", now)

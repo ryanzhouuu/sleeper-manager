@@ -95,7 +95,13 @@ def editor_page(
             f"<section><h2>{escape(plan.title)}</h2><pre>{escape(plan.message)}</pre></section>"
         )
     else:
-        summary = "<p>A new plan has not completed yet.</p>"
+        summary = (
+            '<p class="notice">A current plan is unavailable. Your decisions are saved.</p>'
+            '<form method="post" action="/manage/replan">'
+            + hidden("csrf", csrf)
+            + hidden("request_id", uuid4().hex)
+            + '<button type="submit">Retry plan</button></form>'
+        )
     active = lockable_games(records, context, now)
     corrections = tuple(row for row in records if row.acknowledged_action)
     advice = None if pending else plan
