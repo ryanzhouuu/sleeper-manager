@@ -74,6 +74,20 @@ def test_stale_plan_cannot_be_published_after_a_concurrent_save(store):  # type:
     assert asyncio.run(store.get_recommendation("plan")) is None
 
 
+def test_stale_per_game_confirmation_cannot_bypass_the_parent_version_guard(store):  # type: ignore[no-untyped-def]
+    captured = asyncio.run(store.decision_state_version("league", 1))
+    correct(store)
+    child = replace(
+        plan(),
+        decision_type="live_lock_in",
+        trace_json=json.dumps(
+            {"kind": "lock", "team_plan": {"manager_decision_version": captured}}
+        ),
+    )
+    assert not asyncio.run(store.create_recommendation(child))
+    assert asyncio.run(store.get_recommendation("plan")) is None
+
+
 def test_decision_versions_are_scoped_to_the_league_and_week(store):  # type: ignore[no-untyped-def]
     correct(store)
     assert asyncio.run(store.decision_state_version("league", 1)) == "1:0"

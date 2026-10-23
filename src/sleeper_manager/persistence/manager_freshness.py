@@ -43,7 +43,10 @@ def plan_matches_version(record: RecommendationRecord, version: str | None) -> b
 async def create_current_plan(repository: D1StateRepository, record: RecommendationRecord) -> bool:
     """The version comparison and INSERT share one SQL statement, closing the save/publish race."""
     try:
-        version = json.loads(record.trace_json).get("manager_decision_version")
+        trace = json.loads(record.trace_json)
+        version = trace.get("manager_decision_version")
+        if version is None:
+            version = trace.get("team_plan", {}).get("manager_decision_version")
     except (ValueError, AttributeError):
         version = None
     if version is None:
