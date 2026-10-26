@@ -16,7 +16,7 @@ def test_center_util_swap_names_both_players_and_positions() -> None:
 
     text = render_weekly_plan(plan, player_names={"jokic": "Jokić", "embiid": "Embiid"})
 
-    assert text.message.split("\n\n")[0] == "Swap Jokić (C) and Embiid (UTIL)."
+    assert text.message.split("\n\n")[1] == "• Swap Jokić (C) and Embiid (UTIL)."
 
 
 def test_bench_swap_uses_a_single_instruction() -> None:
@@ -26,7 +26,17 @@ def test_bench_swap_uses_a_single_instruction() -> None:
         moves=(LineupMove("p2", None, 0, DEADLINE, swap_player_id="p1"),),
     )
 
-    assert render_weekly_plan(plan).message.split("\n\n")[0] == "Swap p2 (bench) and p1 (G)."
+    assert render_weekly_plan(plan).message.split("\n\n")[1] == "• Start p2 at G; bench p1."
+
+
+def test_benching_swap_still_names_the_incoming_starter_first() -> None:
+    plan = _plan(
+        observed_assignments=(_planned(0, "G", "p1"),),
+        desired_assignments=(_planned(0, "G", "p2"),),
+        moves=(LineupMove("p1", 0, None, DEADLINE, swap_player_id="p2"),),
+    )
+
+    assert render_weekly_plan(plan).message.split("\n\n")[1] == "• Start p2 at G; bench p1."
 
 
 def test_trace_preserves_swap_participants_and_action_type() -> None:

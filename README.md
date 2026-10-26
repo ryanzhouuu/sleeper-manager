@@ -92,8 +92,12 @@ players with missing reports or unverified availability. Full player/game warnin
 remain in the stored recommendation trace.
 Daily, pre-tipoff, and postgame runs produce a complete team recommendation from
 the current lineup, confirmed decisions, and retained player-game observations.
-They show every starter slot, bench choices, exact lock positions, ordered actions,
-and recovery deadlines. Locked confirms a lock already made in Sleeper; Pass records
+Alerts lead with the deadline and ordered actions, followed by the projected weekly
+total, lineup gain, confidence, and essential warnings. Recovery instructions name
+only changed slots and retain the review deadline and forfeiture consequences.
+Full lineups, bench choices, confirmed decisions, placement comparisons, and modeling
+details remain in the stored recommendation trace.
+Locked confirms a lock already made in Sleeper; Pass records
 the manager's decision not to lock that game. Passing allows the planner to substitute
 the player without requiring a substitution. Delivering advice never records a
 decision or proves that a lineup move or lock occurred. Discord links
@@ -141,7 +145,7 @@ Lineup and Lock/Pass messages show the expected weekly team total assuming the
 recommendation is followed, including locked scores and modeled remaining slots.
 Lineups show the change versus the current lineup; Lock/Pass messages show the other
 action's team total separately from the completed player's score. Blocked advice or
-missing estimates display `Expected weekly total: unavailable.`
+missing estimates display `Projected week: unavailable.` in lineup alerts.
 
 ## Forecast archive
 

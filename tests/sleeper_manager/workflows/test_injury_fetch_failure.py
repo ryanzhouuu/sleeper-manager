@@ -50,7 +50,7 @@ def test_injury_failure_still_delivers_an_actionable_lineup_notification(tmp_pat
     assert result.plan.blocking_reasons == ()
     assert result.plan.expected_terminal_score is not None
     assert len(sender.messages) == 1
-    assert "Start Ben in UTIL." in sender.messages[0].message
+    assert "Start Ben at UTIL." in sender.messages[0].message
     assert "injury updates are unavailable" in sender.messages[0].message.lower()
     assert "provisional" in sender.messages[0].message.lower()
     assert result.recommendation is not None
@@ -111,7 +111,7 @@ def test_postgame_lock_advice_survives_injury_fetch_failure(tmp_path: Path) -> N
                 player_names={"p1": "Ann", "p2": "Ben"},
             )
 
-        locks = [message for message in sender.messages if "Then lock Ann" in message.message]
+        locks = [message for message in sender.messages if "Lock Ann" in message.message]
         assert len(locks) == 1
         assert "injury updates are unavailable" in locks[0].message.lower()
         assert "provisional" in locks[0].message.lower()

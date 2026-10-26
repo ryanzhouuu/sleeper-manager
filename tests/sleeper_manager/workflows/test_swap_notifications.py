@@ -53,8 +53,8 @@ def test_full_bench_substitution_delivers_one_swap(tmp_path: Path, trigger: str)
         assert len(sender.messages) == 1
         assert result.recommendation is not None
         assert (
-            result.recommendation.message.split("\n\n")[0]
-            == "Swap Incoming (bench) and Outgoing (PG)."
+            result.recommendation.message.split("\n\n")[1]
+            == "• Start Incoming at PG; bench Outgoing."
         )
         trace = json.loads(result.recommendation.trace_json)
         assert trace["schema_version"] == 3

@@ -1,6 +1,7 @@
 """Refresh recovery evidence from observed rosters instead of assuming proposed swaps occurred."""
 
 import asyncio
+import json
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
@@ -173,7 +174,9 @@ def test_conflicting_confirmed_position_returns_observed_lineup_without_moves(
         assert result.plan.desired_assignments == result.plan.observed_assignments
         assert result.plan.moves == ()
         assert result.plan.fixed_slots[0].slot_index == 0
-        assert "Observed lineup" in result.recommendation.message
+        assert "Advice is blocked" in result.recommendation.message
+        trace = json.loads(result.recommendation.trace_json)
+        assert trace["observed_assignments"]
 
     asyncio.run(exercise())
 

@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -16,7 +17,7 @@ from sleeper_manager.domain.planning import (
     WeeklyPlan,
 )
 from sleeper_manager.domain.planning_actions import PlannedScoreAction
-from sleeper_manager.workflows.plan_rendering import render_weekly_plan
+from sleeper_manager.workflows.plan_rendering import render_weekly_plan, serialize_weekly_plan_trace
 
 NOW = datetime(2026, 1, 5, 12, tzinfo=UTC)
 DEADLINE = NOW + timedelta(minutes=50)
@@ -59,16 +60,16 @@ def _plan(**overrides: object) -> WeeklyPlan:
     return WeeklyPlan(**values)
 
 
-def test_action_required_messages_lead_with_the_imperative() -> None:
+def test_action_required_messages_show_deadline_actions_and_value() -> None:
     rendered = render_weekly_plan(_plan(), player_names=NAMES, local_timezone=CHICAGO)
 
     sections = rendered.message.split("\n\n")
     assert rendered.title == "Lineup move required"
-    assert sections[0] == "Start Alice in UTIL."
-    assert sections[1] == (
-        "Expected weekly total: 104.8 pts.\nChange versus current lineup: +4.8 pts."
-    )
-    assert sections[-1] == "Complete before Mon 6:50 AM CST."
+    assert sections == [
+        "Update in Sleeper before Mon 6:50 AM CST",
+        "• Start Alice at UTIL.",
+        "Projected week: 104.8 pts (+4.8) · High confidence.",
+    ]
 
 
 def test_pass_advice_describes_a_decision_with_optional_substitution() -> None:
@@ -78,8 +79,7 @@ def test_pass_advice_describes_a_decision_with_optional_substitution() -> None:
 
     message = render_weekly_plan(plan, player_names=NAMES).message
 
-    assert "Pass on Bob's 20.00 pts: choose not to lock this game." in message
-    assert "The player may stay starting or be substituted." in message
+    assert "Record Pass on Bob's 20.00 pts; substitution is optional." in message
     assert "confirm only after doing so in Sleeper" not in message
 
 
@@ -100,9 +100,13 @@ def test_bench_moves_and_swaps_render_in_order() -> None:
         ),
     )
 
-    imperative = render_weekly_plan(plan, player_names=NAMES).message.split("\n\n")[0]
+    imperative = render_weekly_plan(plan, player_names=NAMES).message.split("\n\n")[1]
 
-    assert imperative == ("Move Bob to the bench. Move Alice from UTIL to G. Start Bob in UTIL.")
+    assert imperative.splitlines() == [
+        "• Move Bob to the bench.",
+        "• Move Alice from UTIL to G.",
+        "• Start Bob at UTIL.",
+    ]
 
 
 def test_three_way_cycles_render_every_step() -> None:
@@ -125,18 +129,20 @@ def test_three_way_cycles_render_every_step() -> None:
         ),
     )
 
-    imperative = render_weekly_plan(plan, player_names=NAMES).message.split("\n\n")[0]
+    imperative = render_weekly_plan(plan, player_names=NAMES).message.split("\n\n")[1]
 
-    assert imperative == (
-        "Move Ann to the bench. Move Ben from UTIL 1 to G. "
-        "Move Cal from UTIL 2 to UTIL 1. Start Ann in UTIL 2."
-    )
+    assert imperative.splitlines() == [
+        "• Move Ann to the bench.",
+        "• Move Ben from UTIL 1 to G.",
+        "• Move Cal from UTIL 2 to UTIL 1.",
+        "• Start Ann at UTIL 2.",
+    ]
 
 
 def test_missing_names_fall_back_to_player_ids() -> None:
     rendered = render_weekly_plan(_plan())
 
-    assert rendered.message.split("\n\n")[0] == "Start p2 in UTIL."
+    assert rendered.message.split("\n\n")[1] == "• Start p2 at UTIL."
 
 
 def test_unknown_reason_codes_fall_back_to_readable_text() -> None:
@@ -180,8 +186,8 @@ def test_no_action_plans_do_not_prescribe_moves() -> None:
     rendered = render_weekly_plan(plan)
 
     assert rendered.title == "Lineup is set"
-    assert rendered.message.startswith(
-        "Your lineup already matches the weekly plan.\n\nExpected weekly total: 104.8 pts."
+    assert rendered.message == (
+        "Your lineup is set.\n\nProjected week: 104.8 pts · High confidence."
     )
 
 
@@ -196,7 +202,7 @@ def test_degraded_plans_surface_warnings_and_confidence() -> None:
 
     assert rendered.title == "Lineup check degraded"
     assert "Notes: NBA provider data is unavailable or may be stale." in rendered.message
-    assert "Confidence: low." in rendered.message
+    assert "Low confidence." in rendered.message
 
 
 def test_degraded_plans_with_moves_keep_their_instructions() -> None:
@@ -209,12 +215,12 @@ def test_degraded_plans_with_moves_keep_their_instructions() -> None:
     rendered = render_weekly_plan(plan, player_names=NAMES, local_timezone=CHICAGO)
 
     sections = rendered.message.split("\n\n")
-    assert sections[0] == "Start Alice in UTIL."
-    assert sections[-1] == "Complete before Mon 6:50 AM CST."
+    assert sections[0] == "Update in Sleeper before Mon 6:50 AM CST"
+    assert sections[1] == "• Start Alice at UTIL."
     assert "Notes: NBA provider data is unavailable or may be stale." in rendered.message
 
 
-def test_schedule_reasons_explain_why_the_change_matters() -> None:
+def test_schedule_details_stay_in_the_trace() -> None:
     plan = _plan(
         schedule_assumptions=(
             f"game g1 assumed to start {(NOW + timedelta(hours=1)).isoformat()}",
@@ -224,32 +230,32 @@ def test_schedule_reasons_explain_why_the_change_matters() -> None:
 
     rendered = render_weekly_plan(plan, local_timezone=CHICAGO)
 
-    schedule_section = rendered.message.split("\n\n")[2]
-    assert (
-        "This matters because the first affected game tips off Mon 7:00 AM CST." in schedule_section
+    assert "tips off" not in rendered.message
+    assert "replannable" not in rendered.message
+    assert json.loads(serialize_weekly_plan_trace(plan))["schedule_assumptions"] == list(
+        plan.schedule_assumptions
     )
-    assert "2 later opportunities remain replannable." in schedule_section
 
 
 def test_missing_scores_are_explicitly_unavailable() -> None:
     rendered = render_weekly_plan(_plan(expected_terminal_score=None, observed_terminal_score=None))
 
-    assert "Expected weekly total: unavailable." in rendered.message
-    assert "Change versus" not in rendered.message
+    assert "Projected week: unavailable." in rendered.message
+    assert "(+" not in rendered.message
 
 
 def test_total_is_visible_without_a_current_lineup_estimate() -> None:
     rendered = render_weekly_plan(_plan(observed_terminal_score=None))
 
-    assert "Expected weekly total: 104.8 pts." in rendered.message
-    assert "Change versus" not in rendered.message
+    assert "Projected week: 104.8 pts · High confidence." in rendered.message
+    assert "(+" not in rendered.message
 
 
 @pytest.mark.parametrize(("expected", "change"), ((100.0, "+0.0"), (99.99, "+0.0"), (95.2, "-4.8")))
 def test_unchanged_and_negative_lineup_comparisons(expected: float, change: str) -> None:
     rendered = render_weekly_plan(_plan(expected_terminal_score=expected))
 
-    assert f"Change versus current lineup: {change} pts." in rendered.message
+    assert f"({change})" in rendered.message
 
 
 def test_blocked_plans_do_not_present_retained_scores_as_valid() -> None:
@@ -257,9 +263,9 @@ def test_blocked_plans_do_not_present_retained_scores_as_valid() -> None:
         _plan(status=PlanStatus.BLOCKED, blocking_reasons=(PlanningReasonCode.MISSING_PROJECTION,))
     )
 
-    assert "Expected weekly total: unavailable." in rendered.message
+    assert "Projected week: unavailable." in rendered.message
     assert "104.8" not in rendered.message
-    assert "Change versus" not in rendered.message
+    assert "(+" not in rendered.message
 
 
 def test_degraded_static_plans_still_show_available_total() -> None:
@@ -272,11 +278,11 @@ def test_degraded_static_plans_still_show_available_total() -> None:
         )
     )
 
-    assert "Expected weekly total: 104.8 pts." in rendered.message
-    assert "Change versus" not in rendered.message
+    assert "Projected week: 104.8 pts · High confidence." in rendered.message
+    assert "(+" not in rendered.message
 
 
-def test_approximation_estimates_are_disclosed() -> None:
+def test_approximation_details_stay_in_the_trace() -> None:
     plan = _plan(
         distribution_summary=PlanDistributionSummary(
             scenario_count=2000,
@@ -288,10 +294,12 @@ def test_approximation_estimates_are_disclosed() -> None:
 
     rendered = render_weekly_plan(plan)
 
-    assert (
-        "Values are modeled estimates over 2000 scenarios "
-        "(complete_assignment_rollout), not guarantees." in rendered.message
-    )
+    assert "Projected week:" in rendered.message
+    assert "scenarios" not in rendered.message
+    assert "complete_assignment_rollout" not in rendered.message
+    summary = json.loads(serialize_weekly_plan_trace(plan))["distribution_summary"]
+    assert summary["scenario_count"] == 2000
+    assert summary["approximation"] == "complete_assignment_rollout"
 
 
 def test_deadlines_use_the_earliest_affected_move() -> None:
@@ -313,4 +321,4 @@ def test_deadlines_use_the_earliest_affected_move() -> None:
 
     rendered = render_weekly_plan(plan, local_timezone=CHICAGO)
 
-    assert rendered.message.endswith("Complete before Mon 6:50 AM CST.")
+    assert rendered.message.startswith("Update in Sleeper before Mon 6:50 AM CST\n")

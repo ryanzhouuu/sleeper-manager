@@ -1,4 +1,4 @@
-"""Render complete targets, confirmed facts, and recovery follow-up alongside actions."""
+"""Keep score decisions and required recovery follow-up concise in notifications."""
 
 from collections.abc import Mapping
 from datetime import tzinfo
@@ -20,61 +20,23 @@ def score_action_phrases(
         if action.kind is LockInDecisionKind.LOCK:
             assert action.slot_index is not None
             phrases.append(
-                f"Then lock {player}'s {action.score:.2f} pts in {labels[action.slot_index]}."
+                f"Lock {player}'s {action.score:.2f} pts in {labels[action.slot_index]} "
+                "in Sleeper, then confirm."
             )
         else:
             phrases.append(
-                f"Pass on {player}'s {action.score:.2f} pts: choose not to lock this game. "
-                "The player may stay starting or be substituted."
+                f"Record Pass on {player}'s {action.score:.2f} pts; substitution is optional."
             )
     return phrases
 
 
-def full_recommendation_context(
+def recommendation_follow_up(
     plan: WeeklyPlan, names: Mapping[str, str] | None, local_timezone: tzinfo | None
 ) -> str:
-    """Include unchanged slots and locks so a changed alert stands on its own."""
+    """Retain recovery deadlines and consequences without repeating unchanged slots."""
     labels = names or {}
     positions = slot_labels(plan)
-    view = (
-        plan.observed_assignments if plan.status is PlanStatus.BLOCKED else plan.desired_assignments
-    )
-    lineup = "\n".join(
-        f"{positions[row.slot_index]}: "
-        f"{labels.get(row.player_id, row.player_id) if row.player_id else 'Empty'}"
-        for row in view
-    )
-    parts = [
-        ("Observed lineup" if plan.status is PlanStatus.BLOCKED else "Complete lineup if followed")
-        + ":\n"
-        + lineup
-    ]
-    if plan.bench_player_ids:
-        parts.append(
-            "Bench: "
-            + ", ".join(labels.get(player, player) for player in plan.bench_player_ids)
-            + "."
-        )
-    if plan.fixed_slots:
-        parts.append(
-            "Already locked (confirmed): "
-            + "; ".join(
-                f"{labels.get(row.player_id, row.player_id)} — "
-                f"{row.accepted_fantasy_score:.2f} pts, {positions[row.slot_index]}, "
-                f"game {row.game_id}"
-                for row in plan.fixed_slots
-            )
-            + "."
-        )
-    if plan.passed_opportunities:
-        parts.append(
-            "Decided not to lock: "
-            + ", ".join(
-                f"{labels.get(row.player_id, row.player_id)} (game {row.game_id})"
-                for row in plan.passed_opportunities
-            )
-            + "."
-        )
+    parts = []
     if plan.status is not PlanStatus.BLOCKED:
         for action in plan.score_actions:
             if action.alternative_expected_score is not None:
@@ -82,41 +44,34 @@ def full_recommendation_context(
                 parts.append(
                     f"Alternative ({alternative}): {action.alternative_expected_score:.1f} pts."
                 )
-            if action.placement_values:
-                values = "; ".join(
-                    f"{positions[index]}: {value:.1f} pts"
-                    for index, value in action.placement_values
-                )
-                parts.append(
-                    f"Lock placement totals for {labels.get(action.player_id, action.player_id)}: "
-                    f"{values}."
-                )
         for recovery in plan.recovery_obligations:
             players = ", ".join(
                 labels.get(player, player) for player, _ in recovery.added_player_games
             )
             moment = recovery.deadline.astimezone(local_timezone or plan.decision_time.tzinfo)
+            attempt = {row.slot_index: row.player_id for row in recovery.attempt_assignments}
             restore = "; ".join(
-                f"{labels.get(row.player_id, row.player_id)} in {positions[row.slot_index]}"
+                f"{labels.get(row.player_id, row.player_id)} at {positions[row.slot_index]}"
                 if row.player_id
                 else f"leave {positions[row.slot_index]} open"
                 for row in recovery.baseline_assignments
+                if row.player_id != attempt.get(row.slot_index)
             )
+            instruction = (
+                f"restore {restore} or follow updated advice" if restore else "review advice"
+            )
+            hour = moment.hour % 12 or 12
             parts.append(
-                f"Extra opportunity with later options preserved: {players}. "
-                f"Next review: restore {restore}, or accept a freshly evaluated alternative "
-                f"before {moment.strftime('%a %b %d, %I:%M %p %Z')}. "
-                "If the attempt is still active, recovery explicitly forfeits that game's "
-                "eligibility. Perform the moves in Sleeper."
+                f"Review before {moment:%a} {hour}:{moment:%M %p %Z}: {instruction}. "
+                f"Benching {players} forfeits any active attempt."
             )
         if plan.forfeited_opportunities:
             parts.append(
                 "Recovery forfeits: "
                 + ", ".join(
-                    f"{labels.get(player, player)} (game {game})"
-                    for player, game in plan.forfeited_opportunities
+                    labels.get(player, player) for player, _ in plan.forfeited_opportunities
                 )
-                + ". Returning to the starters cannot revive those performances."
+                + ". Returning to starters cannot restore these games."
             )
     return "\n\n".join(parts)
 

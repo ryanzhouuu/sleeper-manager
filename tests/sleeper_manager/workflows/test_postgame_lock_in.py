@@ -111,7 +111,7 @@ def test_two_identical_finals_notify_lock_with_acknowledgement_actions(
         ]
         assert second.recommendation is not None
         assert second.recommendation.decision_type == LOCK_IN_DECISION_TYPE
-        assert "Expected weekly total: 28.0 pts." in sender.messages[0].message
+        assert "Projected week: 28.0 pts" in sender.messages[0].message
         assert "Alternative (pass): 9.0 pts." in sender.messages[0].message
         assert json.loads(second.recommendation.trace_json)["expected_terminal_score"] == 28.0
         notifications._clock = lambda: SECOND_POLL + timedelta(minutes=5)

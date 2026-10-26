@@ -1,7 +1,6 @@
 """Render validated weekly actions for notifications and versioned decision traces."""
 
 import json
-import re
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, tzinfo
@@ -14,7 +13,7 @@ from sleeper_manager.domain.planning import (
     WeeklyPlan,
 )
 from sleeper_manager.workflows.recommendation_context import (
-    full_recommendation_context,
+    recommendation_follow_up,
     score_action_phrases,
 )
 from sleeper_manager.workflows.recommendation_context import (
@@ -25,10 +24,6 @@ WEEKLY_LINEUP_DECISION_TYPE = "weekly_lineup"
 
 # Deltas smaller than the :.1f display half-step would otherwise render as "0.0 points".
 _UNCHANGED_DELTA_EPSILON = 0.05
-
-# Structured assumption lines emitted by the weekly planner's schedule summary.
-_SCHEDULE_START_PATTERN = re.compile(r"^game \S+ assumed to start (.+)$")
-_REPLANNABLE_PATTERN = re.compile(r"^(\d+) later opportunities remain replannable$")
 
 _TITLES = {
     PlanStatus.ACTION_REQUIRED: "Lineup move required",
@@ -76,6 +71,7 @@ def render_weekly_plan(
     player_names: Mapping[str, str] | None = None,
     local_timezone: tzinfo | None = None,
 ) -> RenderedPlanNotification:
+    """Keep alerts actionable while retaining complete evidence in the separate trace."""
     title = "Lock-In team recommendation" if plan.score_actions else _TITLES[plan.status]
     # Blocked plans suppress instructions even when they retain moves.
     actionable = plan.status in (PlanStatus.ACTION_REQUIRED, PlanStatus.DEGRADED) and bool(
@@ -88,16 +84,16 @@ def render_weekly_plan(
                 "\n\n",
                 _static_message(plan),
                 _value_clause(plan),
-                full_recommendation_context(plan, player_names, local_timezone),
+                _risk_clause(plan),
+                recommendation_follow_up(plan, player_names, local_timezone),
             ),
         )
     sections = (
+        _deadline_clause(plan, local_timezone),
         _imperative(plan, player_names),
         _value_clause(plan),
-        _schedule_clause(plan, local_timezone),
         _risk_clause(plan),
-        full_recommendation_context(plan, player_names, local_timezone),
-        _deadline_clause(plan, local_timezone),
+        recommendation_follow_up(plan, player_names, local_timezone),
     )
     return RenderedPlanNotification(
         title=title,
@@ -111,29 +107,21 @@ def _join_sections(separator: str, *sections: str) -> str:
 
 def _static_message(plan: WeeklyPlan) -> str:
     if plan.status is PlanStatus.NO_ACTION:
-        return "Your lineup already matches the weekly plan."
+        return "Your lineup is set."
     if plan.status is PlanStatus.DEGRADED:
-        return _join_sections(
-            "\n\n",
-            "Lineup advice is limited right now.",
-            _notes_clause(plan.explanation_reasons + plan.warnings),
-            _confidence_clause(plan),
-        )
+        return "Lineup advice is limited right now."
     phrases = _reason_phrases(plan.blocking_reasons)
     blocked_clause = (
         f"Advice is blocked: {'; '.join(phrases)}." if phrases else "Advice is blocked."
     )
-    return _join_sections(
-        "\n\n",
-        blocked_clause,
-        "Lineup advice resumes once the issue resolves.",
-    )
+    return blocked_clause
 
 
 def _imperative(
     plan: WeeklyPlan,
     player_names: Mapping[str, str] | None,
 ) -> str:
+    """Preserve executable move order and place locks after their required moves."""
     labels = _slot_labels(plan)
     phrases = score_action_phrases(plan, player_names, LockInDecisionKind.PASS)
     for index, move in enumerate(plan.moves):
@@ -144,44 +132,40 @@ def _imperative(
         target = labels.get(move.target_slot_index) if move.target_slot_index is not None else None
         if move.swap_player_id is not None:
             other = _player_name(move.swap_player_id, player_names)
-            phrases.append(f"Swap {name} ({source or 'bench'}) and {other} ({target or 'bench'}).")
+            if source is None:
+                phrases.append(f"Start {name} at {target}; bench {other}.")
+            elif target is None:
+                phrases.append(f"Start {other} at {source}; bench {name}.")
+            else:
+                phrases.append(f"Swap {name} ({source}) and {other} ({target}).")
         elif source is None and target is not None:
-            phrases.append(f"Start {name} in {target}.")
+            phrases.append(f"Start {name} at {target}.")
         elif source is not None and target is None:
             phrases.append(f"Move {name} to the bench.")
         else:
             phrases.append(f"Move {name} from {source} to {target}.")
     if plan.pre_lock_move_count == len(plan.moves):
         phrases.extend(score_action_phrases(plan, player_names, LockInDecisionKind.LOCK))
-    return " ".join(phrases)
+    return "\n".join(f"• {phrase}" for phrase in phrases)
 
 
 def _value_clause(plan: WeeklyPlan) -> str:
-    """Show the selected team total and, for moves, its change from the current lineup."""
+    """Combine the modeled team total, optional lineup delta, and confidence."""
     expected = plan.expected_terminal_score
     observed = plan.observed_terminal_score
     if expected is None or plan.status is PlanStatus.BLOCKED:
-        return "Expected weekly total: unavailable."
-    total = f"Expected weekly total: {expected:.1f} pts."
-    if observed is None or not plan.moves:
-        return total
-    delta = round(expected - observed, 6)
-    if abs(delta) < _UNCHANGED_DELTA_EPSILON:
-        delta = 0.0
-    return f"{total}\nChange versus current lineup: {delta:+.1f} pts."
+        return "Projected week: unavailable."
+    total = f"Projected week: {expected:.1f} pts"
+    if observed is not None and plan.moves:
+        delta = round(expected - observed, 6)
+        if abs(delta) < _UNCHANGED_DELTA_EPSILON:
+            delta = 0.0
+        total += f" ({delta:+.1f})"
+    return f"{total} · {plan.confidence.value.title()} confidence."
 
 
 def _risk_clause(plan: WeeklyPlan) -> str:
-    return _join_sections(
-        "\n",
-        _notes_clause(plan.explanation_reasons + plan.warnings),
-        _confidence_clause(plan),
-        _approximation_clause(plan),
-    )
-
-
-def _confidence_clause(plan: WeeklyPlan) -> str:
-    return f"Confidence: {plan.confidence.value}."
+    return _notes_clause(plan.explanation_reasons + plan.warnings)
 
 
 def _reason_phrases(reasons: Iterable[PlanningReasonCode]) -> list[str]:
@@ -198,26 +182,17 @@ def _notes_clause(reasons: Iterable[PlanningReasonCode]) -> str:
     return f"Notes: {'; '.join(phrases)}." if phrases else ""
 
 
-def _approximation_clause(plan: WeeklyPlan) -> str:
-    summary = plan.distribution_summary
-    if summary is None:
-        return ""
-    return (
-        f"Values are modeled estimates over {summary.scenario_count} scenarios "
-        f"({summary.approximation}), not guarantees."
-    )
-
-
 def _deadline_clause(plan: WeeklyPlan, local_timezone: tzinfo | None) -> str:
+    """Show the earliest action cutoff without implying Pass requires a Sleeper move."""
     deadlines = [move.deadline for move in plan.moves] + [
         action.deadline for action in plan.score_actions
     ]
     if not deadlines:
         return ""
     moment = min(deadlines).astimezone(local_timezone or plan.decision_time.tzinfo)
-    return (
-        f"Complete before {_format_local_time(moment, local_timezone, plan.decision_time.tzinfo)}."
-    )
+    action = "Update in Sleeper" if plan.moves else "Decide"
+    when = _format_local_time(moment, local_timezone, plan.decision_time.tzinfo)
+    return f"{action} before {when}"
 
 
 def _format_local_time(
@@ -229,26 +204,6 @@ def _format_local_time(
     hour12 = local.hour % 12 or 12
     zone = local.tzname() or str(local.tzinfo)
     return f"{local.strftime('%a')} {hour12}:{local.strftime('%M %p')} {zone}"
-
-
-def _schedule_clause(plan: WeeklyPlan, local_timezone: tzinfo | None) -> str:
-    lines: list[str] = []
-    starts: list[datetime] = []
-    for assumption in plan.schedule_assumptions:
-        start_match = _SCHEDULE_START_PATTERN.match(assumption)
-        if start_match:
-            try:
-                starts.append(datetime.fromisoformat(start_match.group(1)))
-            except ValueError:
-                continue
-            continue
-        count_match = _REPLANNABLE_PATTERN.match(assumption)
-        if count_match and int(count_match.group(1)) > 0:
-            lines.append(f"{count_match.group(1)} later opportunities remain replannable.")
-    if starts:
-        tipoff = _format_local_time(min(starts), local_timezone, plan.decision_time.tzinfo)
-        lines.insert(0, f"This matters because the first affected game tips off {tipoff}.")
-    return "\n".join(lines)
 
 
 def _player_name(player_id: str, names: Mapping[str, str] | None) -> str:
