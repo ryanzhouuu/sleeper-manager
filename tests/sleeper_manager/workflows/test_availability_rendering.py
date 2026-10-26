@@ -54,7 +54,7 @@ def test_matching_statuses_group_names_with_local_game_time() -> None:
 
     summary = state_availability_summary(state, player_names=NAMES, local_timezone=CHICAGO)
 
-    assert summary == ("• Out: Ann, Ben — Mon Jan 05, 8:00 PM CST.",)
+    assert summary == ("• Out: Ann, Ben — Mon 8:00 PM CST.",)
     assert summary == state_availability_summary(
         replace(state, opportunities=tuple(reversed(state.opportunities))),
         player_names=NAMES,
@@ -80,9 +80,9 @@ def test_distinct_game_statuses_remain_separate_and_provisional() -> None:
     summary = state_availability_summary(state, player_names=NAMES, local_timezone=CHICAGO)
 
     assert summary == (
-        "• Out: Ann — Mon Jan 05, 8:00 PM CST.",
-        "• Questionable: Ann — Tue Jan 06, 8:00 PM CST.",
-        "• Participation estimates are provisional.",
+        "• Out: Ann — Mon 8:00 PM CST.",
+        "• Questionable: Ann — Tue 8:00 PM CST.",
+        "• Estimates provisional.",
     )
 
 
@@ -99,9 +99,7 @@ def test_missing_report_counts_unique_players_across_games() -> None:
 
     summary = state_availability_summary(state, player_names=NAMES)
 
-    assert summary == (
-        "• Game reports missing for 2 players; participation estimates are provisional.",
-    )
+    assert summary == ("• Reports missing for 2 players; estimates provisional.",)
     assert len(state_availability_notes(state, player_names=NAMES)) == 6
 
 
@@ -120,10 +118,7 @@ def test_unscoped_designations_never_render_as_confirmed_absences() -> None:
 
     summary = state_availability_summary(state, player_names=NAMES, local_timezone=CHICAGO)
 
-    assert summary == (
-        "• Unverified out designation: Ann — Mon Jan 05, 8:00 PM CST.",
-        "• Participation estimates are provisional.",
-    )
+    assert summary == ("• Unverified out: Ann (game applicability unknown).",)
 
 
 def test_missing_reports_and_unverified_source_are_distinct_warnings() -> None:
@@ -135,20 +130,17 @@ def test_missing_reports_and_unverified_source_are_distinct_warnings() -> None:
     )
 
     assert state_availability_summary(state) == (
-        "• Game reports missing for 1 player; participation estimates are provisional.",
-        "• Game availability could not be verified for 1 player; "
-        "participation estimates are provisional.",
+        "• Reports missing for 1 player; estimates provisional.",
+        "• Availability unverified for 1 player; estimates provisional.",
     )
 
 
 def test_unknown_uncertainty_keeps_its_explanation_and_player_id() -> None:
-    state = _state(
-        (_warning("p1", "g1", "availability_uncertainty", "A minutes limit is unverified."),)
-    )
+    state = _state((_warning("p1", "g1", "availability_uncertainty", "Unverified minutes limit."),))
 
     summary = state_availability_summary(state)
 
-    assert summary[0] == "• A minutes limit is unverified: p1 — Tue Jan 06, 2:00 AM UTC."
+    assert summary[0] == "• Unverified minutes limit: p1 — Tue 2:00 AM UTC."
 
 
 def test_past_games_and_missing_projections_do_not_emit_warnings() -> None:
@@ -184,3 +176,31 @@ def test_trace_and_material_identity_retain_repeated_statuses_for_distinct_games
     assert availability_material_hash("base", notes) != availability_material_hash(
         "base", notes[:1]
     )
+
+
+def test_unscoped_reports_group_each_player_once_and_keep_individual_trace_notes() -> None:
+    message = (
+        "An unscoped out designation is available; its game applicability is unverified "
+        "and participation remains provisional."
+    )
+    state = _state(
+        tuple(
+            _warning(player, f"g{day}", "availability_uncertainty", message, hours_later=24 * day)
+            for player in ("p2", "p1")
+            for day in range(3)
+        )
+        + (_warning("p1", "confirmed", "confirmed_game_absence", "Out for this game."),)
+    )
+
+    summary = state_availability_summary(state, player_names=NAMES, local_timezone=CHICAGO)
+
+    assert summary == (
+        "• Out: Ann — Mon 8:00 PM CST.",
+        "• Unverified out: Ann, Ben (game applicability unknown).",
+    )
+    assert summary == state_availability_summary(
+        replace(state, opportunities=tuple(reversed(state.opportunities))),
+        player_names=NAMES,
+        local_timezone=CHICAGO,
+    )
+    assert len(state_availability_notes(state, player_names=NAMES)) == 7

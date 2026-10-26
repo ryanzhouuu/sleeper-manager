@@ -87,9 +87,10 @@ advice; hybrid advice requires an explicit selection and pinned history.
 
 ## Recommendations
 
-Notifications group named availability warnings by status and game time, and count
-players with missing reports or unverified availability. Full player/game warnings
-remain in the stored recommendation trace.
+Notifications group game-specific availability warnings by status and game time,
+summarize repeated unscoped designations once per player, and count players with
+missing reports or unverified availability. Full player/game warnings remain in
+the stored recommendation trace.
 Daily, pre-tipoff, and postgame runs produce a complete team recommendation from
 the current lineup, confirmed decisions, and retained player-game observations.
 Alerts lead with the deadline and ordered actions, followed by the projected weekly

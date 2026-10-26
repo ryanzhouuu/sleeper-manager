@@ -188,7 +188,7 @@ def test_missing_official_source_is_one_human_readable_warning(tmp_path) -> None
             ),
         )
         result = await run(inputs, repository, notifications)
-        assert result.notification.message.count("Game availability could not be verified") == 1
+        assert result.notification.message.count("Availability unverified for 2 players") == 1
         assert "RuntimeError" not in result.notification.message
 
     asyncio.run(exercise())

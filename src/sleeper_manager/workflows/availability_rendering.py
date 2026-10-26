@@ -11,9 +11,10 @@ _MISSING_REPORT = "The team has not submitted a game report; participation remai
 _UNCERTAINTY_LABELS = {
     f"{status}; participation is provisional for this game.": status
     for status in ("Questionable", "Doubtful", "Probable")
-} | {
+}
+_UNSCOPED_LABELS = {
     f"An unscoped {status} designation is available; its game applicability is unverified "
-    "and participation remains provisional.": f"Unverified {status} designation"
+    "and participation remains provisional.": f"Unverified {status}"
     for status in ("out", "questionable", "doubtful", "probable")
 }
 
@@ -24,8 +25,9 @@ def state_availability_summary(
     player_names: Mapping[str, str] | None = None,
     local_timezone: tzinfo | None = None,
 ) -> tuple[str, ...]:
-    """Group identical game warnings and count unique players with missing evidence."""
+    """Keep game-scoped warnings distinct and collapse repeated unscoped designations."""
     groups: dict[tuple[datetime, str], set[str]] = defaultdict(set)
+    unverified: dict[str, set[str]] = defaultdict(set)
     missing_reports: set[str] = set()
     data_gaps: set[str] = set()
     uncertain = False
@@ -44,8 +46,11 @@ def state_availability_summary(
                 if reason.message == _MISSING_REPORT:
                     missing_reports.add(player)
                     continue
-                uncertain = True
+                if reason.message in _UNSCOPED_LABELS:
+                    unverified[_UNSCOPED_LABELS[reason.message]].add(player)
+                    continue
                 label = _UNCERTAINTY_LABELS.get(reason.message, reason.message.rstrip("."))
+                uncertain = True
             else:
                 continue
             groups[opportunity.scheduled_start, label].add(player)
@@ -57,25 +62,27 @@ def state_availability_summary(
     for (start, label), players in sorted(groups.items()):
         moment = start.astimezone(local_timezone or state.decision_time.tzinfo)
         hour = moment.hour % 12 or 12
-        when = f"{moment:%a %b %d}, {hour}:{moment:%M %p %Z}"
-        ordered = sorted(players, key=lambda player: (names.get(player, player).casefold(), player))
-        lines.append(
-            f"• {label}: {', '.join(names.get(player, player) for player in ordered)} — {when}."
-        )
+        when = f"{moment:%a} {hour}:{moment:%M %p %Z}"
+        lines.append(f"• {label}: {_player_names(players, names)} — {when}.")
+    for label, players in sorted(unverified.items()):
+        lines.append(f"• {label}: {_player_names(players, names)} (game applicability unknown).")
     if missing_reports:
         lines.append(
-            f"• Game reports missing for {_player_count(missing_reports)}; "
-            "participation estimates are provisional."
+            f"• Reports missing for {_player_count(missing_reports)}; estimates provisional."
         )
     if data_gaps:
         lines.append(
-            f"• Game availability could not be verified for {_player_count(data_gaps)}; "
-            "participation estimates are provisional."
+            f"• Availability unverified for {_player_count(data_gaps)}; estimates provisional."
         )
     if uncertain and not (missing_reports or data_gaps):
-        lines.append("• Participation estimates are provisional.")
+        lines.append("• Estimates provisional.")
     return tuple(lines)
 
 
 def _player_count(players: set[str]) -> str:
     return f"{len(players)} {'player' if len(players) == 1 else 'players'}"
+
+
+def _player_names(players: set[str], names: Mapping[str, str]) -> str:
+    ordered = sorted(players, key=lambda player: (names.get(player, player).casefold(), player))
+    return ", ".join(names.get(player, player) for player in ordered)
