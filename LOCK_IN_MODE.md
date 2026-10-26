@@ -81,11 +81,14 @@ swap, the named players exchange `source_slot_index` and `target_slot_index`;
 null denotes the bench. The entire exchange takes effect in one action. Schema 3 also records proposed
 score actions, pre-lock move ordering, the complete bench, named recovery
 obligations, and any recommended forfeitures. Schema 2 records remain readable;
-they do not establish recovery provenance. Joint completed-score search admits at
-most 4,096 placements and explores at most 100,000 placement combinations. A search
-limit produces a blocked result with a complete observed roster view. Known scores
-and upcoming starts share at most 256 distinct continuation states and paired
-scenario draws, so the two decisions use the same value model.
+they do not establish recovery provenance. Joint completed-score search evaluates
+every placement accepted by move verification without a placement-count or
+continuation-count cutoff. Enumeration rejects repeated players and occupied slots
+before exploring their remaining combinations. Known scores and upcoming starts
+share paired scenario draws and the same value model. All-Pass, opposing Lock/Pass
+choices, and placement values remain available for confidence and tie-breaking.
+The later-week continuation remains approximate, and move verification and runtime
+resource limits still apply. Interrupted searches do not publish partial advice.
 
 ### Adding a free agent or waiver player
 

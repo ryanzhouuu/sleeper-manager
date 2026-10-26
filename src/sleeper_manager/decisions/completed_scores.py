@@ -1,8 +1,8 @@
 """Joint completed-score acceptance with executable pre-lock lineups and shared continuations."""
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import timedelta
-from itertools import product
 
 from sleeper_manager.decisions._lock_flexibility import future_player_sets
 from sleeper_manager.decisions._weekly_plan_completion import complete_assignment
@@ -23,8 +23,6 @@ from sleeper_manager.domain.planning import (
     PlannedAssignment,
     TeamWeekState,
 )
-
-MAX_LOCK_PLACEMENTS = 4096
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +76,7 @@ def usable_completed_games(state: TeamWeekState) -> tuple[GameOpportunity, ...]:
 def executable_lock_placements(
     state: TeamWeekState, games: tuple[GameOpportunity, ...]
 ) -> tuple[CompletedPlacement, ...]:
-    """Enumerate complete reachable lock combinations, failing closed at the search budget."""
+    """Enumerate every reachable lock combination, pruning slot/player collisions early."""
     slots = tuple(slot for slot in state.starter_slots if slot.index in state.open_slot_indices)
     choices = tuple(
         (
@@ -100,14 +98,7 @@ def executable_lock_placements(
         for game in games
     )
     results: list[CompletedPlacement] = []
-    for count, combination in enumerate(product(*choices)):
-        if count >= 100_000 or len(results) >= MAX_LOCK_PLACEMENTS:
-            raise WeeklyPlanError("Completed-score placement search limit exceeded")
-        locks = tuple(item for item in combination if item is not None)
-        if len({item.slot_index for item in locks}) != len(locks) or len(
-            {item.player_id for item in locks}
-        ) != len(locks):
-            continue
+    for locks in _compatible_locks(choices):
         try:
             target = complete_assignment(state, (), AssignmentResult(0, locks))
             view = tuple(
@@ -132,6 +123,34 @@ def executable_lock_placements(
     if not results:
         raise WeeklyPlanError("No executable completed-score placement")
     return tuple(results)
+
+
+def _compatible_locks(
+    choices: tuple[tuple[SlotAssignment | None, ...], ...],
+) -> Iterator[tuple[SlotAssignment, ...]]:
+    """Preserve Cartesian-product order while abandoning only infeasible partial placements."""
+
+    def visit(
+        index: int,
+        occupied: frozenset[int],
+        players: frozenset[str | None],
+        locks: tuple[SlotAssignment, ...],
+    ) -> Iterator[tuple[SlotAssignment, ...]]:
+        if index == len(choices):
+            yield locks
+            return
+        for choice in choices[index]:
+            if choice is None:
+                yield from visit(index + 1, occupied, players, locks)
+            elif choice.slot_index not in occupied and choice.player_id not in players:
+                yield from visit(
+                    index + 1,
+                    occupied | {choice.slot_index},
+                    players | {choice.player_id},
+                    (*locks, choice),
+                )
+
+    yield from visit(0, frozenset(), frozenset(), ())
 
 
 def compare_completed_scores(

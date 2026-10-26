@@ -12,7 +12,6 @@ from sleeper_manager.decisions._weekly_plan_inputs import (
 )
 from sleeper_manager.decisions._weekly_plan_models import (
     WeeklyPlanDecision,
-    WeeklyPlanError,
     WeeklyPlanPolicyConfig,
 )
 from sleeper_manager.decisions._weekly_plan_recovery import recovery_bench_capacity
@@ -31,8 +30,6 @@ from sleeper_manager.domain.planning import (
     PassedOpportunity,
     TeamWeekState,
 )
-
-MAX_COORDINATED_CONTINUATIONS = 256
 
 
 def coordinate_completed_continuations(
@@ -70,8 +67,6 @@ def coordinate_completed_continuations(
             ),
         )
         if key not in cache:
-            if len(cache) >= MAX_COORDINATED_CONTINUATIONS:
-                raise WeeklyPlanError("Coordinated continuation search limit exceeded")
             hypothetical = _continuation_state(state, option, completed, positions, lead_time)
             batch = next_actionable_batch(hypothetical)
             decision = None

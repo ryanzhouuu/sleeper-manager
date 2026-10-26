@@ -55,8 +55,11 @@ Live daily, pre-tipoff, manual, and postgame plans use 128 outer scenarios and 3
 postgame continuation scenarios, reduced from 2,000 and 128 to favor interactive
 latency. Sampling remains deterministic for a given input and seed, but this smaller
 budget can change estimated values, confidence, and recommendations. Explicit
-research/test policies retain their configured sampling budgets. Existing search
-limits still produce an unavailable plan rather than incomplete advice.
+research/test policies retain their configured sampling budgets. Joint completed-score
+comparison has no placement-count or continuation-count cutoff. It shares random
+draws across alternatives, reuses opposing-action comparisons, and computes the
+diagnostic upper bound only for the selected continuation. Move verification and
+runtime resource limits still apply; interrupted work does not publish partial advice.
 Pre-tipoff watches cover only the current fantasy week. Unchanged watches do not
 write or reset retry timing. Each reconciliation cancels at most 50 obsolete future
 watches, so legacy rows retire gradually without a large cleanup burst.

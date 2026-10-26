@@ -174,11 +174,15 @@ def test_known_score_and_next_start_use_the_same_bounded_continuation() -> None:
     assert result.desired_assignments[0].player_id == "held"
 
 
-def test_exhausted_joint_budget_returns_a_full_blocked_view(monkeypatch) -> None:
-    from sleeper_manager.decisions import _coordinated_continuations
+def test_move_search_failure_returns_a_full_blocked_view(monkeypatch) -> None:
+    from sleeper_manager.decisions import team_recommendation
+    from sleeper_manager.decisions.weekly_plan import WeeklyPlanError
     from sleeper_manager.domain.planning import PlanningReasonCode, PlanStatus
 
-    monkeypatch.setattr(_coordinated_continuations, "MAX_COORDINATED_CONTINUATIONS", 0)
+    def fail(*args, **kwargs):
+        raise WeeklyPlanError("No verified legal lineup sequence within search limit")
+
+    monkeypatch.setattr(team_recommendation, "coordinate_completed_continuations", fail)
     state = _after_trial(80)
     result = build_team_recommendation(state, policy=POLICY)
     assert result.status is PlanStatus.BLOCKED

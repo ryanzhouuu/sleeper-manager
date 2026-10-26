@@ -122,10 +122,12 @@ Recovery obligations persist across runs, including after a recovery recommendat
 is ignored. A named recovery may explicitly forfeit its own active attempt; it
 cannot discard another active starter or relocate an accepted lock.
 
-Values use bounded postgame placement search and an approximate later-week
-continuation. Search limits or uncertain evidence can make advice or totals
-unavailable. These changes do not claim a weekly scoring improvement or automatic
-lock detection.
+Completed-score comparisons evaluate every placement accepted by move verification
+and every distinct continuation, using shared scenario draws and an approximate
+later-week continuation. Duplicate player/slot combinations are pruned before
+evaluation. Move-verification limits, runtime limits, or uncertain evidence can
+still make advice or totals unavailable. These changes do not claim a weekly
+scoring improvement or automatic lock detection.
 
 Large deliveries use ordered message parts to preserve the whole
 recommendation and its confirmations within [Discord's content limit](https://docs.discord.com/developers/resources/webhook#execute-webhook)
