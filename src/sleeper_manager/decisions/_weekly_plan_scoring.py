@@ -56,8 +56,11 @@ def score_weekly_options(
     capture_samples: bool = False,
     sampling_inputs: tuple[ScenarioInput, ...] | None = None,
     _samples: PreparedPlanSamples | None = None,
+    _compute_bound: bool = True,
 ) -> WeeklyPlanDecision:
     """Rank current-batch assignments against simulated continuation value.
+
+    Joint comparison can defer the diagnostic bound until its selected decision is finalized.
 
     Raises:
         WeeklyPlanError: If the state is blocked or has no actionable opportunity.
@@ -105,11 +108,17 @@ def score_weekly_options(
         )
     )
     future_inputs = tuple(scenario_input(opportunity) for opportunity in future)
-    perfect_information_bound = _terminal_value(
-        fixed_assignments=fixed_assignment_candidates,
-        remaining_inputs=tuple(scenario_input(opportunity) for opportunity in (*batch, *future)),
-        open_slots=open_slots,
-        scenarios=scenarios,
+    perfect_information_bound = (
+        _terminal_value(
+            fixed_assignments=fixed_assignment_candidates,
+            remaining_inputs=tuple(
+                scenario_input(opportunity) for opportunity in (*batch, *future)
+            ),
+            open_slots=open_slots,
+            scenarios=scenarios,
+        )
+        if _compute_bound
+        else 0.0
     )
     batch_candidates = option_candidates(batch, open_slots)
     candidates = batch_candidates + active_candidates

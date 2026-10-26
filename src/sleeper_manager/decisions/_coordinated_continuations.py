@@ -5,6 +5,7 @@ from datetime import timedelta
 
 from sleeper_manager.decisions._recovery_refresh import due_recovery_forfeitures
 from sleeper_manager.decisions._weekly_plan_inputs import (
+    fixed_assignments,
     future_opportunities,
     next_actionable_batch,
     scenario_input,
@@ -16,14 +17,16 @@ from sleeper_manager.decisions._weekly_plan_models import (
 )
 from sleeper_manager.decisions._weekly_plan_recovery import recovery_bench_capacity
 from sleeper_manager.decisions._weekly_plan_samples import PreparedPlanSamples
-from sleeper_manager.decisions._weekly_plan_scoring import score_weekly_options
+from sleeper_manager.decisions._weekly_plan_scoring import _terminal_value, score_weekly_options
 from sleeper_manager.decisions.completed_scores import (
+    CompletedPlacement,
     CompletedScoreComparison,
     select_completed_placement,
     usable_completed_games,
 )
 from sleeper_manager.domain.planning import (
     FixedSlot,
+    GameOpportunity,
     ObservedStarter,
     PassedOpportunity,
     TeamWeekState,
@@ -69,54 +72,8 @@ def coordinate_completed_continuations(
         if key not in cache:
             if len(cache) >= MAX_COORDINATED_CONTINUATIONS:
                 raise WeeklyPlanError("Coordinated continuation search limit exceeded")
-            fixed = tuple(
-                FixedSlot(
-                    row.slot_index,
-                    row.slot_position,
-                    row.player_id or "",
-                    row.game_id or "",
-                    row.score,
-                    state.decision_time,
-                    "proposed-only",
-                    "proposed-only",
-                )
-                for row in option.locks
-            )
-            hypothetical = replace(
-                state,
-                fixed_slots=(*state.fixed_slots, *fixed),
-                observed_starters=tuple(
-                    ObservedStarter(row.slot_index, row.player_id, positions[row.player_id])
-                    for row in option.assignments
-                    if row.player_id is not None
-                ),
-                passed_opportunities=(
-                    *state.passed_opportunities,
-                    *(
-                        PassedOpportunity(
-                            game.sleeper_player_id,
-                            game.game_id,
-                            state.decision_time,
-                            "proposed-only",
-                            "proposed-only",
-                        )
-                        for game in completed
-                        if (game.sleeper_player_id, game.game_id) not in locked_keys
-                    ),
-                ),
-                recovery_forfeitures=tuple(
-                    key
-                    for key in state.recovery_forfeitures
-                    if key[0] not in {row.player_id for row in fixed}
-                ),
-            )
+            hypothetical = _continuation_state(state, option, completed, positions, lead_time)
             batch = next_actionable_batch(hypothetical)
-            allowed = due_recovery_forfeitures(hypothetical, lead_time)
-            hypothetical = replace(
-                hypothetical,
-                recovery_forfeitures=allowed,
-                bench_capacity=recovery_bench_capacity(state, state.recovery_obligations),
-            )
             decision = None
             if batch is None:
                 scores = (
@@ -129,6 +86,7 @@ def coordinate_completed_continuations(
                     capture_samples=True,
                     sampling_inputs=universe,
                     _samples=samples,
+                    _compute_bound=False,
                 )
                 scores = decision.selected.scenario_terminal_scores
             cache[key] = scores, decision
@@ -141,6 +99,88 @@ def coordinate_completed_continuations(
                 upcoming_decision=decision,
             )
         )
-    return select_completed_placement(
+    result = select_completed_placement(
         tuple(evaluated), config.tie_tolerance, config.minimum_lock_in_confidence
+    )
+    selected = result.selected
+    if selected.upcoming_decision is None:
+        return result
+    hypothetical = _continuation_state(state, selected, completed, positions, lead_time)
+    batch = next_actionable_batch(hypothetical)
+    assert batch is not None
+    future = future_opportunities(hypothetical, batch[0].scheduled_start)
+    bound = _terminal_value(
+        fixed_assignments=fixed_assignments(hypothetical.fixed_slots),
+        remaining_inputs=tuple(scenario_input(game) for game in (*batch, *future)),
+        open_slots=tuple(
+            slot for slot in state.starter_slots if slot.index in hypothetical.open_slot_indices
+        ),
+        scenarios=samples.outer,
+    )
+    finalized = replace(
+        selected,
+        upcoming_decision=replace(selected.upcoming_decision, perfect_information_bound=bound),
+    )
+    return replace(
+        result,
+        selected=finalized,
+        baseline=finalized if result.baseline is selected else result.baseline,
+        alternatives=tuple(finalized if row is selected else row for row in result.alternatives),
+    )
+
+
+def _continuation_state(
+    state: TeamWeekState,
+    option: CompletedPlacement,
+    completed: tuple[GameOpportunity, ...],
+    positions: dict[str, tuple[str, ...]],
+    lead_time: timedelta,
+) -> TeamWeekState:
+    """Hypothesize one full Lock/Pass placement without changing manager observations."""
+    locked_keys = {(row.player_id, row.game_id) for row in option.locks}
+    fixed = tuple(
+        FixedSlot(
+            row.slot_index,
+            row.slot_position,
+            row.player_id or "",
+            row.game_id or "",
+            row.score,
+            state.decision_time,
+            "proposed-only",
+            "proposed-only",
+        )
+        for row in option.locks
+    )
+    hypothetical = replace(
+        state,
+        fixed_slots=(*state.fixed_slots, *fixed),
+        observed_starters=tuple(
+            ObservedStarter(row.slot_index, row.player_id, positions[row.player_id])
+            for row in option.assignments
+            if row.player_id is not None
+        ),
+        passed_opportunities=(
+            *state.passed_opportunities,
+            *(
+                PassedOpportunity(
+                    game.sleeper_player_id,
+                    game.game_id,
+                    state.decision_time,
+                    "proposed-only",
+                    "proposed-only",
+                )
+                for game in completed
+                if (game.sleeper_player_id, game.game_id) not in locked_keys
+            ),
+        ),
+        recovery_forfeitures=tuple(
+            key
+            for key in state.recovery_forfeitures
+            if key[0] not in {row.player_id for row in fixed}
+        ),
+    )
+    return replace(
+        hypothetical,
+        recovery_forfeitures=due_recovery_forfeitures(hypothetical, lead_time),
+        bench_capacity=recovery_bench_capacity(state, state.recovery_obligations),
     )

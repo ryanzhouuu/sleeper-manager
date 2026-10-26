@@ -61,3 +61,26 @@ def test_joint_comparison_prepares_draws_once(monkeypatch: pytest.MonkeyPatch) -
 
     assert plan.expected_terminal_score == 80
     assert counts == [POLICY.scenario_count, POLICY.postgame_scenario_count]
+
+
+def test_joint_comparison_finalizes_only_the_selected_diagnostic_bound(monkeypatch) -> None:
+    from sleeper_manager.decisions import _coordinated_continuations, _weekly_plan_scoring
+    from sleeper_manager.decisions.team_recommendation import build_team_recommendation
+    from tests.sleeper_manager.decisions.test_team_recommendation import _after_trial
+
+    state = _after_trial(5)
+    reference = build_team_recommendation(state, policy=POLICY)
+    original = _weekly_plan_scoring._terminal_value
+    calls = 0
+
+    def record(**kwargs):
+        nonlocal calls
+        calls += 1
+        return original(**kwargs)
+
+    monkeypatch.setattr(_weekly_plan_scoring, "_terminal_value", record)
+    monkeypatch.setattr(_coordinated_continuations, "_terminal_value", record)
+    actual = build_team_recommendation(state, policy=POLICY)
+
+    assert actual == reference
+    assert calls == 1

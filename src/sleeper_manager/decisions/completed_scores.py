@@ -205,6 +205,26 @@ def select_completed_placement(
     evaluated = list(options)
     baseline = next(item for item in evaluated if not item.locks)
     selected = baseline
+    opposing: dict[tuple[str | None, str | None], CompletedPlacement] = {}
+    confidences: dict[tuple[int, str | None, str | None], float] = {}
+
+    def lock_confidence(choice: CompletedPlacement, lock: SlotAssignment) -> float:
+        """Preserve the first best opposing action and reuse identical paired samples."""
+        key = lock.player_id, lock.game_id
+        if key not in opposing:
+            opposing[key] = max(
+                (
+                    row
+                    for row in evaluated
+                    if not any((item.player_id, item.game_id) == key for item in row.locks)
+                ),
+                key=lambda row: row.expected_score,
+            )
+        sample_key = id(choice.terminal_scores), *key
+        if sample_key not in confidences:
+            confidences[sample_key] = _lock_confidence(choice, opposing[key], tie_tolerance)
+        return confidences[sample_key]
+
     for item in evaluated:
         confidence = sum(
             a > b + tie_tolerance
@@ -213,8 +233,7 @@ def select_completed_placement(
         if item.locks and confidence < minimum_confidence:
             continue
         if minimum_confidence > 0 and any(
-            _lock_confidence(item, lock, evaluated, tie_tolerance) < minimum_confidence
-            for lock in item.locks
+            lock_confidence(item, lock) < minimum_confidence for lock in item.locks
         ):
             continue
         if item.expected_score > selected.expected_score + tie_tolerance:
@@ -239,22 +258,10 @@ def select_completed_placement(
 
 def _lock_confidence(
     choice: CompletedPlacement,
-    lock: SlotAssignment,
-    alternatives: list[CompletedPlacement],
+    other: CompletedPlacement,
     tolerance: float,
 ) -> float:
     """Qualify each joint lock against the best legal continuation without that player-game."""
-    other = max(
-        (
-            row
-            for row in alternatives
-            if not any(
-                (item.player_id, item.game_id) == (lock.player_id, lock.game_id)
-                for item in row.locks
-            )
-        ),
-        key=lambda row: row.expected_score,
-    )
     return sum(
         a > b + tolerance
         for a, b in zip(choice.terminal_scores, other.terminal_scores, strict=True)
