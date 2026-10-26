@@ -37,6 +37,7 @@ from sleeper_manager.decisions._weekly_plan_models import (
 from sleeper_manager.decisions._weekly_plan_moves import plan_moves
 from sleeper_manager.decisions._weekly_plan_recourse import recourse_terminal_values
 from sleeper_manager.decisions._weekly_plan_recovery import prove_recovery
+from sleeper_manager.decisions._weekly_plan_samples import PreparedPlanSamples
 from sleeper_manager.decisions._weekly_plan_terminal_values import assignment_terminal_values
 from sleeper_manager.decisions.lineup import AssignmentCandidate, AssignmentResult
 from sleeper_manager.decisions.simulation import (
@@ -54,6 +55,7 @@ def score_weekly_options(
     config: WeeklyPlanPolicyConfig | None = None,
     capture_samples: bool = False,
     sampling_inputs: tuple[ScenarioInput, ...] | None = None,
+    _samples: PreparedPlanSamples | None = None,
 ) -> WeeklyPlanDecision:
     """Rank current-batch assignments against simulated continuation value.
 
@@ -86,11 +88,21 @@ def score_weekly_options(
         roster_id=state.roster_id,
         decision_time=state.decision_time,
     )
-    scenarios = generate_projection_scenarios(
-        sampling_inputs if sampling_inputs is not None else scenario_inputs,
-        decision_time=state.decision_time,
-        count=policy_config.scenario_count,
-        seed=seed,
+    if _samples is not None:
+        _samples.validate(
+            state,
+            policy_config,
+            sampling_inputs if sampling_inputs is not None else scenario_inputs,
+        )
+    scenarios = (
+        _samples.outer
+        if _samples is not None
+        else generate_projection_scenarios(
+            sampling_inputs if sampling_inputs is not None else scenario_inputs,
+            decision_time=state.decision_time,
+            count=policy_config.scenario_count,
+            seed=seed,
+        )
     )
     future_inputs = tuple(scenario_input(opportunity) for opportunity in future)
     perfect_information_bound = _terminal_value(
@@ -116,11 +128,15 @@ def score_weekly_options(
         + ((observed_result,) if observed_result is not None else ())
         + (empty_assignment,)
     )
-    postgame_scenarios = generate_projection_scenarios(
-        sampling_inputs if sampling_inputs is not None else future_inputs,
-        decision_time=state.decision_time,
-        count=policy_config.postgame_scenario_count,
-        seed=seed ^ 0x504F5354,
+    postgame_scenarios = (
+        _samples.inner
+        if _samples is not None
+        else generate_projection_scenarios(
+            sampling_inputs if sampling_inputs is not None else future_inputs,
+            decision_time=state.decision_time,
+            count=policy_config.postgame_scenario_count,
+            seed=seed ^ 0x504F5354,
+        )
     )
     samples: dict[AssignmentResult, tuple[float, ...]] | None = {} if capture_samples else None
     terminal_values = recourse_terminal_values(

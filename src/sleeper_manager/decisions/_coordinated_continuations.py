@@ -15,6 +15,7 @@ from sleeper_manager.decisions._weekly_plan_models import (
     WeeklyPlanPolicyConfig,
 )
 from sleeper_manager.decisions._weekly_plan_recovery import recovery_bench_capacity
+from sleeper_manager.decisions._weekly_plan_samples import PreparedPlanSamples
 from sleeper_manager.decisions._weekly_plan_scoring import score_weekly_options
 from sleeper_manager.decisions.completed_scores import (
     CompletedScoreComparison,
@@ -50,6 +51,7 @@ def coordinate_completed_continuations(
     for game in state.opportunities:
         positions.setdefault(game.sleeper_player_id, game.eligible_positions)
     completed = usable_completed_games(state)
+    samples = PreparedPlanSamples.prepare(state, config, universe)
     cache: dict[tuple[object, ...], tuple[tuple[float, ...], WeeklyPlanDecision | None]] = {}
     evaluated = []
     for option in comparison.alternatives:
@@ -122,7 +124,11 @@ def coordinate_completed_continuations(
                 ) * config.scenario_count
             else:
                 decision = score_weekly_options(
-                    hypothetical, config=config, capture_samples=True, sampling_inputs=universe
+                    hypothetical,
+                    config=config,
+                    capture_samples=True,
+                    sampling_inputs=universe,
+                    _samples=samples,
                 )
                 scores = decision.selected.scenario_terminal_scores
             cache[key] = scores, decision
