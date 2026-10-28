@@ -168,6 +168,20 @@ ul {
   white-space: pre;
 }
 
+.status[data-injury-status="gtd" i] {
+  color: #facc15;
+}
+
+.status[data-injury-status="dtd" i] {
+  color: #fb923c;
+}
+
+.status[data-injury-status="out" i],
+.status[data-injury-status="ir" i],
+.status[data-injury-status="sus" i] {
+  color: #f87171;
+}
+
 .mark {
   display: block;
   object-fit: cover;

@@ -112,7 +112,10 @@ function PlayerName({
     <span className="player">
       <span className="text">{name ?? MISSING}</span>
       {injuryStatus === null ? null : (
-        <span className="status"> · {injuryStatus}</span>
+        <span className="status" data-injury-status={injuryStatus}>
+          {" · "}
+          {injuryStatus}
+        </span>
       )}
     </span>
   );

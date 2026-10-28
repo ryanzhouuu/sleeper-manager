@@ -110,7 +110,9 @@ describe("RosterBlock positions and injuries", () => {
     const tatum = html.split(/<li[ >]/)[3];
 
     expect(tatum).toContain("SF/PF");
-    expect(tatum).toContain('<span class="status"> · DTD</span>');
+    expect(tatum).toContain(
+      '<span class="status" data-injury-status="DTD"> · DTD</span>',
+    );
     expect(html).toContain("--positions-width:5ch");
     expect(html.split(/<li[ >]/)[1]).not.toContain('class="status"');
   });
@@ -126,7 +128,9 @@ describe("GamesBlock", () => {
     expect(html.indexOf("@ BOS")).toBeLessThan(html.indexOf("vs LAL"));
     expect(html).toContain("11:30 PM");
     expect(html.match(/Jalen Brunson<\/span>/g)).toHaveLength(2);
-    expect(html).toContain('Jayson Tatum</span><span class="status"> · DTD');
+    expect(html).toContain(
+      'Jayson Tatum</span><span class="status" data-injury-status="DTD"> · DTD',
+    );
   });
 
   it.each([
