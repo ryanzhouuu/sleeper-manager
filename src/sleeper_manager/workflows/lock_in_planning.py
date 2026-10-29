@@ -272,9 +272,22 @@ def _merge_planning_evidence(
     current: LockInOpportunityRecord,
     candidate: LockInOpportunityRecord,
 ) -> LockInOpportunityRecord:
-    """Refresh schedule and newer pre-tipoff evidence while retaining lifecycle progress."""
+    """Refresh schedule evidence without reopening confirmed or automatic decisions."""
 
-    advanced = current.status not in {
+    saved_status = (
+        {
+            "locked": LockInOpportunityStatus.ACKNOWLEDGED_LOCKED,
+            "passed": LockInOpportunityStatus.ACKNOWLEDGED_PASSED,
+        }.get(current.acknowledged_action or "", current.status)
+        if current.acknowledged_at is not None
+        else current.status
+    )
+    settled = saved_status in {
+        LockInOpportunityStatus.ACKNOWLEDGED_LOCKED,
+        LockInOpportunityStatus.ACKNOWLEDGED_PASSED,
+        LockInOpportunityStatus.AUTOMATIC_FINAL,
+    }
+    advanced = settled or current.status not in {
         LockInOpportunityStatus.SCHEDULED,
         LockInOpportunityStatus.ACTIVE,
         LockInOpportunityStatus.INELIGIBLE,
@@ -301,17 +314,16 @@ def _merge_planning_evidence(
         or current.current_observed_score is not None
         or current.stable_score is not None
     )
-    forfeited = retained_loss is True or (
-        datetime.fromisoformat(candidate_trace.get("observed_at", candidate.updated_at.isoformat()))
-        >= current.scheduled_start
-        and candidate_trace.get("observed_starter") is False
-        and begun
-        and current.status
-        not in {
-            LockInOpportunityStatus.ACKNOWLEDGED_LOCKED,
-            LockInOpportunityStatus.ACKNOWLEDGED_PASSED,
-            LockInOpportunityStatus.AUTOMATIC_FINAL,
-        }
+    forfeited = not settled and (
+        retained_loss is True
+        or (
+            datetime.fromisoformat(
+                candidate_trace.get("observed_at", candidate.updated_at.isoformat())
+            )
+            >= current.scheduled_start
+            and candidate_trace.get("observed_starter") is False
+            and begun
+        )
     )
     return replace(
         current,
@@ -320,7 +332,9 @@ def _merge_planning_evidence(
         action_deadline=candidate.action_deadline,
         fantasy_week_end=candidate.fantasy_week_end,
         status=(
-            LockInOpportunityStatus.INELIGIBLE
+            saved_status
+            if settled
+            else LockInOpportunityStatus.INELIGIBLE
             if forfeited
             else LockInOpportunityStatus.RECONCILIATION_REQUIRED
             if league_changed
