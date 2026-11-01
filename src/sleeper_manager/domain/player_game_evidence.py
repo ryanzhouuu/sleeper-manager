@@ -21,3 +21,6 @@ class PlayerGameEvidence:
     stable_score: float | None = None
     stabilized_at: datetime | None = None
     score_is_current: bool = False
+    scheduled_start: datetime | None = None
+    provider_player_id: str | None = None
+    eligible_positions: tuple[str, ...] = ()

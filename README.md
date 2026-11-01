@@ -98,6 +98,9 @@ total, lineup gain, confidence, and essential warnings. Recovery instructions na
 only changed slots and retain the review deadline and forfeiture consequences.
 Full lineups, bench choices, confirmed decisions, placement comparisons, and modeling
 details remain in the stored recommendation trace.
+Confirmed weekly locks retain their accepted score and slot when a player leaves
+the current roster. This scoring view does not restore ownership or create future
+opportunities for that player; conflicting occupied slots still block advice.
 Locked confirms a lock already made in Sleeper; Pass records
 the manager's decision not to lock that game. Passing allows the planner to substitute
 the player without requiring a substitution. Delivering advice never records a

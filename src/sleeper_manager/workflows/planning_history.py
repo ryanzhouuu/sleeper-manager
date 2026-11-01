@@ -26,6 +26,9 @@ def player_game_evidence(record: LockInOpportunityRecord) -> PlayerGameEvidence:
             record.stable_fingerprint is not None
             and record.stable_fingerprint == record.current_observation_fingerprint
         ),
+        scheduled_start=record.scheduled_start,
+        provider_player_id=record.provider_player_id,
+        eligible_positions=record.eligible_positions,
     )
 
 

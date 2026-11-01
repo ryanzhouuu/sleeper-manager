@@ -38,6 +38,7 @@ from sleeper_manager.domain.projection import ProjectionSnapshot
 from sleeper_manager.domain.scoring import ScoringPolicy
 from sleeper_manager.projections.live_baseline import LiveProjectionTarget
 from sleeper_manager.workflows.planning_history import reconcile_player_games
+from sleeper_manager.workflows.retained_weekly_locks import retained_weekly_locks
 
 
 class LiveProjectionProvider(Protocol):
@@ -291,6 +292,19 @@ def build_live_team_week_state(
                 )
             )
 
+    retained = retained_weekly_locks(inputs, decision_time=decision_time)
+    opportunities.extend(retained)
+    for retained_game in retained:
+        roster_player_ids += (retained_game.sleeper_player_id,)
+        positions_by_player[retained_game.sleeper_player_id] = retained_game.eligible_positions
+        opportunity_keys.add((retained_game.sleeper_player_id, retained_game.game_id))
+        observed += (
+            ObservedStarter(
+                retained_game.eligible_slot_indices[0],
+                retained_game.sleeper_player_id,
+                retained_game.eligible_positions,
+            ),
+        )
     reconciled_games = reconcile_player_games(
         opportunities, inputs.player_game_evidence, observed, decision_time
     )
