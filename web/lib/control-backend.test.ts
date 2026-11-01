@@ -121,7 +121,7 @@ describe("server-to-Worker controls", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it.each(["x".repeat(4097), new Uint8Array([255])])(
+  it.each(["x".repeat(16_385), new Uint8Array([255])])(
     "rejects oversized or invalid UTF-8 form streams",
     async (body) => {
       expect(
@@ -131,6 +131,28 @@ describe("server-to-Worker controls", () => {
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );
+
+  it("forwards a complete week of saved games within the Worker form bound", async () => {
+    const body = new URLSearchParams({
+      csrf: "c".repeat(64),
+      batch_id: "a".repeat(32),
+      count: "128",
+    });
+    for (let index = 0; index < 128; index++) {
+      body.set(`player_id_${index}`, String(1000 + index));
+      body.set(`game_id_${index}`, String(401000000 + index));
+      body.set(`version_${index}`, "3500");
+      body.set(`action_${index}`, "passed");
+    }
+    expect(body.toString().length).toBeGreaterThan(4096);
+    fetchMock.mockResolvedValue(Response.json({ status: "saved" }));
+    const response = await forwardControl(
+      post("https://app.test", body),
+      "/manage/save",
+    );
+    expect(response.status).toBe(200);
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(body.toString());
+  });
 
   it("never follows unexpected upstream redirects or returns upstream HTML", async () => {
     fetchMock.mockResolvedValue(

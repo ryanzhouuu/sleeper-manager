@@ -97,7 +97,7 @@ async function formBody(request: Request): Promise<string> {
       const part = await reader.read();
       if (part.done) return body + decoder.decode();
       size += part.value.byteLength;
-      if (size > 4096) {
+      if (size > 16_384) {
         await reader.cancel();
         throw new Error("Form too large");
       }

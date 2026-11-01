@@ -4,6 +4,7 @@ from dataclasses import replace
 from datetime import datetime
 from uuid import UUID
 
+from sleeper_manager.cloudflare.form_pages import MAX_MANAGER_FORM_GAMES
 from sleeper_manager.cloudflare.manager_context import ManagerContext
 from sleeper_manager.persistence.manager_store import D1ManagerStore
 from sleeper_manager.workflows.manager_decisions import ManagerAction, ManagerEdit
@@ -15,7 +16,7 @@ async def save_manager_form(
     """Return (saved, changed); unchanged forms create no audit rows or planning work."""
     batch_id = UUID(values["batch_id"]).hex
     count = int(values["count"])
-    if not 1 <= count <= 16:
+    if not 1 <= count <= MAX_MANAGER_FORM_GAMES:
         raise ValueError("Invalid game count.")
     records = await store.list_week_lock_in_opportunities(context.league_id, context.week)
     owned = {

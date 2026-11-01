@@ -258,7 +258,7 @@ def test_unchanged_shared_form_does_not_enqueue_or_audit(environment, store):  #
     "fields,status",
     [
         ({"version_0": "9"}, 409),
-        ({"count": "17"}, 400),
+        ({"count": "129"}, 400),
         ({"player_id_0": "other"}, 400),
         ({"action_0": "invalid"}, 400),
         ({"csrf": "wrong"}, 403),

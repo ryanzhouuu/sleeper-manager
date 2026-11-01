@@ -6,6 +6,9 @@ from html import escape
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+MAX_MANAGER_FORM_GAMES = 128
+MAX_FORM_BYTES = 16_384
+
 _STYLE = """:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;background:#11161d;
 color:#e5eaf0;font:15px/1.5 ui-monospace,monospace}main{max-width:48rem;margin:auto;
 padding:2rem 1rem}section{background:#1c242e;padding:1rem;margin:1rem 0}h1,h2,p{
@@ -131,7 +134,7 @@ async def form_values(request: Any) -> dict[str, str]:
     if content_type != "application/x-www-form-urlencoded":
         raise ValueError("Expected form data")
     length = request.headers.get("content-length")
-    if length is not None and int(length) > 4096:
+    if length is not None and int(length) > MAX_FORM_BYTES:
         raise ValueError("Form too large")
     reader = request.body.getReader()
     chunks = bytearray()
@@ -141,12 +144,16 @@ async def form_values(request: Any) -> dict[str, str]:
             if part.done:
                 break
             chunks.extend(bytes(part.value.to_py()))
-            if len(chunks) > 4096:
+            if len(chunks) > MAX_FORM_BYTES:
                 await reader.cancel()
                 raise ValueError("Form too large")
     finally:
         reader.releaseLock()
-    values = parse_qs(chunks.decode("utf-8"), keep_blank_values=True, max_num_fields=70)
+    values = parse_qs(
+        chunks.decode("utf-8"),
+        keep_blank_values=True,
+        max_num_fields=3 + 4 * MAX_MANAGER_FORM_GAMES,
+    )
     if any(len(items) != 1 for items in values.values()):
         raise ValueError("Duplicate fields")
     return {key: items[0] for key, items in values.items()}
