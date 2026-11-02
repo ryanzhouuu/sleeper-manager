@@ -60,6 +60,9 @@ def _route_sleeper() -> None:
     respx.get(f"https://api.sleeper.app/v1/league/{league_id}/transactions/1").mock(
         return_value=httpx.Response(200, json=_load(SLEEPER_FIXTURES / "transactions.json"))
     )
+    respx.get(f"https://api.sleeper.app/v1/league/{league_id}/matchups/1").mock(
+        return_value=httpx.Response(200, json=_load(SLEEPER_FIXTURES / "matchups.json"))
+    )
 
 
 class _FixtureNBAProvider:

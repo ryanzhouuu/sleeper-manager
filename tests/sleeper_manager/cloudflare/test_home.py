@@ -36,7 +36,7 @@ class FakeSleeper:
             "season_type": "regular",
         }
         self.matchup_payload: list[dict[str, object]] = [
-            {"roster_id": 1, "matchup_id": 7, "points": True},
+            {"roster_id": 1, "matchup_id": 7, "points": True, "starters": ["known"]},
             {"roster_id": 2, "matchup_id": 7, "points": 9},
         ]
         self.manager_settings: dict[str, object] | None = {
@@ -294,7 +294,9 @@ def test_build_home_catalog_failure_is_league_unavailable(tmp_path) -> None:  # 
 
 def test_build_home_bye_week_omits_opponent(tmp_path) -> None:  # type: ignore[no-untyped-def]
     sleeper = FakeSleeper()
-    sleeper.matchup_payload = [{"roster_id": 1, "matchup_id": None, "points": 3}]
+    sleeper.matchup_payload = [
+        {"roster_id": 1, "matchup_id": None, "points": 3, "starters": ["known"]}
+    ]
 
     document = _build(sleeper, FakeSchedule(), _repository(tmp_path)).payload
 

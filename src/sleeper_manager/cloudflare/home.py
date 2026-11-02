@@ -53,6 +53,7 @@ from sleeper_manager.integrations.sleeper.schemas import (
     SleeperStatePayload,
     SleeperUserPayload,
 )
+from sleeper_manager.integrations.sleeper.weekly_lineup import with_matchup_starters
 from sleeper_manager.persistence.base import AsyncRuntimeStateRepository
 
 _WEEKLY_LINEUP = "weekly_lineup"
@@ -111,16 +112,20 @@ async def build_home(
     manager_roster = owned[0]
     try:
         season_year = espn_season_end_year(state.season or league.season)
-    except (TypeError, ValueError):
+        matchups = await sleeper.matchups(league_id, week) if week > 0 else []
+        if week > 0:
+            manager_roster = with_matchup_starters(
+                manager_roster, matchups, league.roster_positions
+            )
+    except (CloudflareProviderError, TypeError, ValueError):
         return _league_unavailable()
-    matchup = await _matchup(
-        sleeper,
+    matchup = _matchup(
+        matchups,
         users,
         raw_users,
         rosters,
         manager_roster,
         standings,
-        league_id=league_id,
         user_id=user_id,
         week=week,
     )
@@ -247,18 +252,18 @@ async def _load_league(
     return league, users, raw_users, rosters, roster_standings(raw_roster_list), state
 
 
-async def _matchup(
-    sleeper: HomeSleeper,
+def _matchup(
+    payload: list[dict[str, Any]],
     users: Sequence[SleeperUserPayload],
     raw_users: Sequence[Mapping[str, Any]],
     rosters: Sequence[SleeperRosterPayload],
     manager_roster: SleeperRosterPayload,
     standings: Mapping[int, RosterStanding],
     *,
-    league_id: str,
     user_id: str,
     week: int,
 ) -> tuple[HomeSide, HomeSide | None] | None:
+    """Use the same weekly snapshot for displayed scores and starter assignments."""
     manager_user = next((user for user in users if user.user_id == user_id), None)
     manager_side = _with_standing(
         HomeSide(
@@ -270,10 +275,6 @@ async def _matchup(
     )
     if week == 0:
         return manager_side, None
-    try:
-        payload = await sleeper.matchups(league_id, week)
-    except (CloudflareProviderError, TypeError, ValueError):
-        return None
     sides = matchup_sides(payload)
     if sides is None:
         return None

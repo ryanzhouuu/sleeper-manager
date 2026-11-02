@@ -58,6 +58,7 @@ class FixtureFetch:
             "/v1/league/league-current/users": "sleeper/users.json",
             "/v1/league/league-current/rosters": "sleeper/rosters.json",
             "/v1/league/league-current/transactions/1": "sleeper/transactions.json",
+            "/v1/league/league-current/matchups/1": "sleeper/matchups.json",
             "/v1/state/nba": "sleeper/state.json",
             "/v1/players/nba": "planning_inputs/sleeper_players_catalog.json",
             "/apis/site/v2/sports/basketball/nba/teams/DEN/roster": (

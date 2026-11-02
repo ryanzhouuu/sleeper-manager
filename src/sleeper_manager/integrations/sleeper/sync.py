@@ -1,3 +1,5 @@
+"""Build league profiles using weekly starters and current roster ownership."""
+
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -24,6 +26,7 @@ from sleeper_manager.integrations.sleeper.schemas import (
     SleeperTransactionPayload,
     SleeperUserPayload,
 )
+from sleeper_manager.integrations.sleeper.weekly_lineup import with_matchup_starters
 from sleeper_manager.persistence.base import LeagueProfileStore, StoredLeagueProfile
 
 
@@ -47,6 +50,8 @@ class SleeperReader(Protocol):
     async def league(self, league_id: str) -> dict[str, Any]: ...
 
     async def rosters(self, league_id: str) -> list[dict[str, Any]]: ...
+
+    async def matchups(self, league_id: str, week: int) -> list[dict[str, Any]]: ...
 
     async def users(self, league_id: str) -> list[dict[str, Any]]: ...
 
@@ -272,6 +277,7 @@ class LeagueSynchronizationService:
         self._clock = clock or (lambda: datetime.now(UTC))
 
     async def sync(self, *, league_id: str, user_id: str) -> LeagueSyncResult:
+        """Refuse in-season planning when the manager's weekly lineup is unverified."""
         previous = (
             self._profile_store.load_profile(league_id) if self._profile_store is not None else None
         )
@@ -294,27 +300,33 @@ class LeagueSynchronizationService:
         raw_users = await self._sleeper.users(league_id)
         raw_rosters = await self._sleeper.rosters(league_id)
         raw_state = await self._sleeper.state()
+        state = _parse_payload(SleeperStatePayload, raw_state, "NBA state")
+        fantasy_week = _parse_week(state, season=league.season, season_type=league.season_type)
+        roster_payloads = tuple(
+            _parse_payload(SleeperRosterPayload, payload, "roster") for payload in raw_rosters
+        )
+        owned = tuple(row for row in roster_payloads if row.owner_id == user_id)
+        if len(owned) != 1:
+            raise LeagueOwnershipError(
+                f"Configured Sleeper user {user_id!r} owns {len(owned)} league rosters"
+            )
+        if fantasy_week.week > 0:
+            matchups = await self._sleeper.matchups(league_id, fantasy_week.week)
+            try:
+                weekly = with_matchup_starters(owned[0], matchups, league.roster_positions)
+            except ValueError as error:
+                raise LeagueCompatibilityError(str(error)) from error
+            roster_payloads = tuple(weekly if row == owned[0] else row for row in roster_payloads)
         users = tuple(
             _parse_user(_parse_payload(SleeperUserPayload, payload, "user"))
             for payload in raw_users
         )
-        rosters = tuple(
-            _parse_roster(_parse_payload(SleeperRosterPayload, payload, "roster"))
-            for payload in raw_rosters
-        )
+        rosters = tuple(_parse_roster(payload) for payload in roster_payloads)
         matching_users = tuple(user for user in users if user.sleeper_id == user_id)
         if len(matching_users) != 1:
             raise LeagueOwnershipError(
                 f"Configured Sleeper user {user_id!r} matched {len(matching_users)} league users"
             )
-        matching_rosters = tuple(roster for roster in rosters if roster.owner_id == user_id)
-        if len(matching_rosters) != 1:
-            raise LeagueOwnershipError(
-                f"Configured Sleeper user {user_id!r} owns {len(matching_rosters)} league rosters"
-            )
-
-        state = _parse_payload(SleeperStatePayload, raw_state, "NBA state")
-        fantasy_week = _parse_week(state, season=league.season, season_type=league.season_type)
         raw_transactions = (
             await self._sleeper.transactions(league_id, fantasy_week.week)
             if fantasy_week.week > 0
@@ -343,7 +355,7 @@ class LeagueSynchronizationService:
             users=users,
             rosters=rosters,
             manager_user_id=user_id,
-            manager_roster_id=matching_rosters[0].roster_id,
+            manager_roster_id=owned[0].roster_id,
             fantasy_week=fantasy_week,
             transactions=transactions,
             configuration_fingerprint=fingerprint,

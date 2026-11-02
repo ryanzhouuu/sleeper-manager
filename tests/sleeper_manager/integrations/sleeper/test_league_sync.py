@@ -47,6 +47,9 @@ def route_league(
     respx.get(f"https://api.sleeper.app/v1/league/{league_id}/transactions/1").mock(
         return_value=httpx.Response(200, json=fixture("transactions.json"))
     )
+    respx.get(f"https://api.sleeper.app/v1/league/{league_id}/matchups/1").mock(
+        return_value=httpx.Response(200, json=fixture("matchups.json"))
+    )
 
 
 @respx.mock
@@ -119,6 +122,11 @@ def test_sync_treats_zero_starter_as_empty() -> None:
     rosters = fixture("rosters.json")
     rosters[0]["starters"].insert(0, "0")
     route_league(fixture("current_league.json"), rosters=rosters)
+    matchups = fixture("matchups.json")
+    matchups[0]["starters"] = ["0", "player-1", "player-2", "0", "0", "0", "0", "0"]
+    respx.get("https://api.sleeper.app/v1/league/league-current/matchups/1").mock(
+        return_value=httpx.Response(200, json=matchups)
+    )
 
     async def run() -> Any:
         async with SleeperClient() as sleeper:
@@ -128,7 +136,16 @@ def test_sync_treats_zero_starter_as_empty() -> None:
 
     result = asyncio.run(run())
 
-    assert result.profile.rosters[0].starter_ids == (None, "player-1", "player-2")
+    assert result.profile.rosters[0].starter_ids == (
+        None,
+        "player-1",
+        "player-2",
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
 
 
 @respx.mock
@@ -191,6 +208,9 @@ def test_sync_detects_changed_configuration(tmp_path) -> None:  # type: ignore[n
     )
     respx.get("https://api.sleeper.app/v1/league/league-current/transactions/1").mock(
         return_value=httpx.Response(200, json=fixture("transactions.json"))
+    )
+    respx.get("https://api.sleeper.app/v1/league/league-current/matchups/1").mock(
+        return_value=httpx.Response(200, json=fixture("matchups.json"))
     )
     repository = SQLiteStateRepository(tmp_path / "state.db")
     repository.initialize()

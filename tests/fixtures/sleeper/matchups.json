@@ -1,0 +1,14 @@
+[
+  {
+    "roster_id": 1,
+    "matchup_id": 1,
+    "players": ["player-1", "player-2", "player-3"],
+    "starters": ["player-1", "player-2", "0", "0", "0", "0", "0", "0"]
+  },
+  {
+    "roster_id": 2,
+    "matchup_id": 1,
+    "players": ["player-4", "player-5"],
+    "starters": ["player-4", "0", "0", "0", "0", "0", "0", "0"]
+  }
+]

@@ -87,6 +87,11 @@ advice; hybrid advice requires an explicit selection and pinned history.
 
 ## Recommendations
 
+Current-week starters come from Sleeper's weekly matchup, while ownership and
+injured reserve come from its roster endpoint. Missing or invalid weekly lineup
+evidence blocks in-season advice and owner controls rather than falling back to
+the general roster's starters. The dashboard uses that same weekly lineup.
+
 Notifications group game-specific availability warnings by status and game time,
 summarize repeated unscoped designations once per player, and count players with
 missing reports or unverified availability. Full player/game warnings remain in

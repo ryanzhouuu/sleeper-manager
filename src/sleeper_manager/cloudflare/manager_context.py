@@ -17,6 +17,7 @@ from sleeper_manager.integrations.sleeper.schemas import (
     SleeperRosterPayload,
     SleeperStatePayload,
 )
+from sleeper_manager.integrations.sleeper.weekly_lineup import with_matchup_starters
 from sleeper_manager.persistence.manager_store import D1ManagerStore
 
 
@@ -56,7 +57,10 @@ async def load_manager_context(
     if len(owned) != 1 or week is None or week < 1 or league.league_id != league_id:
         raise ValueError("Manager scope unavailable")
     positions = tuple(p for p in league.roster_positions if p.upper() not in {"BN", "IR"})
-    starters = tuple(owned[0].starters)
+    weekly = with_matchup_starters(
+        owned[0], await sleeper.matchups(league_id, week), league.roster_positions
+    )
+    starters = tuple(weekly.starters)
     occupied = [player for player in starters if player not in {"", "0"}]
     if len(positions) != len(starters) or len(set(occupied)) != len(occupied):
         raise ValueError("Starter alignment unavailable")

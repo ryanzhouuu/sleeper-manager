@@ -63,10 +63,7 @@ class FixtureSleeper:
 
     async def matchups(self, league_id: str, week: int) -> list[dict[str, Any]]:
         del league_id, week
-        return [
-            {"roster_id": 1, "matchup_id": 1, "players": ["player-1", "player-2", "player-3"]},
-            {"roster_id": 2, "matchup_id": 1, "players": ["player-4", "player-5"]},
-        ]
+        return _fixture("matchups.json")
 
     async def players(self, *, active: bool = True) -> dict[str, dict[str, Any]]:
         del active
