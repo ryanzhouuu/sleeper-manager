@@ -1,5 +1,6 @@
 """Use the bounded upcoming-game planner for every joint completed-score alternative."""
 
+from array import array
 from dataclasses import replace
 from datetime import timedelta
 
@@ -23,6 +24,7 @@ from sleeper_manager.decisions.completed_scores import (
     select_completed_placement,
     usable_completed_games,
 )
+from sleeper_manager.decisions.simulation import ScenarioInput
 from sleeper_manager.domain.planning import (
     FixedSlot,
     GameOpportunity,
@@ -52,7 +54,7 @@ def coordinate_completed_continuations(
         positions.setdefault(game.sleeper_player_id, game.eligible_positions)
     completed = usable_completed_games(state)
     samples = PreparedPlanSamples.prepare(state, config, universe)
-    cache: dict[tuple[object, ...], tuple[tuple[float, ...], WeeklyPlanDecision | None]] = {}
+    cache: dict[tuple[object, ...], array[float]] = {}
     evaluated = []
     for option in comparison.alternatives:
         locked_keys = {(row.player_id, row.game_id) for row in option.locks}
@@ -68,41 +70,31 @@ def coordinate_completed_continuations(
         )
         if key not in cache:
             hypothetical = _continuation_state(state, option, completed, positions, lead_time)
-            batch = next_actionable_batch(hypothetical)
-            decision = None
-            if batch is None:
-                scores = (
+            if next_actionable_batch(hypothetical) is None:
+                terminal = (
                     sum(row.accepted_fantasy_score for row in hypothetical.fixed_slots),
                 ) * config.scenario_count
             else:
-                decision = score_weekly_options(
-                    hypothetical,
-                    config=config,
-                    capture_samples=True,
-                    sampling_inputs=universe,
-                    _samples=samples,
-                    _compute_bound=False,
-                )
-                scores = decision.selected.scenario_terminal_scores
-            cache[key] = scores, decision
-        scores, decision = cache[key]
+                terminal = _score_continuation(
+                    hypothetical, config, universe, samples
+                ).selected.scenario_terminal_scores
+            cache[key] = array("d", terminal)
+        scores = cache[key]
         evaluated.append(
             replace(
                 option,
                 expected_score=round(sum(scores) / len(scores), 6),
                 terminal_scores=scores,
-                upcoming_decision=decision,
             )
         )
     result = select_completed_placement(
         tuple(evaluated), config.tie_tolerance, config.minimum_lock_in_confidence
     )
     selected = result.selected
-    if selected.upcoming_decision is None:
-        return result
     hypothetical = _continuation_state(state, selected, completed, positions, lead_time)
     batch = next_actionable_batch(hypothetical)
-    assert batch is not None
+    if batch is None:
+        return result
     future = future_opportunities(hypothetical, batch[0].scheduled_start)
     bound = _terminal_value(
         fixed_assignments=fixed_assignments(hypothetical.fixed_slots),
@@ -114,13 +106,33 @@ def coordinate_completed_continuations(
     )
     finalized = replace(
         selected,
-        upcoming_decision=replace(selected.upcoming_decision, perfect_information_bound=bound),
+        upcoming_decision=replace(
+            _score_continuation(hypothetical, config, universe, samples),
+            perfect_information_bound=bound,
+        ),
     )
     return replace(
         result,
         selected=finalized,
         baseline=finalized if result.baseline is selected else result.baseline,
         alternatives=tuple(finalized if row is selected else row for row in result.alternatives),
+    )
+
+
+def _score_continuation(
+    hypothetical: TeamWeekState,
+    config: WeeklyPlanPolicyConfig,
+    universe: tuple[ScenarioInput, ...],
+    samples: PreparedPlanSamples,
+) -> WeeklyPlanDecision:
+    """Decisions retain per-sample detail, so only the selected placement's result is kept."""
+    return score_weekly_options(
+        hypothetical,
+        config=config,
+        capture_samples=True,
+        sampling_inputs=universe,
+        _samples=samples,
+        _compute_bound=False,
     )
 
 

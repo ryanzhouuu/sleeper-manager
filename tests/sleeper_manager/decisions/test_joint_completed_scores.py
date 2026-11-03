@@ -3,7 +3,10 @@
 from dataclasses import replace
 from datetime import timedelta
 
+from sleeper_manager.decisions import completed_scores
+from sleeper_manager.decisions._coordinated_continuations import coordinate_completed_continuations
 from sleeper_manager.decisions.completed_scores import compare_completed_scores
+from sleeper_manager.decisions.weekly_plan import WeeklyPlanPolicyConfig
 from sleeper_manager.domain.planning import (
     FixedSlot,
     ObservedStarter,
@@ -132,3 +135,62 @@ def test_equal_values_preserve_verified_future_flexibility_before_fewer_moves() 
     selected = compare_completed_scores(state, scenario_count=8).selected
     assert selected.locks[0].slot_index == 0
     assert len(selected.moves) == 1
+
+
+def _two_player_options_state():
+    slots = tuple(StarterSlot(i, "UTIL") for i in range(3))
+    games = tuple(_completed(player, score) for player, score in (("a", 40), ("b", 30)))
+    later = _opportunity(
+        "later", "later", NOW + timedelta(days=1), ("PG",), ((20, 1),), eligible_slot_indices=(2,)
+    )
+    return replace(
+        _state(
+            (*games, later),
+            starter_slots=slots,
+            observed=(ObservedStarter(0, "a", ("PG",)), ObservedStarter(1, "b", ("PG",))),
+        ),
+        week_ends_at=NOW + timedelta(days=6),
+    )
+
+
+def test_identical_lineups_share_one_object_across_placements() -> None:
+    state = _two_player_options_state()
+    options = compare_completed_scores(state, scenario_count=2).alternatives
+    assert len(options) > len({option.assignments for option in options})
+    assert len({id(option.assignments) for option in options}) == len(
+        {option.assignments for option in options}
+    )
+
+
+def test_flexibility_proofs_only_run_for_tied_placements(monkeypatch) -> None:
+    calls = []
+    prove = completed_scores.future_player_sets
+
+    def counted(*args, **kwargs):
+        calls.append(kwargs["excluded"])
+        return prove(*args, **kwargs)
+
+    monkeypatch.setattr(completed_scores, "future_player_sets", counted)
+    guard = _completed("guard", 30, indices=(0,))
+    state = replace(
+        _state((guard,), starter_slots=(StarterSlot(0, "PG"),), observed=()),
+        observed_starters=(ObservedStarter(0, "guard", ("PG",)),),
+        week_ends_at=NOW + timedelta(days=6),
+    )
+    assert compare_completed_scores(state, scenario_count=2).selected.locks[0].player_id == "guard"
+    assert calls == []
+
+
+def test_only_the_selected_placement_keeps_its_upcoming_decision() -> None:
+    state = _two_player_options_state()
+    config = WeeklyPlanPolicyConfig(scenario_count=4, postgame_scenario_count=4)
+    result = coordinate_completed_continuations(
+        state, compare_completed_scores(state, scenario_count=4), config, timedelta(minutes=10)
+    )
+    assert result.selected.upcoming_decision is not None
+    assert result.selected.upcoming_decision.perfect_information_bound is not None
+    assert all(
+        option.upcoming_decision is None
+        for option in result.alternatives
+        if option is not result.selected
+    )

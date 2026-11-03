@@ -1,8 +1,10 @@
 """Joint completed-score acceptance with executable pre-lock lineups and shared continuations."""
 
-from collections.abc import Iterator
+from array import array
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
+from functools import lru_cache, partial
 
 from sleeper_manager.decisions._lock_flexibility import future_player_sets
 from sleeper_manager.decisions._weekly_plan_completion import complete_assignment
@@ -33,9 +35,14 @@ class CompletedPlacement:
     assignments: tuple[PlannedAssignment, ...]
     moves: tuple[LineupMove, ...]
     expected_score: float = 0.0
-    terminal_scores: tuple[float, ...] = ()
+    terminal_scores: Sequence[float] = ()
     flexibility: frozenset[int] = frozenset()
     upcoming_decision: WeeklyPlanDecision | None = None
+    flexibility_proof: Callable[[], frozenset[int]] | None = None
+
+    def proven_flexibility(self) -> frozenset[int]:
+        """Defer costly proofs because only tied expected scores ever compare them."""
+        return self.flexibility_proof() if self.flexibility_proof else self.flexibility
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,6 +105,8 @@ def executable_lock_placements(
         for game in games
     )
     results: list[CompletedPlacement] = []
+    views: dict[tuple[PlannedAssignment, ...], tuple[PlannedAssignment, ...]] = {}
+    move_sets: dict[tuple[LineupMove, ...], tuple[LineupMove, ...]] = {}
     for locks in _compatible_locks(choices):
         try:
             target = complete_assignment(state, (), AssignmentResult(0, locks))
@@ -119,7 +128,11 @@ def executable_lock_placements(
             moves = plan_moves(state, view, state.decision_time + timedelta(days=7), timedelta(0))
         except WeeklyPlanError:
             continue
-        results.append(CompletedPlacement(locks, view, moves))
+        results.append(
+            CompletedPlacement(
+                locks, views.setdefault(view, view), move_sets.setdefault(moves, moves)
+            )
+        )
     if not results:
         raise WeeklyPlanError("No executable completed-score placement")
     return tuple(results)
@@ -198,10 +211,14 @@ def compare_completed_scores(
         tables = topology.best_scores_by_excluded_players(dict(scenario.values), requested)
         for key, values in scores.items():
             values.append(tables[key[0]][key[1]])
+    prove_flexibility = lru_cache(maxsize=16)(
+        lambda excluded, mask: future_player_sets(inputs, slots, excluded=excluded, slot_mask=mask)
+    )
+    proofs = {key: partial(prove_flexibility, *key) for key in scores}
     evaluated = []
     for placement, key in zip(placements, keys, strict=True):
         locked_score = fixed_score + sum(item.score for item in placement.locks)
-        totals = tuple(locked_score + value for value in scores[key])
+        totals = array("d", (locked_score + value for value in scores[key]))
         evaluated.append(
             CompletedPlacement(
                 placement.locks,
@@ -209,7 +226,7 @@ def compare_completed_scores(
                 placement.moves,
                 round(sum(totals) / len(totals), 6),
                 totals,
-                future_player_sets(inputs, slots, excluded=key[0], slot_mask=key[1]),
+                flexibility_proof=proofs[key],
             )
         )
     return select_completed_placement(tuple(evaluated), tie_tolerance, minimum_confidence)
@@ -262,9 +279,11 @@ def select_completed_placement(
             and selected.locks
             and abs(item.expected_score - selected.expected_score) <= tie_tolerance
         ):
-            verified = bool(item.flexibility and selected.flexibility)
-            if (verified and item.flexibility > selected.flexibility) or (
-                not (verified and selected.flexibility > item.flexibility)
+            flexibility = item.proven_flexibility()
+            selected_flexibility = selected.proven_flexibility()
+            verified = bool(flexibility and selected_flexibility)
+            if (verified and flexibility > selected_flexibility) or (
+                not (verified and selected_flexibility > flexibility)
                 and (len(item.moves), tuple((row.player_id, row.slot_index) for row in item.locks))
                 < (
                     len(selected.moves),
