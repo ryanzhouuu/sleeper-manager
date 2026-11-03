@@ -198,8 +198,10 @@ def test_missing_current_mapping_emits_unavailable_warning(tmp_path) -> None:  #
         assert result.outcome == "unavailable"
         assert result.evaluation is not None
         assert result.evaluation.reason_codes == ("mapping_unavailable",)
-        assert len(sender.messages) == 2
-        assert all(message.title.startswith("Lock-In unavailable") for message in sender.messages)
+        assert len(sender.messages) == 3
+        assert all(
+            message.title.startswith("Lock-In unavailable") for message in sender.messages[1:]
+        )
 
     asyncio.run(exercise())
 
@@ -210,17 +212,6 @@ def test_actionable_delivery_failure_is_reported_for_retry(tmp_path) -> None:  #
     async def exercise() -> None:
         repository, inputs, notifications, sender = await _prepare(tmp_path)
         summary = _summary_result(_box("401", points=20), _box("402", points=8))
-        await run_postgame_lock_in(
-            "g1",
-            inputs,
-            decision_time=POSTGAME,
-            repository=repository,
-            notifications=notifications,
-            fetch_summary=_fetcher(summary),
-            runtime_policy=POLICY,
-            open_sleeper_url="https://sleeper.com",
-            poll_id="wake-1",
-        )
         sender.fail = True
         notifications._clock = lambda: SECOND_POLL
 
@@ -326,17 +317,6 @@ def test_final_eligible_game_remains_a_choice_until_confirmed(tmp_path) -> None:
             acknowledgement_kinds=LOCK_IN_ACKNOWLEDGEMENT_KINDS,
         )
         summary = _summary_result(_box("401", points=20), _box("402", points=8))
-        await run_postgame_lock_in(
-            "g1",
-            inputs,
-            decision_time=POSTGAME,
-            repository=repository,
-            notifications=notifications,
-            fetch_summary=_fetcher(summary),
-            runtime_policy=POLICY,
-            open_sleeper_url="https://sleeper.com",
-            poll_id="wake-1",
-        )
         notifications._clock = lambda: SECOND_POLL
         result = await run_postgame_lock_in(
             "g1",

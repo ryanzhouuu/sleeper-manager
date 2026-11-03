@@ -19,10 +19,14 @@ from sleeper_manager.persistence.base import (
     ScheduledWorkRecord,
     ScheduledWorkStatus,
 )
+from sleeper_manager.persistence.lock_in_opportunities import LockInOpportunityRecord
+from sleeper_manager.workflows.lock_in_planning import sync_live_lock_in_opportunities
 from sleeper_manager.workflows.notification_loop import NotificationLoop
 from sleeper_manager.workflows.postgame_lock_in import (
     DirectGameSummarySource,
-    run_postgame_lock_in,
+    PostgameLockInResult,
+    observe_postgame,
+    recommend_postgame_batch,
 )
 
 _RETRY_DELAY = timedelta(minutes=5)
@@ -53,7 +57,7 @@ async def dispatch_postgame_work(
     open_sleeper_url: str,
     clock: Callable[[], datetime],
 ) -> tuple[WorkAttemptSummary, ...]:
-    """Collect once, fetch each game summary once, and retain five-minute watches."""
+    """Persist all due finals before computing a single coordinated plan."""
 
     if fetch_summary is None:
         return await _finish_all(
@@ -71,6 +75,11 @@ async def dispatch_postgame_work(
             policy=policy,
             scheduled_at=scheduled_at,
         )
+        await sync_live_lock_in_opportunities(
+            assembly.evidence.inputs,
+            repository=repository,
+            observed_at=assembly.evidence.decision_time,
+        )
     except Exception as error:
         return await _finish_all(
             repository,
@@ -81,35 +90,58 @@ async def dispatch_postgame_work(
             failure=FailureCategory.PROVIDER,
             detail=str(error),
         )
-    attempts: list[WorkAttemptSummary] = []
+    observed: dict[str, tuple[LockInOpportunityRecord, ...]] = {}
+    errors: dict[str, Exception] = {}
     for work in work_items:
         if work.game_id is None:
-            attempts.append(
-                await _finish(
-                    repository,
-                    work,
-                    scheduled_at=scheduled_at,
-                    correlation_id=correlation_id,
-                    outcome=ScheduledRunStatus.FAILED,
-                    failure=FailureCategory.INTERNAL_INVARIANT,
-                    detail="postgame_work_missing_game",
-                    retry=False,
-                )
-            )
             continue
         try:
-            result = await run_postgame_lock_in(
+            observed[work.work_id] = await observe_postgame(
                 work.game_id,
                 assembly.evidence.inputs,
                 decision_time=assembly.evidence.decision_time,
                 repository=repository,
-                notifications=notifications,
                 fetch_summary=fetch_summary,
+                poll_id=f"{correlation_id}:{work.work_id}",
+            )
+        except Exception as error:
+            errors[work.work_id] = error
+
+    result = PostgameLockInResult("wait")
+    stable = tuple(row for rows in observed.values() for row in rows)
+    if stable:
+        try:
+            result = await recommend_postgame_batch(
+                assembly.evidence.inputs,
+                stable,
+                decision_time=clock(),
+                repository=repository,
+                notifications=notifications,
                 runtime_policy=policy,
                 open_sleeper_url=open_sleeper_url,
-                poll_id=f"{correlation_id}:{work.work_id}",
                 player_names=dict(assembly.player_names),
             )
+        except Exception as error:
+            errors.update({work_id: error for work_id, rows in observed.items() if rows})
+
+    attempts: list[WorkAttemptSummary] = []
+    for work in work_items:
+        work_error = errors.get(work.work_id)
+        failure: FailureCategory | None
+        if work.game_id is None:
+            outcome = ScheduledRunStatus.FAILED
+            failure = FailureCategory.INTERNAL_INVARIANT
+            detail = "postgame_work_missing_game"
+            retry = False
+            recommendation = None
+        elif work_error is not None:
+            outcome = ScheduledRunStatus.FAILED
+            failure = FailureCategory.PROVIDER
+            detail = str(work_error)
+            retry = True
+            recommendation = None
+        else:
+            game_result = result if observed.get(work.work_id) else PostgameLockInResult("wait")
             outcome = {
                 "wait": ScheduledRunStatus.NO_ACTION,
                 "notified": ScheduledRunStatus.SUCCESS,
@@ -117,34 +149,27 @@ async def dispatch_postgame_work(
                 "unavailable": ScheduledRunStatus.BLOCKED,
                 "automatic_final": ScheduledRunStatus.NO_ACTION,
                 "delivery_failed": ScheduledRunStatus.DELIVERY_FAILED,
-            }[result.outcome]
+            }[game_result.outcome]
+            failure = FailureCategory.DELIVERY if game_result.outcome == "delivery_failed" else None
+            detail = None
             retry = await repository.has_open_lock_in_watch(work.game_id, scheduled_at)
-            failure = FailureCategory.DELIVERY if result.outcome == "delivery_failed" else None
-            attempts.append(
-                await _finish(
-                    repository,
-                    work,
-                    scheduled_at=scheduled_at,
-                    correlation_id=correlation_id,
-                    outcome=outcome,
-                    failure=failure,
-                    recommendation=result.recommendation,
-                    retry=retry,
-                    clock=clock,
-                )
+            recommendation = game_result.recommendation
+            if recommendation is not None and recommendation.game_id != work.game_id:
+                recommendation = None
+        attempts.append(
+            await _finish(
+                repository,
+                work,
+                scheduled_at=scheduled_at,
+                correlation_id=correlation_id,
+                outcome=outcome,
+                failure=failure,
+                detail=detail,
+                recommendation=recommendation,
+                retry=retry,
+                clock=clock,
             )
-        except Exception as error:
-            attempts.append(
-                await _finish(
-                    repository,
-                    work,
-                    scheduled_at=scheduled_at,
-                    correlation_id=correlation_id,
-                    outcome=ScheduledRunStatus.FAILED,
-                    failure=FailureCategory.PROVIDER,
-                    detail=str(error),
-                )
-            )
+        )
     return tuple(attempts)
 
 

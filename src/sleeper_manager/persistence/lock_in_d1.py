@@ -84,7 +84,7 @@ class D1LockInOpportunityMixin:
         *,
         expected_version: int,
     ) -> LockInOpportunityRecord | None:
-        """Apply one distinct direct poll and stabilize after two matching fingerprints."""
+        """Accept a qualified final once per distinct direct poll."""
 
         rows = await self._all(
             RECORD_LOCK_IN_OBSERVATION_SQL,

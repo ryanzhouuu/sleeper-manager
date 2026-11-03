@@ -81,7 +81,7 @@ class SQLiteLockInOpportunityMixin:
         *,
         expected_version: int,
     ) -> LockInOpportunityRecord | None:
-        """Apply one distinct direct poll and stabilize after two matching fingerprints."""
+        """Accept a qualified final once per distinct direct poll."""
 
         with self._connect() as connection:
             row = connection.execute(

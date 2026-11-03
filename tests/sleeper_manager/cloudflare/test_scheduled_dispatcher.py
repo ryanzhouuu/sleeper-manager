@@ -514,27 +514,14 @@ def test_postgame_delivery_failure_remains_visible_and_retryable(tmp_path) -> No
 
         collect, _ = _collector(_assembly(decision_time=first_at))
         notifications._clock = lambda: first_at
-        await dispatch_due_work(
-            repository,
-            notifications=notifications,
-            collect=collect,
-            scheduled_at=first_at,
-            correlation_id="postgame-1",
-            open_sleeper_url="https://sleeper.com/league",
-            plan_policy=PLAN_POLICY,
-            fetch_game_summary=fetch,
-        )
-        second_at = first_at + timedelta(minutes=5)
-        collect, _ = _collector(_assembly(decision_time=second_at))
-        notifications._clock = lambda: second_at
         sender.fail = True
 
         result = await dispatch_due_work(
             repository,
             notifications=notifications,
             collect=collect,
-            scheduled_at=second_at,
-            correlation_id="postgame-2",
+            scheduled_at=first_at,
+            correlation_id="postgame-1",
             open_sleeper_url="https://sleeper.com/league",
             plan_policy=PLAN_POLICY,
             fetch_game_summary=fetch,
@@ -547,6 +534,6 @@ def test_postgame_delivery_failure_remains_visible_and_retryable(tmp_path) -> No
         assert attempt.outcome is ScheduledRunStatus.DELIVERY_FAILED
         assert attempt.failure_category is FailureCategory.DELIVERY
         assert g1.status is ScheduledWorkStatus.RETRY
-        assert g1.due_at == second_at + timedelta(minutes=5)
+        assert g1.due_at == first_at + timedelta(minutes=5)
 
     asyncio.run(exercise())

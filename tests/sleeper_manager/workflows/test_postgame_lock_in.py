@@ -58,10 +58,10 @@ def test_partial_or_in_progress_summary_waits_without_notification(tmp_path) -> 
     asyncio.run(exercise())
 
 
-def test_two_identical_finals_notify_lock_with_acknowledgement_actions(
+def test_first_complete_final_notifies_lock_with_acknowledgement_actions(
     tmp_path,
 ) -> None:  # type: ignore[no-untyped-def]
-    """Require two distinct scheduled wakes before emitting Lock advice."""
+    """Send advice on the first complete final and deduplicate identical repeats."""
 
     async def exercise() -> None:
         repository, inputs, notifications, sender = await _prepare(tmp_path)
@@ -96,10 +96,10 @@ def test_two_identical_finals_notify_lock_with_acknowledgement_actions(
         stored = await repository.get_lock_in_opportunity(
             LockInOpportunityKey("league-1", 1, 1, "p1", "g1")
         )
-        assert first.outcome == "wait"
-        assert second.outcome == "notified"
-        assert second.evaluation is not None
-        assert second.evaluation.kind is LockInEvaluationKind.LOCK
+        assert first.outcome == "notified"
+        assert second.outcome == "duplicate"
+        assert first.evaluation is not None
+        assert first.evaluation.kind is LockInEvaluationKind.LOCK
         assert stored is not None
         assert stored.status is LockInOpportunityStatus.ACTIONABLE
         assert stored.consecutive_direct_poll_count == 2
@@ -109,11 +109,11 @@ def test_two_identical_finals_notify_lock_with_acknowledgement_actions(
             "Locked",
             "Pass",
         ]
-        assert second.recommendation is not None
-        assert second.recommendation.decision_type == LOCK_IN_DECISION_TYPE
+        assert first.recommendation is not None
+        assert first.recommendation.decision_type == LOCK_IN_DECISION_TYPE
         assert "Projected week: 28.0 pts" in sender.messages[0].message
         assert "Alternative (pass): 9.0 pts." in sender.messages[0].message
-        assert json.loads(second.recommendation.trace_json)["expected_terminal_score"] == 28.0
+        assert json.loads(first.recommendation.trace_json)["expected_terminal_score"] == 28.0
         notifications._clock = lambda: SECOND_POLL + timedelta(minutes=5)
         retry = await run_postgame_lock_in(
             "g1",
@@ -136,7 +136,7 @@ def test_two_identical_finals_notify_lock_with_acknowledgement_actions(
 def test_changed_fingerprint_resets_and_supersedes_unacknowledged_advice(
     tmp_path,
 ) -> None:  # type: ignore[no-untyped-def]
-    """A corrected box score returns to finalizing and replaces pending advice."""
+    """A corrected final immediately replaces the score and supersedes pending advice."""
 
     async def exercise() -> None:
         repository, inputs, notifications, sender = await _prepare(tmp_path)
@@ -190,11 +190,12 @@ def test_changed_fingerprint_resets_and_supersedes_unacknowledged_advice(
             LockInOpportunityKey("league-1", 1, 1, "p1", "g1")
         )
         superseded = await repository.get_recommendation(first_rec.recommendation_id)
-        assert changed.outcome == "wait"
+        assert changed.outcome == "notified"
         assert stored is not None
         assert stored.consecutive_direct_poll_count == 1
-        assert stored.score_revision == 1
-        assert stored.status is LockInOpportunityStatus.FINALIZING
+        assert stored.score_revision == 2
+        assert stored.stable_score == 24.0
+        assert stored.status is LockInOpportunityStatus.ACTIONABLE
         assert superseded is not None
         assert superseded.status is RecommendationStatus.SUPERSEDED
 

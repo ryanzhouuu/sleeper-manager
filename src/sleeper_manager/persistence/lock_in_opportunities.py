@@ -270,7 +270,7 @@ def lock_in_observation_values(
     observation: LockInObservation,
     expected_version: int,
 ) -> tuple[object, ...]:
-    """Encode a guarded observation and its repeated stabilization comparisons."""
+    """Encode a qualified final and the guards against replay or concurrent writes."""
 
     return (
         observation.score,
@@ -279,13 +279,10 @@ def lock_in_observation_values(
         observation.poll_id,
         observation.observed_at.isoformat(),
         observation.next_check_at.isoformat(),
-        observation.fingerprint,
         observation.score,
         observation.fingerprint,
         observation.fingerprint,
-        observation.fingerprint,
         observation.observed_at.isoformat(),
-        observation.fingerprint,
         observation.fingerprint,
         observation.observed_at.isoformat(),
         *lock_in_key_values(key),

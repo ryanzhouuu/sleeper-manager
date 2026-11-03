@@ -82,7 +82,8 @@ def test_opportunity_guards_stabilization_corrections_and_queries(
         )
         assert first is not None
         assert first.consecutive_direct_poll_count == 1
-        assert first.stable_score is None
+        assert first.stable_score == 12.0
+        assert first.stable_fingerprint == "summary-a"
         assert (
             await repository.record_lock_in_observation(
                 original.key,
@@ -112,7 +113,7 @@ def test_opportunity_guards_stabilization_corrections_and_queries(
         assert stable is not None
         assert stable.stable_score == 12.0
         assert stable.score_revision == 1
-        assert stable.stabilized_at == NOW + timedelta(minutes=5)
+        assert stable.stabilized_at == NOW
 
         correction = await repository.record_lock_in_observation(
             original.key,
@@ -126,7 +127,8 @@ def test_opportunity_guards_stabilization_corrections_and_queries(
             expected_version=stable.row_version,
         )
         assert correction is not None
-        assert correction.stable_score == 12.0
+        assert correction.stable_score == 13.0
+        assert correction.score_revision == 2
         assert correction.consecutive_direct_poll_count == 1
         corrected = await repository.record_lock_in_observation(
             original.key,

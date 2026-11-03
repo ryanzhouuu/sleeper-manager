@@ -89,7 +89,7 @@ WHERE league_id = ? AND fantasy_week = ? AND roster_id = ? AND player_id = ? AND
 RECORD_LOCK_IN_OBSERVATION_SQL = f"""
 UPDATE lock_in_opportunities SET
     status = CASE
-        WHEN status IN ('acknowledged_locked', 'acknowledged_passed') THEN status
+        WHEN status IN ('acknowledged_locked', 'acknowledged_passed', 'automatic_final') THEN status
         ELSE 'finalizing'
     END,
     previous_observed_at = current_observed_at,
@@ -98,19 +98,10 @@ UPDATE lock_in_opportunities SET
         WHEN current_observation_fingerprint = ? THEN consecutive_direct_poll_count + 1 ELSE 1
     END,
     current_poll_id = ?, current_observed_at = ?, next_check_at = ?,
-    stable_score = CASE
-        WHEN current_observation_fingerprint = ? AND consecutive_direct_poll_count >= 1
-            THEN ? ELSE stable_score END,
-    stable_fingerprint = CASE
-        WHEN current_observation_fingerprint = ? AND consecutive_direct_poll_count >= 1
-            THEN ? ELSE stable_fingerprint END,
-    stabilized_at = CASE
-        WHEN current_observation_fingerprint = ? AND consecutive_direct_poll_count >= 1
-            THEN ? ELSE stabilized_at END,
-    score_revision = CASE
-        WHEN current_observation_fingerprint = ? AND consecutive_direct_poll_count >= 1
-             AND (stable_fingerprint IS NULL OR stable_fingerprint != ?)
-            THEN score_revision + 1 ELSE score_revision END,
+    stable_score = ?, stable_fingerprint = ?,
+    stabilized_at = CASE WHEN stable_fingerprint IS NOT ? THEN ? ELSE stabilized_at END,
+    score_revision = score_revision + (stable_fingerprint IS NOT ?),
+    trace_json = json_remove(trace_json, '$.reason_codes'),
     row_version = row_version + 1, updated_at = ?
 WHERE league_id = ? AND fantasy_week = ? AND roster_id = ? AND player_id = ?
   AND game_id = ? AND row_version = ? AND (current_poll_id IS NULL OR current_poll_id != ?)

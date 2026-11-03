@@ -45,20 +45,52 @@ async def run_postgame_lock_in(
     player_names: dict[str, str] | None = None,
     policy: ScoreMaximizingLockInPolicy | None = None,
 ) -> PostgameLockInResult:
-    """Fetch once, stabilize every relevant player, evaluate, and notify safely."""
+    """Observe and evaluate one game for callers without a scheduled batch."""
 
     await sync_live_lock_in_opportunities(inputs, repository=repository, observed_at=decision_time)
+    stable = await observe_postgame(
+        game_id,
+        inputs,
+        decision_time=decision_time,
+        repository=repository,
+        fetch_summary=fetch_summary,
+        poll_id=poll_id,
+    )
+    return await recommend_postgame_batch(
+        inputs,
+        stable,
+        decision_time=decision_time,
+        repository=repository,
+        notifications=notifications,
+        runtime_policy=runtime_policy,
+        open_sleeper_url=open_sleeper_url,
+        player_names=player_names,
+        policy=policy,
+    )
+
+
+async def observe_postgame(
+    game_id: str,
+    inputs: LivePlanningInputs,
+    *,
+    decision_time: datetime,
+    repository: AsyncRuntimeStateRepository,
+    fetch_summary: DirectGameSummarySource,
+    poll_id: str,
+) -> tuple[LockInOpportunityRecord, ...]:
+    """Persist a qualified final before spending time on team optimization."""
+
     due = await repository.list_due_lock_in_opportunities(decision_time)
     opportunities = tuple(item for item in due if item.key.game_id == game_id)
     if not opportunities:
-        return PostgameLockInResult("wait")
+        return ()
     summary_result = await fetch_summary(game_id)
     decision_time = max(decision_time, summary_result.quality.retrieved_at)
     if any(row.action_deadline <= decision_time for row in opportunities):
         await repository.expire_lock_in_opportunities(decision_time)
         opportunities = tuple(row for row in opportunities if row.action_deadline > decision_time)
         if not opportunities:
-            return PostgameLockInResult("wait")
+            return ()
     summary = summary_result.records
     reason = summary_wait_reason(summary_result, opportunities)
     if reason is not None:
@@ -69,7 +101,7 @@ async def run_postgame_lock_in(
             reason=reason,
             active=summary.game.status is GameStatus.IN_PROGRESS,
         )
-        return PostgameLockInResult("wait")
+        return ()
 
     fingerprint = summary_fingerprint(summary)
     boxes = {item.player_id: item for item in summary.player_box_scores}
@@ -100,14 +132,25 @@ async def run_postgame_lock_in(
         if stored is not None:
             updated.append(stored)
 
-    stable = tuple(
-        item
-        for item in updated
-        if item.stable_fingerprint == fingerprint and item.consecutive_direct_poll_count >= 2
-    )
+    return tuple(updated)
+
+
+async def recommend_postgame_batch(
+    inputs: LivePlanningInputs,
+    stable: tuple[LockInOpportunityRecord, ...],
+    *,
+    decision_time: datetime,
+    repository: AsyncRuntimeStateRepository,
+    notifications: NotificationLoop,
+    runtime_policy: RuntimePolicy,
+    open_sleeper_url: str,
+    player_names: dict[str, str] | None = None,
+    policy: ScoreMaximizingLockInPolicy | None = None,
+) -> PostgameLockInResult:
+    """Evaluate all observed finals against the same refreshed team state."""
     if not stable:
         return PostgameLockInResult("wait")
-
+    decision_time = max(decision_time, *(row.updated_at for row in stable))
     live_inputs = replace(inputs, runtime_policy_version=runtime_policy.manager_intent.version)
     state = await refreshed_team_state(live_inputs, repository, decision_time)
     return await deliver_coordinated_postgame(
@@ -156,6 +199,8 @@ __all__ = (
     "LOCK_IN_DECISION_TYPE",
     "LOCK_IN_WARNING_TYPE",
     "PostgameLockInResult",
+    "observe_postgame",
+    "recommend_postgame_batch",
     "run_postgame_lock_in",
     "summary_fingerprint",
     "summary_wait_reason",

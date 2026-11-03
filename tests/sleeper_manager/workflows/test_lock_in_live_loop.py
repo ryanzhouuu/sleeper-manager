@@ -17,7 +17,6 @@ from sleeper_manager.workflows.postgame_lock_in import run_postgame_lock_in
 from tests.sleeper_manager.workflows.postgame_lock_in_support import (
     LATER_START,
     POLICY,
-    POSTGAME,
     SECOND_POLL,
     _box,
     _fetcher,
@@ -32,18 +31,6 @@ def test_lock_in_live_loop_ack_correction_and_later_planning(tmp_path) -> None: 
     async def exercise() -> None:
         repository, inputs, notifications, sender = await _prepare(tmp_path)
         summary = _summary_result(_box("401", points=20), _box("402", points=8))
-        await run_postgame_lock_in(
-            "g1",
-            inputs,
-            decision_time=POSTGAME,
-            repository=repository,
-            notifications=notifications,
-            fetch_summary=_fetcher(summary),
-            runtime_policy=POLICY,
-            open_sleeper_url="https://sleeper.com",
-            poll_id="wake-1",
-            player_names={"p1": "Ann"},
-        )
         notifications._clock = lambda: SECOND_POLL
         notified = await run_postgame_lock_in(
             "g1",
@@ -74,14 +61,6 @@ def test_lock_in_live_loop_ack_correction_and_later_planning(tmp_path) -> None: 
         assert locked.stable_score == 20.0
 
         corrected = _summary_result(_box("401", points=24), _box("402", points=8))
-        day_one = SECOND_POLL + timedelta(hours=1)
-        await refresh_terminal_lock_in_scores(
-            inputs,
-            repository=repository,
-            fetch_summary=_fetcher(corrected),
-            observed_at=day_one,
-            poll_id="daily-1",
-        )
         day_two = SECOND_POLL + timedelta(hours=2)
         refreshed = await refresh_terminal_lock_in_scores(
             inputs,
