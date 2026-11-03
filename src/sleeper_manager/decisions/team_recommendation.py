@@ -64,7 +64,7 @@ def build_team_recommendation(
         comparison = (
             compare_completed_scores(
                 state,
-                scenario_count=config.postgame_scenario_count,
+                scenario_count=config.scenario_count,
                 seed=config.seed,
                 tie_tolerance=config.tie_tolerance,
                 minimum_confidence=0,

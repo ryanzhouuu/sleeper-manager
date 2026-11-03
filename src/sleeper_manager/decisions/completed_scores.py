@@ -27,6 +27,28 @@ from sleeper_manager.domain.planning import (
 )
 
 
+class _ShiftedScores(Sequence[float]):
+    """Share one continuation's samples among placements differing only by locked points."""
+
+    __slots__ = ("_offset", "_samples")
+
+    def __init__(self, offset: float, samples: array[float]) -> None:
+        self._offset = offset
+        self._samples = samples
+
+    def __len__(self) -> int:
+        return len(self._samples)
+
+    def __getitem__(self, index):  # type: ignore[no-untyped-def]
+        if isinstance(index, slice):
+            return [self._offset + value for value in self._samples[index]]
+        return self._offset + self._samples[index]
+
+    def __iter__(self) -> Iterator[float]:
+        offset = self._offset
+        return (offset + value for value in self._samples)
+
+
 @dataclass(frozen=True, slots=True)
 class CompletedPlacement:
     """Name the exact irreversible player-game/slot choices and the moves preceding them."""
@@ -47,7 +69,7 @@ class CompletedPlacement:
 
 @dataclass(frozen=True, slots=True)
 class CompletedScoreComparison:
-    """Expose a joint selection, its all-pass baseline, and every legal placement value."""
+    """Expose a joint selection, its all-pass baseline, and each placement value still needed."""
 
     selected: CompletedPlacement
     baseline: CompletedPlacement
@@ -106,33 +128,38 @@ def executable_lock_placements(
     )
     results: list[CompletedPlacement] = []
     views: dict[tuple[PlannedAssignment, ...], tuple[PlannedAssignment, ...]] = {}
-    move_sets: dict[tuple[LineupMove, ...], tuple[LineupMove, ...]] = {}
+    plans: dict[tuple[PlannedAssignment, ...], tuple[LineupMove, ...] | None] = {}
     for locks in _compatible_locks(choices):
         try:
             target = complete_assignment(state, (), AssignmentResult(0, locks))
-            view = tuple(
-                sorted(
-                    (
-                        *(
-                            PlannedAssignment(row.slot_index, row.slot_position, row.player_id)
-                            for row in target
-                        ),
-                        *(
-                            PlannedAssignment(row.slot_index, row.slot_position, row.player_id)
-                            for row in state.fixed_slots
-                        ),
-                    ),
-                    key=lambda row: row.slot_index,
-                )
-            )
-            moves = plan_moves(state, view, state.decision_time + timedelta(days=7), timedelta(0))
         except WeeklyPlanError:
             continue
-        results.append(
-            CompletedPlacement(
-                locks, views.setdefault(view, view), move_sets.setdefault(moves, moves)
+        built = tuple(
+            sorted(
+                (
+                    *(
+                        PlannedAssignment(row.slot_index, row.slot_position, row.player_id)
+                        for row in target
+                    ),
+                    *(
+                        PlannedAssignment(row.slot_index, row.slot_position, row.player_id)
+                        for row in state.fixed_slots
+                    ),
+                ),
+                key=lambda row: row.slot_index,
             )
         )
+        view = views.setdefault(built, built)
+        if view not in plans:
+            try:
+                plans[view] = plan_moves(
+                    state, view, state.decision_time + timedelta(days=7), timedelta(0)
+                )
+            except WeeklyPlanError:
+                plans[view] = None
+        moves = plans[view]
+        if moves is not None:
+            results.append(CompletedPlacement(locks, view, moves))
     if not results:
         raise WeeklyPlanError("No executable completed-score placement")
     return tuple(results)
@@ -195,18 +222,22 @@ def compare_completed_scores(
     )
     topology = PreparedContinuationTopology(inputs, slots)
     bits = {slot.index: 1 << i for i, slot in enumerate(slots)}
+    shared_keys: dict[tuple[frozenset[str], int], tuple[frozenset[str], int]] = {}
     keys = tuple(
-        (
-            frozenset(item.player_id for item in placement.locks if item.player_id is not None),
-            topology.full_slot_mask & ~sum(bits[item.slot_index] for item in placement.locks),
+        shared_keys.setdefault(key, key)
+        for key in (
+            (
+                frozenset(item.player_id for item in placement.locks if item.player_id is not None),
+                topology.full_slot_mask & ~sum(bits[item.slot_index] for item in placement.locks),
+            )
+            for placement in placements
         )
-        for placement in placements
     )
     requested: dict[frozenset[str], frozenset[int]] = {}
     for excluded, mask in keys:
         requested[excluded] = requested.get(excluded, frozenset()) | {mask}
     fixed_score = sum(item.score for item in fixed_assignments(state.fixed_slots))
-    scores: dict[tuple[frozenset[str], int], list[float]] = {key: [] for key in keys}
+    scores: dict[tuple[frozenset[str], int], array[float]] = {key: array("d") for key in keys}
     for scenario in scenarios:
         tables = topology.best_scores_by_excluded_players(dict(scenario.values), requested)
         for key, values in scores.items():
@@ -218,13 +249,13 @@ def compare_completed_scores(
     evaluated = []
     for placement, key in zip(placements, keys, strict=True):
         locked_score = fixed_score + sum(item.score for item in placement.locks)
-        totals = array("d", (locked_score + value for value in scores[key]))
+        totals = _ShiftedScores(locked_score, scores[key])
         evaluated.append(
             CompletedPlacement(
                 placement.locks,
                 placement.assignments,
                 placement.moves,
-                round(sum(totals) / len(totals), 6),
+                round(sum(totals) / len(scores[key]), 6),
                 totals,
                 flexibility_proof=proofs[key],
             )
@@ -262,12 +293,13 @@ def select_completed_placement(
         return confidences[sample_key]
 
     for item in evaluated:
-        confidence = sum(
-            a > b + tie_tolerance
-            for a, b in zip(item.terminal_scores, baseline.terminal_scores, strict=True)
-        ) / len(item.terminal_scores)
-        if item.locks and confidence < minimum_confidence:
-            continue
+        if minimum_confidence > 0 and item.locks:
+            confidence = sum(
+                a > b + tie_tolerance
+                for a, b in zip(item.terminal_scores, baseline.terminal_scores, strict=True)
+            ) / len(item.terminal_scores)
+            if confidence < minimum_confidence:
+                continue
         if minimum_confidence > 0 and any(
             lock_confidence(item, lock) < minimum_confidence for lock in item.locks
         ):

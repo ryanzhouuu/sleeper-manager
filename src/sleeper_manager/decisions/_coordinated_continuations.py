@@ -33,6 +33,9 @@ from sleeper_manager.domain.planning import (
     TeamWeekState,
 )
 
+# Generous because tie-breaks chain across options that sit within tie tolerance of each other.
+_BOUND_MARGIN_TOLERANCES = 25
+
 
 def coordinate_completed_continuations(
     state: TeamWeekState,
@@ -40,7 +43,11 @@ def coordinate_completed_continuations(
     config: WeeklyPlanPolicyConfig,
     lead_time: timedelta,
 ) -> CompletedScoreComparison:
-    """Pair all alternatives using identical draws and the same bounded continuation model."""
+    """Score only placements whose hindsight bound can still change what is recommended.
+
+    Every continuation is a feasible lineup within its scenario, so a placement's hindsight total
+    on the same outer draws bounds its value. Those draws must come from `comparison`.
+    """
     universe = tuple(
         scenario_input(game) for game in future_opportunities(state, state.decision_time)
     )
@@ -55,8 +62,9 @@ def coordinate_completed_continuations(
     completed = usable_completed_games(state)
     samples = PreparedPlanSamples.prepare(state, config, universe)
     cache: dict[tuple[object, ...], array[float]] = {}
-    evaluated = []
-    for option in comparison.alternatives:
+
+    def evaluate(option: CompletedPlacement) -> CompletedPlacement:
+        """Replace an option's hindsight bound with its full continuation on the same draws."""
         locked_keys = {(row.player_id, row.game_id) for row in option.locks}
         occupied = {row.slot_index for row in option.locks}
         key = (
@@ -80,16 +88,40 @@ def coordinate_completed_continuations(
                 ).selected.scenario_terminal_scores
             cache[key] = array("d", terminal)
         scores = cache[key]
-        evaluated.append(
-            replace(
-                option,
-                expected_score=round(sum(scores) / len(scores), 6),
-                terminal_scores=scores,
-            )
+        return replace(
+            option,
+            expected_score=round(sum(scores) / len(scores), 6),
+            terminal_scores=scores,
         )
-    result = select_completed_placement(
-        tuple(evaluated), config.tie_tolerance, config.minimum_lock_in_confidence
-    )
+
+    margin = _BOUND_MARGIN_TOLERANCES * config.tie_tolerance
+    options = comparison.alternatives
+    evaluated: dict[int, CompletedPlacement] = {}
+    bests: dict[tuple[object, ...], float] = {}
+    for index in sorted(range(len(options)), key=lambda i: -options[i].expected_score):
+        option = options[index]
+        groups = _value_groups(option, completed)
+        if not option.locks or any(
+            option.expected_score + margin >= bests.get(group, float("-inf")) for group in groups
+        ):
+            evaluated[index] = evaluate(option)
+            for group in groups:
+                bests[group] = max(bests.get(group, float("-inf")), evaluated[index].expected_score)
+    while True:
+        result = select_completed_placement(
+            tuple(evaluated[index] for index in sorted(evaluated)),
+            config.tie_tolerance,
+            config.minimum_lock_in_confidence,
+        )
+        contenders = [
+            index
+            for index, option in enumerate(options)
+            if index not in evaluated
+            and option.expected_score + margin >= result.selected.expected_score
+        ]
+        if not contenders:
+            break
+        evaluated.update({index: evaluate(options[index]) for index in contenders})
     selected = result.selected
     hypothetical = _continuation_state(state, selected, completed, positions, lead_time)
     batch = next_actionable_batch(hypothetical)
@@ -116,6 +148,20 @@ def coordinate_completed_continuations(
         selected=finalized,
         baseline=finalized if result.baseline is selected else result.baseline,
         alternatives=tuple(finalized if row is selected else row for row in result.alternatives),
+    )
+
+
+def _value_groups(
+    option: CompletedPlacement, completed: tuple[GameOpportunity, ...]
+) -> tuple[tuple[object, ...], ...]:
+    """Name each maximum the recommendation reads: per Pass, per Lock placement, and overall."""
+    placed = {(row.player_id, row.game_id): row.slot_index for row in option.locks}
+    return (
+        ("overall",),
+        *(
+            ("lock", key, placed[key]) if key in placed else ("pass", key)
+            for key in ((game.sleeper_player_id, game.game_id) for game in completed)
+        ),
     )
 
 

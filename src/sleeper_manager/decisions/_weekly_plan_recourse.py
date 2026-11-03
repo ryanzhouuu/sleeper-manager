@@ -37,7 +37,6 @@ class _Choice:
     continuation: _Continuation
     expected_future: float
     thresholds: tuple[tuple[str, float], ...]
-    flexibility: frozenset[int] = frozenset()
 
 
 def recourse_terminal_values(
@@ -118,12 +117,16 @@ def recourse_terminal_values(
         for inner_key, scores in inner_scores.items():
             scores.append(tables[inner_key.excluded][inner_key.slot_mask])
     means = {key: sum(scores) / len(scores) for key, scores in inner_scores.items()}
-    flexibility = {
-        child: future_player_sets(
-            future_inputs, open_slots, excluded=child.excluded, slot_mask=child.slot_mask
-        )
-        for child in inner_scores
-    }
+    flexibility_proofs: dict[_Continuation, frozenset[int]] = {}
+
+    def flexibility(child: _Continuation) -> frozenset[int]:
+        """Defer costly proofs because only tied values within a scenario compare them."""
+        if child not in flexibility_proofs:
+            flexibility_proofs[child] = future_player_sets(
+                future_inputs, open_slots, excluded=child.excluded, slot_mask=child.slot_mask
+            )
+        return flexibility_proofs[child]
+
     thresholds: dict[tuple[_Continuation, _Continuation], float] = {}
     choices: dict[tuple[_Placement, ...], tuple[_Choice, ...]] = {}
     for key, subsets_for_assignment in subsets.items():
@@ -155,7 +158,6 @@ def recourse_terminal_values(
                     child,
                     means[child],
                     tuple(gates),
-                    flexibility[child],
                 )
             )
         choices[key] = tuple(prepared)
@@ -182,9 +184,9 @@ def recourse_terminal_values(
                 if value > best_score + tie_tolerance or (
                     best.sample_ids
                     and abs(value - best_score) <= tie_tolerance
-                    and choice.flexibility
-                    and best.flexibility
-                    and choice.flexibility > best.flexibility
+                    and flexibility(choice.continuation)
+                    and flexibility(best.continuation)
+                    and flexibility(choice.continuation) > flexibility(best.continuation)
                 ):
                     best, best_score, retained_score = choice, value, current_score
             continuation = best.continuation
