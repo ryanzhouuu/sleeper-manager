@@ -4,11 +4,18 @@ from dataclasses import replace
 from datetime import timedelta
 
 from sleeper_manager.decisions.team_recommendation import build_team_recommendation
+from sleeper_manager.decisions.weekly_plan import WeeklyPlanPolicyConfig
 from sleeper_manager.domain.lock_in import LockInDecisionKind
-from sleeper_manager.domain.planning import ObservedStarter, PlanningGameStatus
+from sleeper_manager.domain.planning import (
+    ObservedStarter,
+    PlanningGameStatus,
+    PlanStatus,
+    StarterSlot,
+)
 from sleeper_manager.domain.projection import ProjectionDistribution
+from tests.sleeper_manager.decisions.test_joint_completed_scores import _completed
 from tests.sleeper_manager.decisions.test_recoverable_attempts import POLICY, _trial
-from tests.sleeper_manager.decisions.weekly_plan_support import NOW
+from tests.sleeper_manager.decisions.weekly_plan_support import NOW, _opportunity, _state
 
 
 def _after_trial(score):
@@ -189,3 +196,47 @@ def test_move_search_failure_returns_a_full_blocked_view(monkeypatch) -> None:
     assert result.blocking_reasons == (PlanningReasonCode.SEARCH_LIMIT,)
     assert result.moves == result.score_actions == ()
     assert result.desired_assignments == result.observed_assignments
+
+
+def _uncertain_starter_state():
+    slots = (StarterSlot(0, "PG"), StarterSlot(1, "C"))
+    games = (
+        _completed("sure", 80, ("PG",), (0,)),
+        _completed("uncertain", 50, ("C",), (1,)),
+    )
+    swing = _opportunity(
+        "swing",
+        "swing-game",
+        NOW + timedelta(hours=20),
+        ("C",),
+        ((200, 0.6), (0, 0.4)),
+        eligible_slot_indices=(1,),
+    )
+    return replace(
+        _state(
+            (*games, swing),
+            starter_slots=slots,
+            observed=(
+                ObservedStarter(0, "sure", ("PG",)),
+                ObservedStarter(1, "uncertain", ("C",)),
+            ),
+        ),
+        week_ends_at=NOW + timedelta(days=6),
+    )
+
+
+def test_uncertain_final_stays_in_lineup_without_blocking_confident_lock() -> None:
+    plan = build_team_recommendation(
+        _uncertain_starter_state(),
+        policy=WeeklyPlanPolicyConfig(
+            scenario_count=128, postgame_scenario_count=32, minimum_lock_in_confidence=0.7
+        ),
+    )
+    assert plan.status is not PlanStatus.BLOCKED
+    assert [(row.player_id, row.kind) for row in plan.score_actions] == [
+        ("sure", LockInDecisionKind.LOCK)
+    ]
+    assert {row.player_id for row in plan.desired_assignments} == {"sure", "uncertain"}
+    assert plan.moves == ()
+    assert plan.fixed_slots == ()
+    assert plan.expected_terminal_score is None

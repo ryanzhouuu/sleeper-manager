@@ -202,6 +202,10 @@ def build_team_recommendation(
     unresolved = {game.sleeper_player_id for game in completed} - {
         action.player_id for action in actions
     }
+    holds_uncertain = bool(unresolved - {row.player_id for row in plan.desired_assignments})
+    if holds_uncertain:
+        conditional = _hold_in_place(conditional, completed, unresolved)
+        plan = build_weekly_plan(conditional, lead_time=lead_time, policy=config)
     if unresolved - {row.player_id for row in plan.desired_assignments}:
         blocked = replace(state, blocking_reasons=(PlanningReasonCode.LOW_CONFIDENCE,))
         return _with_roster(build_weekly_plan(blocked, policy=config), state)
@@ -275,7 +279,7 @@ def build_team_recommendation(
         for game in protected_performances(state)
     ):
         expected = None
-    if PlanningReasonCode.MISSING_TIPOFF_EVIDENCE in state.warnings:
+    if holds_uncertain or PlanningReasonCode.MISSING_TIPOFF_EVIDENCE in state.warnings:
         expected = None
     result = replace(
         plan,
@@ -301,6 +305,31 @@ def build_team_recommendation(
         confidence=PlanConfidence.MEDIUM if actions else plan.confidence,
     )
     return _with_roster(result, state)
+
+
+def _hold_in_place(
+    state: TeamWeekState,
+    completed: tuple[GameOpportunity, ...],
+    player_ids: set[str],
+) -> TeamWeekState:
+    """Benching forfeits a final, so moves must not imply a Pass too uncertain to recommend."""
+    games = {game.sleeper_player_id: game for game in completed}
+    positions = {slot.index: slot.position for slot in state.starter_slots}
+    holds = tuple(
+        FixedSlot(
+            row.slot_index,
+            positions[row.slot_index],
+            row.player_id,
+            games[row.player_id].game_id,
+            games[row.player_id].completed_fantasy_score or 0,
+            state.decision_time,
+            f"held:{row.player_id}:{games[row.player_id].game_id}",
+            "proposed-only",
+        )
+        for row in state.observed_starters
+        if row.player_id in player_ids
+    )
+    return replace(state, fixed_slots=(*state.fixed_slots, *holds))
 
 
 def _with_roster(plan: WeeklyPlan, state: TeamWeekState) -> WeeklyPlan:
