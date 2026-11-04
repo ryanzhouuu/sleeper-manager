@@ -89,7 +89,6 @@ def score_weekly_options(
         league_id=state.league_id,
         week=state.week,
         roster_id=state.roster_id,
-        decision_time=state.decision_time,
     )
     if _samples is not None:
         _samples.validate(

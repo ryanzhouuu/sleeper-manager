@@ -217,7 +217,6 @@ def compare_completed_scores(
             league_id=state.league_id,
             week=state.week,
             roster_id=state.roster_id,
-            decision_time=state.decision_time,
         ),
     )
     topology = PreparedContinuationTopology(inputs, slots)

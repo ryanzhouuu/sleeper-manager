@@ -109,11 +109,10 @@ def stable_scenario_seed(
     league_id: str,
     week: int,
     roster_id: int,
-    decision_time: datetime,
 ) -> int:
-    """Derive a stable per-decision random seed from team-week identity."""
+    """Exclude the clock: replanning identical inputs later must not redraw the scenarios."""
 
-    payload = f"{run_seed}|{league_id}|{week}|{roster_id}|{decision_time.isoformat()}"
+    payload = f"{run_seed}|{league_id}|{week}|{roster_id}"
     digest = hashlib.sha256(payload.encode()).digest()
     return int.from_bytes(digest[:8], "big")
 

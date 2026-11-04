@@ -35,7 +35,6 @@ class PreparedPlanSamples:
             league_id=state.league_id,
             week=state.week,
             roster_id=state.roster_id,
-            decision_time=state.decision_time,
         )
         return cls(
             (state.league_id, state.week, state.roster_id, state.decision_time),

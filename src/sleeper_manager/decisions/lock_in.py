@@ -133,7 +133,6 @@ class ScoreMaximizingLockInPolicy:
             league_id=state.league_id,
             week=state.week,
             roster_id=state.roster_id,
-            decision_time=state.decision_time,
         )
         scenarios = generate_projection_scenarios(
             inputs,
