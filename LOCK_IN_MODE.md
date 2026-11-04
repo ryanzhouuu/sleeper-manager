@@ -90,6 +90,13 @@ choices, and placement values remain available for confidence and tie-breaking.
 The later-week continuation remains approximate, and move verification and runtime
 resource limits still apply. Interrupted searches do not publish partial advice.
 
+Scenario seeds exclude the clock, so replanning identical inputs reproduces the same
+advice. Published advice is replaced only when evidence changes materially: a
+different stance needs confidence 0.05 above the manager's minimum, and a held stance
+is withdrawn only once it falls 0.05 below that minimum. Changes to confirmed
+decisions, lineup observations, availability notes, or the set of finals always
+publish. Postgame polls skip the search when the inputs match the published plan.
+
 ### Adding a free agent or waiver player
 
 You cannot add a player and receive points from a game they played before joining your roster. You may use the player for games going forward, provided they are in your starting lineup when those games are played.
