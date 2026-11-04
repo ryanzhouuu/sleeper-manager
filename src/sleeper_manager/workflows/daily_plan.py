@@ -50,6 +50,10 @@ from sleeper_manager.workflows.planning_inputs import (
 )
 from sleeper_manager.workflows.recovery_schedule import schedule_recovery_checks
 from sleeper_manager.workflows.score_confirmations import prepare_score_confirmations
+from sleeper_manager.workflows.sticky_advice import (
+    published_team_advice,
+    retains_published_advice,
+)
 
 _WEEKLY_LINEUP_PLACEHOLDER_PLAYER = "weekly-lineup"
 _DEFAULT_POLICY = WeeklyPlanPolicyConfig()
@@ -136,6 +140,18 @@ async def _run_weekly_lineup_workflow(
     notes = state_availability_notes(
         state, player_names=player_names, local_timezone=local_timezone
     )
+    published = (
+        None
+        if daily_confirmation
+        else await published_team_advice(repository, plan.league_id, plan.week, now=now)
+    )
+    if published is not None and retains_published_advice(
+        plan,
+        availability_notes=notes,
+        published=published[1],
+        minimum_confidence=(policy or _DEFAULT_POLICY).minimum_lock_in_confidence,
+    ):
+        return WeeklyLineupWorkflowResult("duplicate", plan, published[0], None, None)
     summary = state_availability_summary(
         state, player_names=player_names, local_timezone=local_timezone
     )
