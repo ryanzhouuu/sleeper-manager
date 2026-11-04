@@ -13,6 +13,7 @@ from sleeper_manager.decisions._weekly_plan_models import WeeklyPlanError
 from sleeper_manager.decisions._weekly_plan_moves import plan_moves
 from sleeper_manager.decisions._weekly_plan_recovery import recovery_bench_capacity
 from sleeper_manager.decisions.completed_scores import (
+    CompletedPlacement,
     compare_completed_scores,
     usable_completed_games,
 )
@@ -30,7 +31,7 @@ from sleeper_manager.domain.planning import (
     TeamWeekState,
     WeeklyPlan,
 )
-from sleeper_manager.domain.planning_actions import PlannedScoreAction
+from sleeper_manager.domain.planning_actions import PlannedScoreAction, UndecidedScore
 
 
 def score_deadline(
@@ -87,6 +88,7 @@ def build_team_recommendation(
     selected = comparison.selected if comparison else None
     locks = {(row.player_id, row.game_id): row for row in selected.locks} if selected else {}
     actions = []
+    undecided: list[UndecidedScore] = []
     for game in completed:
         key = (game.sleeper_player_id, game.game_id)
         slot = locks.get(key)
@@ -105,15 +107,21 @@ def build_team_recommendation(
         )
         alternative = max(opposing, key=lambda option: option.expected_score) if opposing else None
         confidence = (
-            sum(
-                a > b + config.tie_tolerance
-                for a, b in zip(selected.terminal_scores, alternative.terminal_scores, strict=True)
-            )
-            / len(selected.terminal_scores)
+            _win_rate(selected, alternative, config.tie_tolerance)
             if alternative is not None and selected is not None
             else 1.0
         )
         if slot is None and (alternative is None or confidence < config.minimum_lock_in_confidence):
+            undecided.append(
+                UndecidedScore(
+                    game.sleeper_player_id,
+                    game.game_id,
+                    confidence,
+                    _win_rate(alternative, selected, config.tie_tolerance)
+                    if alternative is not None and selected is not None
+                    else 0.0,
+                )
+            )
             continue
         placement_values: dict[int, float] = {}
         for option in comparison.alternatives:
@@ -288,6 +296,7 @@ def build_team_recommendation(
         fixed_slots=state.fixed_slots,
         passed_opportunities=state.passed_opportunities,
         score_actions=tuple(actions),
+        undecided_scores=tuple(undecided),
         pre_lock_move_count=len(pre_moves),
         recovery_obligations=tuple(
             {
@@ -305,6 +314,13 @@ def build_team_recommendation(
         confidence=PlanConfidence.MEDIUM if actions else plan.confidence,
     )
     return _with_roster(result, state)
+
+
+def _win_rate(choice: CompletedPlacement, other: CompletedPlacement, tolerance: float) -> float:
+    return sum(
+        a > b + tolerance
+        for a, b in zip(choice.terminal_scores, other.terminal_scores, strict=True)
+    ) / len(choice.terminal_scores)
 
 
 def _hold_in_place(

@@ -12,7 +12,11 @@ from sleeper_manager.domain._planning_validation import (
 )
 from sleeper_manager.domain.lineup_moves import LineupMove, apply_lineup_moves
 from sleeper_manager.domain.lock_in import LockInDecisionKind
-from sleeper_manager.domain.planning_actions import PlannedScoreAction, RecoveryObligation
+from sleeper_manager.domain.planning_actions import (
+    PlannedScoreAction,
+    RecoveryObligation,
+    UndecidedScore,
+)
 from sleeper_manager.domain.planning_evidence import (
     FixedSlot,
     FreshnessSummary,
@@ -61,6 +65,7 @@ class WeeklyPlan:
     recovery_failures: tuple[str, ...] = ()
     forfeited_opportunities: tuple[tuple[str, str], ...] = ()
     bench_player_ids: tuple[str, ...] = ()
+    undecided_scores: tuple[UndecidedScore, ...] = ()
 
     def __post_init__(self) -> None:
         _require_text(self.league_id, "Plan league ID")

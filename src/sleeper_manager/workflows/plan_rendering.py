@@ -224,6 +224,7 @@ def serialize_weekly_plan_trace(
         "week": plan.week,
         "roster_id": plan.roster_id,
         "score_actions": [asdict(row) for row in plan.score_actions],
+        "undecided_scores": [asdict(row) for row in plan.undecided_scores],
         "pre_lock_move_count": plan.pre_lock_move_count,
         "passes_before_moves": True,
         "recovery_obligations": [

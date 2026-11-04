@@ -43,6 +43,16 @@ class PlannedScoreAction:
 
 
 @dataclass(frozen=True, slots=True)
+class UndecidedScore:
+    """Keep both confidences for a final too close to advise, so later replans can compare."""
+
+    player_id: str
+    game_id: str
+    pass_confidence: float
+    lock_confidence: float
+
+
+@dataclass(frozen=True, slots=True)
 class RecoveryObligation:
     """Prove a joint return path that may discard only the named newly added attempts."""
 
