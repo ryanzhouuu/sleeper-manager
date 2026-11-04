@@ -33,6 +33,7 @@ from sleeper_manager.workflows.availability_advice import (
 from sleeper_manager.workflows.availability_rendering import state_availability_summary
 from sleeper_manager.workflows.current_team_plan import build_current_team_plan
 from sleeper_manager.workflows.daily_completion import notify_daily_completion
+from sleeper_manager.workflows.decision_inputs import decision_input_fingerprint
 from sleeper_manager.workflows.notification_loop import (
     Clock,
     NotificationLoop,
@@ -49,7 +50,10 @@ from sleeper_manager.workflows.planning_inputs import (
     LivePlanningInputs,
 )
 from sleeper_manager.workflows.recovery_schedule import schedule_recovery_checks
-from sleeper_manager.workflows.score_confirmations import prepare_score_confirmations
+from sleeper_manager.workflows.score_confirmations import (
+    prepare_score_confirmations,
+    restore_score_confirmations,
+)
 from sleeper_manager.workflows.sticky_advice import (
     published_team_advice,
     retains_published_advice,
@@ -151,6 +155,7 @@ async def _run_weekly_lineup_workflow(
         published=published[1],
         minimum_confidence=(policy or _DEFAULT_POLICY).minimum_lock_in_confidence,
     ):
+        await restore_score_confirmations(repository, published[1], now=now)
         return WeeklyLineupWorkflowResult("duplicate", plan, published[0], None, None)
     summary = state_availability_summary(
         state, player_names=player_names, local_timezone=local_timezone
@@ -160,10 +165,14 @@ async def _run_weekly_lineup_workflow(
     trace = append_availability_trace(
         serialize_weekly_plan_trace(plan, trigger=trigger), notes, material_hash
     )
-    if version is not None:
-        trace = json.dumps(
-            {**json.loads(trace), "manager_decision_version": version}, sort_keys=True
-        )
+    trace = json.dumps(
+        {
+            **json.loads(trace),
+            "input_fingerprint": decision_input_fingerprint(state, policy or _DEFAULT_POLICY),
+            **({"manager_decision_version": version} if version is not None else {}),
+        },
+        sort_keys=True,
+    )
     confirmations = await prepare_score_confirmations(
         repository,
         plan,

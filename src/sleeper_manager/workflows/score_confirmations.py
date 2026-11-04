@@ -1,8 +1,10 @@
 """Keep per-player confirmation identities inside a coordinated team recommendation."""
 
 import json
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime
+from typing import Any
 
 from sleeper_manager.domain.lock_in import LockInDecisionKind, LockInOpportunityStatus
 from sleeper_manager.domain.planning import WeeklyPlan
@@ -86,39 +88,68 @@ async def prepare_score_confirmations(
         await repository.create_recommendation(child)
         child = await repository.get_recommendation(child.recommendation_id) or child
         results.append(child)
-        getter = getattr(repository, "get_lock_in_opportunity", None)
-        updater = getattr(repository, "update_lock_in_opportunity", None)
-        if getter is None or updater is None:
-            continue
-        row = await getter(
-            LockInOpportunityKey(
-                plan.league_id, plan.week, plan.roster_id, action.player_id, action.game_id
-            )
+        await _mark_actionable(
+            repository, child, plan.roster_id, material_hash=plan.material_hash, now=now
         )
-        if row is not None and (
-            row.status is LockInOpportunityStatus.AUTOMATIC_FINAL
-            or row.status
-            not in {
-                LockInOpportunityStatus.ACKNOWLEDGED_LOCKED,
-                LockInOpportunityStatus.ACKNOWLEDGED_PASSED,
-                LockInOpportunityStatus.AUTOMATIC_FINAL,
-                LockInOpportunityStatus.INELIGIBLE,
-            }
-        ):
-            await updater(
-                replace(
-                    row,
-                    status=LockInOpportunityStatus.ACTIONABLE,
-                    current_recommendation_id=child.recommendation_id,
-                    current_recommendation_kind=child.decision_type,
-                    trace_json=child.trace_json,
-                    latest_evaluation_hash=plan.material_hash,
-                    updated_at=now,
-                ),
-                expected_version=row.row_version,
-            )
     current_ids = {row.recommendation_id for row in results}
     for old in pending:
         if old.recommendation_id not in current_ids:
             await repository.supersede_recommendation(old.recommendation_id, now)
     return tuple(results)
+
+
+async def restore_score_confirmations(
+    repository: AsyncStateRepository, trace: Mapping[str, Any], *, now: datetime
+) -> tuple[RecommendationRecord, ...]:
+    """Each poll resets its finals to Finalizing, so advice kept in place must re-mark them."""
+    children = []
+    for identity in trace.get("confirmation_targets", ()):
+        child = await repository.get_recommendation(identity)
+        if child is None or child.status is not RecommendationStatus.PENDING:
+            continue
+        await _mark_actionable(
+            repository, child, trace["roster_id"], material_hash=trace["material_hash"], now=now
+        )
+        children.append(child)
+    return tuple(children)
+
+
+async def _mark_actionable(
+    repository: AsyncStateRepository,
+    child: RecommendationRecord,
+    roster_id: int,
+    *,
+    material_hash: str,
+    now: datetime,
+) -> None:
+    getter = getattr(repository, "get_lock_in_opportunity", None)
+    updater = getattr(repository, "update_lock_in_opportunity", None)
+    if getter is None or updater is None or child.game_id is None:
+        return
+    row = await getter(
+        LockInOpportunityKey(
+            child.league_id, child.fantasy_week, roster_id, child.player_id, child.game_id
+        )
+    )
+    if row is not None and (
+        row.status is LockInOpportunityStatus.AUTOMATIC_FINAL
+        or row.status
+        not in {
+            LockInOpportunityStatus.ACKNOWLEDGED_LOCKED,
+            LockInOpportunityStatus.ACKNOWLEDGED_PASSED,
+            LockInOpportunityStatus.AUTOMATIC_FINAL,
+            LockInOpportunityStatus.INELIGIBLE,
+        }
+    ):
+        await updater(
+            replace(
+                row,
+                status=LockInOpportunityStatus.ACTIONABLE,
+                current_recommendation_id=child.recommendation_id,
+                current_recommendation_kind=child.decision_type,
+                trace_json=child.trace_json,
+                latest_evaluation_hash=material_hash,
+                updated_at=now,
+            ),
+            expected_version=row.row_version,
+        )

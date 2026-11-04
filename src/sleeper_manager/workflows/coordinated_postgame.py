@@ -13,11 +13,14 @@ from sleeper_manager.domain.runtime_policy import RuntimePolicy
 from sleeper_manager.persistence.base import AsyncRuntimeStateRepository
 from sleeper_manager.persistence.lock_in_opportunities import LockInOpportunityRecord
 from sleeper_manager.workflows.daily_plan import _run_weekly_lineup_workflow
+from sleeper_manager.workflows.decision_inputs import decision_input_fingerprint
 from sleeper_manager.workflows.notification_loop import NotificationLoop
 from sleeper_manager.workflows.planning_inputs import LivePlanningInputs
 from sleeper_manager.workflows.planning_policy import LIVE_PLAN_POLICY
 from sleeper_manager.workflows.postgame_types import PostgameLockInResult
 from sleeper_manager.workflows.postgame_warnings import blocked_postgame_advice
+from sleeper_manager.workflows.score_confirmations import restore_score_confirmations
+from sleeper_manager.workflows.sticky_advice import published_team_advice
 
 
 async def deliver_coordinated_postgame(
@@ -42,6 +45,21 @@ async def deliver_coordinated_postgame(
         seed=policy.config.seed if policy else 0,
         minimum_lock_in_confidence=runtime_policy.manager_intent.minimum_confidence,
     )
+    if not state.is_blocked and not state.recovery_obligations:
+        published = await published_team_advice(
+            repository, state.league_id, state.week, now=decision_time
+        )
+        if published is not None and published[1].get(
+            "input_fingerprint"
+        ) == decision_input_fingerprint(state, config):
+            children = await restore_score_confirmations(
+                repository, published[1], now=decision_time
+            )
+            observed = {(row.key.player_id, row.key.game_id) for row in stable}
+            return PostgameLockInResult(
+                "duplicate",
+                next((row for row in children if (row.player_id, row.game_id) in observed), None),
+            )
     coordinated = build_team_recommendation(
         state, lead_time=live_inputs.move_lead_time, policy=config
     )
