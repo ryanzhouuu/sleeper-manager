@@ -49,6 +49,17 @@ def _fixture(path: str) -> Any:
     return json.loads((FIXTURES / path).read_text())
 
 
+def test_sleeper_player_game_stats_reads_the_stats_host() -> None:
+    fetch = SequenceFetch(Response(200, {"3": []}))
+
+    payload = asyncio.run(CloudflareSleeperClient(fetch).player_game_stats("1511", 2026))
+
+    assert payload == {"3": []}
+    assert fetch.urls == [
+        "https://api.sleeper.com/stats/nba/player/1511?season_type=regular&season=2026&grouping=week"
+    ]
+
+
 @pytest.mark.parametrize("status", (429, 500, 503))
 def test_sleeper_fetch_retries_transient_http_once_and_validates_shape(status: int) -> None:
     fetch = SequenceFetch(

@@ -109,9 +109,11 @@ class CloudflareSleeperClient:
         fetcher: Any,
         *,
         base_url: str = "https://api.sleeper.app/v1",
+        stats_base_url: str = "https://api.sleeper.com/stats/nba",
         timeout: timedelta = timedelta(seconds=15),
     ) -> None:
         self._base_url = base_url.rstrip("/")
+        self._stats_base_url = stats_base_url.rstrip("/")
         self._client = _CloudflareJSONClient(fetcher, provider="Sleeper", timeout=timeout)
 
     def _url(self, path: str) -> str:
@@ -141,6 +143,11 @@ class CloudflareSleeperClient:
 
     async def state(self) -> dict[str, Any]:
         return await self._client.object(self._url("/state/nba"))
+
+    async def player_game_stats(self, player_id: str, season: int) -> dict[str, Any]:
+        """Read one player's regular-season game rows, grouped by fantasy week."""
+        query = urlencode({"season_type": "regular", "season": season, "grouping": "week"})
+        return await self._client.object(f"{self._stats_base_url}/player/{player_id}?{query}")
 
 
 class CloudflareESPNProvider:
