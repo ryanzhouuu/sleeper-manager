@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from sleeper_manager.cloudflare.dispatcher import dispatch_due_work, scheduled_at_from_controller
+from sleeper_manager.cloudflare.manager_context import read_tipoff_lineup
 from sleeper_manager.cloudflare.notifications import (
     CloudflareDiscordSender,
     CloudflareNtfySender,
@@ -180,6 +181,7 @@ async def run_scheduled(
             correlation_id=correlation,
             open_sleeper_url=open_sleeper_url,
             fetch_game_summary=CloudflareESPNProvider(fetcher, clock=tick).game_summary,
+            read_tipoff_lineup=lambda: read_tipoff_lineup(env, fetcher, tick),
             plan_policy=LIVE_PLAN_POLICY,
             clock=tick,
         )

@@ -13,6 +13,7 @@ from sleeper_manager.persistence.base import (
     ScheduledWorkStatus,
 )
 from sleeper_manager.workflows.planning_inputs import LivePlanningInputs
+from sleeper_manager.workflows.tipoff_evidence import AFTER_TIPOFF, BEFORE_TIPOFF
 
 _CRON_INTERVAL = timedelta(minutes=5)
 _MAX_OBSOLETE_CANCELLATIONS = 50
@@ -69,6 +70,59 @@ async def _replace_future_pre_tipoff(
                 status=ScheduledWorkStatus.PENDING,
                 game_id=game.provider_id,
                 deadline=game.start_time,
+                created_at=scheduled_at,
+                updated_at=scheduled_at,
+            )
+        )
+
+
+async def _replace_future_tipoff_reads(
+    repository: AsyncRuntimeStateRepository,
+    inputs: LivePlanningInputs,
+    scheduled_at: datetime,
+) -> None:
+    """Keep one before and one after read per distinct future tipoff, not per game."""
+    tipoffs = {
+        game.start_time
+        for game in _roster_games(inputs)
+        if game.start_time > scheduled_at
+        and game.status is GameStatus.SCHEDULED
+        and inputs.week_window.contains(game.start_time)
+    }
+    wanted = {
+        key: (due_at, deadline)
+        for tipoff in tipoffs
+        for key, due_at, deadline in (
+            (f"tipoff_evidence:before:{tipoff.isoformat()}", tipoff - BEFORE_TIPOFF, tipoff),
+            (
+                f"tipoff_evidence:after:{tipoff.isoformat()}",
+                tipoff + AFTER_TIPOFF,
+                tipoff + AFTER_TIPOFF + _CRON_INTERVAL,
+            ),
+        )
+    }
+    existing = await repository.list_scheduled_work(kind=DueWorkKind.TIPOFF_EVIDENCE)
+    for work in existing:
+        if (
+            work.status is ScheduledWorkStatus.PENDING
+            and work.dedupe_key not in wanted
+            and work.due_at > scheduled_at
+        ):
+            await repository.upsert_scheduled_work(
+                replace(work, status=ScheduledWorkStatus.CANCELED, updated_at=scheduled_at)
+            )
+    known = {work.dedupe_key for work in existing}
+    for key, (due_at, deadline) in wanted.items():
+        if key in known:
+            continue
+        await repository.upsert_scheduled_work(
+            ScheduledWorkRecord(
+                work_id=_work_id(key),
+                dedupe_key=key,
+                kind=DueWorkKind.TIPOFF_EVIDENCE,
+                due_at=due_at,
+                status=ScheduledWorkStatus.PENDING,
+                deadline=deadline,
                 created_at=scheduled_at,
                 updated_at=scheduled_at,
             )

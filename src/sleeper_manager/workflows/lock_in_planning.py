@@ -363,6 +363,7 @@ def _merge_planning_evidence(
         roster_evidence_at=(
             candidate.roster_evidence_at if newer_evidence else current.roster_evidence_at
         ),
+        tipoff_unverified=False if newer_evidence else current.tipoff_unverified,
         league_configuration_fingerprint=candidate.league_configuration_fingerprint,
         updated_at=candidate.updated_at,
         trace_json=json.dumps({**current_trace, "eligibility_forfeited": forfeited}),

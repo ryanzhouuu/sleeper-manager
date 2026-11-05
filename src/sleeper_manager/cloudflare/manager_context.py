@@ -1,6 +1,7 @@
 """Resolve editor scope from the configured Sleeper owner, never submitted identity fields."""
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
@@ -19,6 +20,7 @@ from sleeper_manager.integrations.sleeper.schemas import (
 )
 from sleeper_manager.integrations.sleeper.weekly_lineup import with_matchup_starters
 from sleeper_manager.persistence.manager_store import D1ManagerStore
+from sleeper_manager.workflows.tipoff_evidence import TipoffLineup
 
 
 @dataclass(frozen=True)
@@ -40,12 +42,10 @@ class ManagerContext:
         return None
 
 
-async def load_manager_context(
-    env: Any, fetcher: Any, store: D1ManagerStore, now: datetime
-) -> ManagerContext:
-    """Fail closed if the manager, current week, or starter alignment is ambiguous."""
-    league_id, user_id = str(env.SLEEPER_LEAGUE_ID), str(env.SLEEPER_USER_ID)
-    sleeper = CloudflareSleeperClient(fetcher)
+async def _owned_lineup(
+    sleeper: CloudflareSleeperClient, league_id: str, user_id: str
+) -> tuple[SleeperRosterPayload, int, tuple[str, ...], tuple[str, ...]]:
+    """Read the owner's roster, week, starting positions, and aligned starters."""
     league_raw, rosters_raw, state_raw = await asyncio.gather(
         sleeper.league(league_id), sleeper.rosters(league_id), sleeper.state()
     )
@@ -64,14 +64,45 @@ async def load_manager_context(
     occupied = [player for player in starters if player not in {"", "0"}]
     if len(positions) != len(starters) or len(set(occupied)) != len(occupied):
         raise ValueError("Starter alignment unavailable")
+    return owned[0], week, positions, starters
+
+
+async def read_tipoff_lineup(env: Any, fetcher: Any, clock: Callable[[], datetime]) -> TipoffLineup:
+    """Read only the lineup; tipoff evidence needs no schedule, injury, or player data."""
+    league_id = str(env.SLEEPER_LEAGUE_ID)
+    owned, week, positions, starters = await _owned_lineup(
+        CloudflareSleeperClient(fetcher), league_id, str(env.SLEEPER_USER_ID)
+    )
+    return TipoffLineup(
+        league_id,
+        week,
+        owned.roster_id,
+        {
+            player: (index, positions[index])
+            for index, player in enumerate(starters)
+            if player not in {"", "0"}
+        },
+        read_at=clock(),
+    )
+
+
+async def load_manager_context(
+    env: Any, fetcher: Any, store: D1ManagerStore, now: datetime
+) -> ManagerContext:
+    """Fail closed if the manager, current week, or starter alignment is ambiguous."""
+    league_id = str(env.SLEEPER_LEAGUE_ID)
+    sleeper = CloudflareSleeperClient(fetcher)
+    owned, week, positions, starters = await _owned_lineup(
+        sleeper, league_id, str(env.SLEEPER_USER_ID)
+    )
     timezone = str(getattr(env, "TIMEZONE", "America/Chicago"))
     loaded = await load_player_identities(sleeper, store, timezone_name=timezone, now=now)
     identities, cached = loaded if loaded is not None else ({}, False)
     if loaded is not None and not cached:
         espn = CloudflareESPNProvider(fetcher, clock=lambda: now)
-        if await fill_espn_ids(espn, identities, owned[0].players):
+        if await fill_espn_ids(espn, identities, owned.players):
             await remember_identities(store, identities, timezone_name=timezone, now=now)
     names = {key: value.name or key for key, value in identities.items()}
     return ManagerContext(
-        league_id, week, owned[0].roster_id, positions, starters, names, timezone, identities
+        league_id, week, owned.roster_id, positions, starters, names, timezone, identities
     )

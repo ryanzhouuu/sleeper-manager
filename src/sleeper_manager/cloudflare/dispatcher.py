@@ -13,7 +13,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from sleeper_manager.cloudflare.planning import CloudflarePlanningAssembly
-from sleeper_manager.cloudflare.planning_schedule import _replace_future_pre_tipoff, _work_id
+from sleeper_manager.cloudflare.planning_schedule import (
+    _replace_future_pre_tipoff,
+    _replace_future_tipoff_reads,
+    _work_id,
+)
 from sleeper_manager.cloudflare.postgame_dispatch import dispatch_postgame_work
 from sleeper_manager.cloudflare.scheduled_recovery import recover_claimed_work, scheduled_stage
 from sleeper_manager.cloudflare.scheduler_types import (
@@ -23,6 +27,7 @@ from sleeper_manager.cloudflare.scheduler_types import (
     ScheduledRunSummary,
     WorkAttemptSummary,
 )
+from sleeper_manager.cloudflare.tipoff_dispatch import TipoffLineupReader, dispatch_tipoff_reads
 from sleeper_manager.decisions.weekly_plan import WeeklyPlanPolicyConfig
 from sleeper_manager.domain.runtime_policy import RuntimePolicy, RuntimePolicyError
 from sleeper_manager.domain.scheduling import manager_daily_schedule, manager_local_day
@@ -77,6 +82,7 @@ async def dispatch_due_work(
     plan_policy: WeeklyPlanPolicyConfig | None = None,
     clock: Callable[[], datetime] | None = None,
     fetch_game_summary: DirectGameSummarySource | None = None,
+    read_tipoff_lineup: TipoffLineupReader | None = None,
 ) -> ScheduledRunSummary:
     """Dispatch claimed daily, pre-tipoff, postgame, and delivery-retry rows for this wake."""
     if scheduled_at.tzinfo is None or scheduled_at.utcoffset() is None:
@@ -108,14 +114,27 @@ async def dispatch_due_work(
     planning = tuple(
         item
         for item in claimed
-        if item.kind not in {DueWorkKind.DELIVERY_RETRY, DueWorkKind.POSTGAME}
+        if item.kind
+        not in {DueWorkKind.DELIVERY_RETRY, DueWorkKind.POSTGAME, DueWorkKind.TIPOFF_EVIDENCE}
     )
+    tipoff_reads = tuple(item for item in claimed if item.kind is DueWorkKind.TIPOFF_EVIDENCE)
     postgame = tuple(item for item in claimed if item.kind is DueWorkKind.POSTGAME)
     retries = tuple(item for item in claimed if item.kind is DueWorkKind.DELIVERY_RETRY)
     attempts: list[WorkAttemptSummary] = []
     async with recover_claimed_work(
         repository, claimed, attempts, correlation_id=correlation_id, clock=tick
     ):
+        if tipoff_reads:
+            attempts.extend(
+                await dispatch_tipoff_reads(
+                    repository,
+                    tipoff_reads,
+                    read_lineup=read_tipoff_lineup,
+                    scheduled_at=scheduled_at,
+                    correlation_id=correlation_id,
+                    clock=tick,
+                )
+            )
         if planning:
             attempts.extend(
                 await _run_planning(
@@ -130,6 +149,7 @@ async def dispatch_due_work(
                     plan_policy=plan_policy,
                     clock=tick,
                     fetch_game_summary=fetch_game_summary,
+                    schedule_tipoff_reads=read_tipoff_lineup is not None,
                 )
             )
         if postgame:
@@ -214,6 +234,7 @@ async def _run_planning(
     plan_policy: WeeklyPlanPolicyConfig | None,
     clock: Callable[[], datetime],
     fetch_game_summary: DirectGameSummarySource | None = None,
+    schedule_tipoff_reads: bool = False,
 ) -> tuple[WorkAttemptSummary, ...]:
     trigger = (
         "pre_tipoff" if any(item.kind is DueWorkKind.PRE_TIPOFF for item in claimed) else "daily"
@@ -254,6 +275,8 @@ async def _run_planning(
             planning_inputs,
             scheduled_at,
         )
+        if schedule_tipoff_reads:
+            await _replace_future_tipoff_reads(repository, planning_inputs, scheduled_at)
     with scheduled_stage("lock_in_sync", FailureCategory.PERSISTENCE):
         await sync_live_lock_in_opportunities(
             planning_inputs,
