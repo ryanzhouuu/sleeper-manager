@@ -46,14 +46,18 @@ def option_candidates(
 
 
 def protected_performances(state: TeamWeekState) -> tuple[GameOpportunity, ...]:
-    """Retain active trials and still-eligible finals whose score has not been verified."""
+    """Retain still-lockable live games and finals whose score has not been verified."""
     passed = {(row.player_id, row.game_id) for row in state.passed_opportunities}
     return tuple(
         game
         for game in state.opportunities
         if (game.sleeper_player_id, game.game_id) not in state.recovery_forfeitures
         and (
-            game.status is PlanningGameStatus.ACTIVE
+            (
+                game.status is PlanningGameStatus.ACTIVE
+                and game.rostered_at_tipoff is not False
+                and game.eligible_slot_indices
+            )
             or (
                 game.status is PlanningGameStatus.FINAL
                 and game.completed_fantasy_score is None
