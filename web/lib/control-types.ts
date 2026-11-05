@@ -1,5 +1,6 @@
 /** Private control documents are independent of the public dashboard response. */
-export type DecisionAction = "not_locked" | "locked" | "passed";
+export type DecisionAction =
+  "not_locked" | "locked" | "passed" | "not_lockable" | "lockable";
 export type ControlOperation = "login" | "save" | "replan" | "logout";
 
 export interface DecisionGame {
@@ -12,6 +13,7 @@ export interface DecisionGame {
   deadline: string;
   score: number | null;
   action: DecisionAction;
+  choices: DecisionAction[];
   advisor: string;
   saved: string;
   portrait_url: string | null;
@@ -30,6 +32,7 @@ export interface ManagerDocument {
   plan: { title: string; message: string } | null;
   active: DecisionGame[];
   saved: DecisionGame[];
+  reopenable: DecisionGame[];
   past: { name: string; start: string; score: number; state: string }[];
   history: {
     name: string;

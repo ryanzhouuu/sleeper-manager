@@ -27,6 +27,19 @@ describe("decision cards", () => {
     expect(html).toContain('name="action_2" checked="" value="not_locked"');
   });
 
+  it("offers the actions that settle an uncertain game", () => {
+    const html = renderToStaticMarkup(
+      <DecisionCard
+        game={{ ...game, choices: ["not_locked", "lockable"] }}
+        index={0}
+        timezone="America/Chicago"
+      />,
+    );
+    expect(html).toContain('value="lockable"');
+    expect(html).toContain("Sleeper shows a lock");
+    expect(html).not.toContain('value="locked"');
+  });
+
   it("escapes provider names in headings and accessible descriptions", () => {
     const html = renderToStaticMarkup(
       <DecisionCard

@@ -3,7 +3,13 @@ import Image from "next/image";
 import { ACTION_LABELS } from "@/lib/control-document";
 import type { DecisionAction, DecisionGame } from "@/lib/control-types";
 
-export const CHOICES: DecisionAction[] = ["not_locked", "locked", "passed"];
+const CHOICE_TEXT: Record<DecisionAction, string> = {
+  not_locked: "Wait",
+  locked: "Lock",
+  passed: "Pass",
+  not_lockable: "Not lockable",
+  lockable: "Sleeper shows a lock",
+};
 
 export function ControlIcon({ kind }: { kind: DecisionAction | "arrow" }) {
   const paths = {
@@ -22,6 +28,18 @@ export function ControlIcon({ kind }: { kind: DecisionAction | "arrow" }) {
     passed: (
       <>
         <path d="m5 5 10 7-10 7V5Zm14 0v14" />
+      </>
+    ),
+    not_lockable: (
+      <>
+        <circle cx="12" cy="12" r="8" />
+        <path d="m7 7 10 10" />
+      </>
+    ),
+    lockable: (
+      <>
+        <rect x="5" y="10" width="14" height="11" rx="2" />
+        <path d="M8 10V7a4 4 0 017-2.6" />
       </>
     ),
     arrow: <path d="M4 12h16m-6-6l6 6-6 6" />,
@@ -143,7 +161,7 @@ export function DecisionCard({
       <input type="hidden" name={`version_${index}`} value={game.version} />
       <fieldset className="decision-choices">
         <legend className="control-sr">Your choice for {game.name}</legend>
-        {CHOICES.map((action) => (
+        {game.choices.map((action) => (
           <label
             className="decision-choice"
             key={action}
@@ -158,11 +176,7 @@ export function DecisionCard({
             />
             <span className="decision-option">
               <ControlIcon kind={action} />
-              {action === "locked"
-                ? "Lock"
-                : action === "passed"
-                  ? "Pass"
-                  : "Wait"}
+              {CHOICE_TEXT[action]}
             </span>
           </label>
         ))}

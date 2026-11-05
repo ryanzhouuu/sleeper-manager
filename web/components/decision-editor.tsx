@@ -25,7 +25,7 @@ export function DecisionEditor({
     operation: ControlOperation,
   ) => void;
 }) {
-  const games = [...document.active, ...document.saved];
+  const games = [...document.active, ...document.saved, ...document.reopenable];
   return (
     <>
       {document.pending ? (
@@ -117,6 +117,26 @@ export function DecisionEditor({
                   <DecisionCard
                     game={game}
                     index={document.active.length + index}
+                    timezone={document.timezone}
+                    key={`${game.player_id}:${game.game_id}`}
+                  />
+                ))}
+              </details>
+            ) : null}
+            {document.reopenable.length ? (
+              <details>
+                <summary>
+                  Marked ineligible · {document.reopenable.length}
+                </summary>
+                <p className="control-muted">
+                  Use this if Sleeper shows a lock for the game.
+                </p>
+                {document.reopenable.map((game, index) => (
+                  <DecisionCard
+                    game={game}
+                    index={
+                      document.active.length + document.saved.length + index
+                    }
                     timezone={document.timezone}
                     key={`${game.player_id}:${game.game_id}`}
                   />

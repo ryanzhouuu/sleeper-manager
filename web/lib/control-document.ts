@@ -9,7 +9,11 @@ export const ACTION_LABELS: Record<DecisionAction, string> = {
   not_locked: "Wait",
   locked: "Locked in Sleeper",
   passed: "Passed",
+  not_lockable: "Not lockable",
+  lockable: "Sleeper shows a lock",
 };
+
+const DEFAULT_CHOICES: DecisionAction[] = ["not_locked", "locked", "passed"];
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value))
@@ -48,7 +52,13 @@ function moment(value: unknown): string {
 }
 
 function action(value: unknown): DecisionAction {
-  if (value !== "not_locked" && value !== "locked" && value !== "passed")
+  if (
+    value !== "not_locked" &&
+    value !== "locked" &&
+    value !== "passed" &&
+    value !== "not_lockable" &&
+    value !== "lockable"
+  )
     throw new Error("Invalid action");
   return value;
 }
@@ -60,6 +70,10 @@ function image(value: unknown): string | null {
   if (url.origin !== "https://a.espncdn.com" || url.username || url.password)
     throw new Error("Invalid image");
   return url.href;
+}
+
+function invalidChoices(): never {
+  throw new Error("Invalid choices");
 }
 
 function game(row: Record<string, unknown>): DecisionGame {
@@ -76,6 +90,12 @@ function game(row: Record<string, unknown>): DecisionGame {
     deadline: moment(row.deadline),
     score: row.score === null ? null : number(row.score),
     action: action(row.action),
+    choices:
+      row.choices === undefined
+        ? DEFAULT_CHOICES
+        : (Array.isArray(row.choices) ? row.choices : invalidChoices()).map(
+            action,
+          ),
     advisor: text(row.advisor),
     saved: text(row.saved),
     portrait_url: image(row.portrait_url),
@@ -101,7 +121,11 @@ export function parseControlDocument(value: unknown): ControlDocument {
     case "confirmation": {
       const decision = action(row.action);
       const token = text(row.token);
-      if (decision === "not_locked" || !token || token.length > 256)
+      if (
+        (decision !== "locked" && decision !== "passed") ||
+        !token ||
+        token.length > 256
+      )
         throw new Error("Invalid confirmation");
       return {
         status: "confirmation",
@@ -132,6 +156,8 @@ export function parseControlDocument(value: unknown): ControlDocument {
         plan: plan && { title: text(plan.title), message: text(plan.message) },
         active: list(row.active, game),
         saved: list(row.saved, game),
+        reopenable:
+          row.reopenable === undefined ? [] : list(row.reopenable, game),
         past: list(row.past, (item) => ({
           name: text(item.name),
           start: moment(item.start),
