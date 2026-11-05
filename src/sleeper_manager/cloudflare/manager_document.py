@@ -7,9 +7,11 @@ from uuid import uuid4
 from sleeper_manager.cloudflare.home_document import player_image_url, team_image_url
 from sleeper_manager.cloudflare.manager_context import ManagerContext
 from sleeper_manager.cloudflare.manager_games import (
+    decision_choices,
     lockable_games,
     recommendation_for,
     recorded_state,
+    reopenable_games,
 )
 from sleeper_manager.persistence.base import RecommendationRecord
 from sleeper_manager.persistence.lock_in_opportunities import LockInOpportunityRecord
@@ -28,7 +30,8 @@ def editor_document(
     """Keep private row versions and CSRF proofs out of the public home document."""
     active = lockable_games(records, context, now)
     saved = tuple(row for row in records if row.acknowledged_action)
-    visible = {row.key for row in (*active, *saved)}
+    reopenable = reopenable_games(records, context, now)
+    visible = {row.key for row in (*active, *saved, *reopenable)}
     advice = None if pending else plan
 
     def card(row: LockInOpportunityRecord) -> dict[str, object]:
@@ -45,6 +48,7 @@ def editor_document(
             "deadline": row.action_deadline.isoformat(),
             "score": row.stable_score,
             "action": row.acknowledged_action or "not_locked",
+            "choices": list(decision_choices(row)),
             "advisor": recommendation_for(row, advice, now),
             "saved": recorded_state(row, now),
             "portrait_url": player_image_url(identity.espn_id) if identity else None,
@@ -63,6 +67,7 @@ def editor_document(
         "plan": {"title": plan.title, "message": plan.message} if plan and not pending else None,
         "active": [card(row) for row in active],
         "saved": [card(row) for row in saved],
+        "reopenable": [card(row) for row in reopenable],
         "past": [
             {
                 "name": context.names.get(row.key.player_id, row.key.player_id),

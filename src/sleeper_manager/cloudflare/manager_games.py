@@ -36,6 +36,37 @@ def lockable_games(
     return tuple(sorted(result, key=lambda r: (r.action_deadline, r.key.player_id)))
 
 
+def reopenable_games(
+    records: tuple[LockInOpportunityRecord, ...], context: ManagerContext, now: datetime
+) -> tuple[LockInOpportunityRecord, ...]:
+    """Offer the override for a starter's newest started game while it can still be locked."""
+    latest: dict[str, LockInOpportunityRecord] = {}
+    for row in sorted(records, key=lambda r: (r.scheduled_start, r.key.game_id)):
+        if row.scheduled_start < now:
+            latest[row.key.player_id] = row
+    return tuple(
+        sorted(
+            (
+                row
+                for row in latest.values()
+                if row.status is Status.INELIGIBLE
+                and now < min(row.action_deadline, row.fantasy_week_end)
+                and context.actual_slot(row.key.player_id) is not None
+            ),
+            key=lambda r: (r.action_deadline, r.key.player_id),
+        )
+    )
+
+
+def decision_choices(row: LockInOpportunityRecord) -> tuple[str, ...]:
+    """Unverified and ineligible games offer the actions that settle them."""
+    if row.status is Status.INELIGIBLE:
+        return ("not_locked", "lockable")
+    if row.tipoff_unverified:
+        return ("not_locked", "locked", "passed", "not_lockable")
+    return ("not_locked", "locked", "passed")
+
+
 def recommendation_for(
     row: LockInOpportunityRecord, plan: RecommendationRecord | None, now: datetime
 ) -> str:
@@ -88,6 +119,8 @@ def recorded_state(
         for other in records
     ):
         return "Passed · next game started"
+    if row.tipoff_unverified:
+        return "Check Sleeper"
     if row.rostered_at_tipoff is not True or row.status is Status.RECONCILIATION_REQUIRED:
         return "Eligibility unverified"
     return "Wait"

@@ -29,6 +29,7 @@ def player_game_evidence(record: LockInOpportunityRecord) -> PlayerGameEvidence:
         scheduled_start=record.scheduled_start,
         provider_player_id=record.provider_player_id,
         eligible_positions=record.eligible_positions,
+        tipoff_unverified=record.tipoff_unverified,
     )
 
 
@@ -80,6 +81,7 @@ def reconcile_player_games(
                 completed_fantasy_score=score,
                 finalized_at=row.stabilized_at if score is not None else game.finalized_at,
                 data_quality="retained-roster-observations",
+                tipoff_unverified=row.tipoff_unverified,
             )
         )
     finalized = {

@@ -11,6 +11,7 @@ import pytest
 from sleeper_manager.domain.lock_in import LockInOpportunityStatus
 from sleeper_manager.persistence.base import (
     AcknowledgementAction,
+    DueWorkKind,
     RecommendationRecord,
     RecommendationStatus,
 )
@@ -21,7 +22,11 @@ from sleeper_manager.persistence.lock_in_opportunities import (
 )
 from sleeper_manager.persistence.manager_store import D1ManagerStore
 from sleeper_manager.workflows.lock_in_evidence import evidence_from_lock_in_opportunity
-from sleeper_manager.workflows.manager_decisions import ManagerAction, reported_decision
+from sleeper_manager.workflows.manager_decisions import (
+    ManagerAction,
+    ManagerEdit,
+    reported_decision,
+)
 from tests.sleeper_manager.persistence.test_d1 import FakeD1
 
 NOW = datetime(2026, 10, 22, 21, tzinfo=UTC)
@@ -250,3 +255,44 @@ def test_concurrent_duplicate_id_cannot_apply_to_a_different_game(store, monkeyp
     )
     assert asyncio.run(store.get_lock_in_opportunity(other.key)).acknowledged_action == "locked"
     assert len(asyncio.run(store.decision_history("league", 1, 1))) == 1
+
+
+def _with_owner_actions(store) -> None:  # type: ignore[no-untyped-def]
+    connection = store._database.connection
+    connection.executescript(
+        """
+        ALTER TABLE manager_decision_changes RENAME TO old_changes;
+        CREATE TABLE manager_decision_changes AS SELECT * FROM old_changes WHERE 0;
+        DROP TABLE old_changes;
+        """
+    )
+
+
+def test_override_saves_eligibility_and_queues_a_score_recheck(store) -> None:  # type: ignore[no-untyped-def]
+    _with_owner_actions(store)
+    current = replace(
+        row(store),
+        status=LockInOpportunityStatus.INELIGIBLE,
+        rostered_at_tipoff=False,
+        acknowledged_action=None,
+        acknowledged_at=None,
+        stable_score=None,
+    )
+    asyncio.run(store.update_lock_in_opportunity(current, expected_version=current.row_version))
+    current = row(store)
+
+    saved = asyncio.run(
+        store.save_decisions(
+            (ManagerEdit(current, ManagerAction.LOCKABLE, (0, "PF")),),
+            batch_id="batch-1",
+            now=NOW,
+        )
+    )
+
+    assert saved
+    updated = row(store)
+    assert updated.status is LockInOpportunityStatus.ACTIVE
+    assert updated.rostered_at_tipoff is True
+    assert updated.tipoff_unverified is True
+    work = asyncio.run(store.list_scheduled_work(kind=DueWorkKind.POSTGAME))
+    assert [item.game_id for item in work] == [KEY.game_id]

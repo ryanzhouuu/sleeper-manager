@@ -136,6 +136,7 @@ class GameOpportunity:
     finalized_at: datetime | None
     source_lineage: tuple[SourceLineage, ...] = ()
     data_quality: str = "complete"
+    tipoff_unverified: bool = False
 
     def __post_init__(self) -> None:
         _require_text(self.sleeper_player_id, "Sleeper player ID")

@@ -124,6 +124,9 @@ Plan and Saved states separate; full advice and help are expandable.
 Expired or forfeited performances move to history with their reason; confirmed locks
 remain visible. Saving retains correction history and queues a fresh plan; see
 [owner controls](infra/cloudflare/README.md#owner-controls) for access setup.
+A game whose tipoff eligibility could not be verified still gets advice and asks you
+to check that Sleeper shows a lock. **Not lockable** settles it as ineligible, and
+**Sleeper shows a lock** reopens an ineligible game before its deadline.
 
 The Next.js dashboard, owner editor, and notification confirmation pages deploy
 together on Vercel; Python planning, scheduling, and persistence stay on Cloudflare.

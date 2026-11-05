@@ -1,5 +1,9 @@
 """Atomic correction statements use the inserted audit row as their write guard."""
 
+import json
+
+from sleeper_manager.persistence.lock_in_opportunities import LockInOpportunityRecord
+
 INSERT_CHANGE = """
 INSERT OR IGNORE INTO manager_decision_changes (
     change_id,write_id,league_id,fantasy_week,roster_id,player_id,game_id,action,
@@ -21,6 +25,7 @@ WHERE league_id=? AND fantasy_week=? AND roster_id=? AND player_id=? AND game_id
 UPDATE_DECISION = """
 UPDATE lock_in_opportunities SET status=?,slot_index=?,slot_position=?,
     acknowledged_action=?,acknowledged_at=?,next_check_at=?,latest_evaluation_hash=NULL,
+    rostered_at_tipoff=?,tipoff_unverified=?,eligible_positions_json=?,trace_json=?,
     row_version=row_version+1,updated_at=?
 WHERE league_id=? AND fantasy_week=? AND roster_id=? AND player_id=? AND game_id=?
   AND row_version=? AND EXISTS (
@@ -50,6 +55,13 @@ DELETE FROM lock_acknowledgements WHERE recommendation_id IN (
 ) AND EXISTS (SELECT 1 FROM manager_decision_changes WHERE change_id=? AND write_id=?)
 """
 
+INSERT_SCORE_RECHECK = """
+INSERT OR IGNORE INTO scheduled_work
+    (work_id,dedupe_key,kind,due_at,status,game_id,deadline,created_at,updated_at)
+SELECT ?,?,'postgame',?,'pending',?,?,?,?
+WHERE EXISTS (SELECT 1 FROM manager_decision_changes WHERE change_id=? AND write_id=?)
+"""
+
 INSERT_REPLAN = """
 INSERT OR IGNORE INTO scheduled_work (
     work_id,dedupe_key,kind,due_at,status,deadline,created_at,updated_at
@@ -57,3 +69,13 @@ INSERT OR IGNORE INTO scheduled_work (
 SELECT ?,?,'daily',?,'pending',?,?,?
 WHERE EXISTS (SELECT 1 FROM manager_decision_changes WHERE change_id=? AND write_id=?)
 """
+
+
+def decision_evidence_values(record: LockInOpportunityRecord) -> tuple[object, ...]:
+    """Encode the eligibility fields an owner's correction can change."""
+    return (
+        None if record.rostered_at_tipoff is None else int(record.rostered_at_tipoff),
+        int(record.tipoff_unverified),
+        json.dumps(record.eligible_positions, separators=(",", ":")),
+        record.trace_json,
+    )

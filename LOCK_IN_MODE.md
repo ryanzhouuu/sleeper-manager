@@ -53,6 +53,9 @@ An active starter must not be treated as locked, but a lineup update must not si
 ### Advisor and replay requirements
 
 - Capture Lock-In eligibility from the lineup that existed when each game began.
+  No read lands exactly at tipoff, so live advice reads the lineup 5 minutes before
+  and 10 minutes after each scheduled tip. A player benched before and starting after
+  is unverified: they keep normal advice, and the manager confirms in Sleeper.
 - Preserve every active starter in subsequent target lineups unless the policy explicitly chooses to forfeit that player-game performance.
 - Allow an active starter to move between eligible starting positions and retain the original player-game eligibility record.
 - Record an active starter's move to the bench as an irreversible loss of eligibility for that player-game performance.

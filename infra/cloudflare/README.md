@@ -118,6 +118,10 @@ The history lists manual corrections; existing notification acknowledgements
 remain stored separately. A correction cannot restore a performance forfeited by
 a bench transition or an elapsed deadline.
 
+An unverified game also offers **Not lockable**, and an ineligible game for a current
+starter offers **Sleeper shows a lock** until its deadline. Apply
+`0007_tipoff_evidence.sql` before deploying these controls.
+
 `POST /manage/login`, `/manage/save`, `/manage/replan`, and `/manage/logout` require the same origin.
 Form pages use `Referrer-Policy: same-origin` to preserve browser POST origins
 while withholding referrers from external sites.

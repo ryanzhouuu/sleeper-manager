@@ -11,15 +11,30 @@ from sleeper_manager.cloudflare.home_document import player_image_url, team_imag
 from sleeper_manager.cloudflare.manager_context import ManagerContext
 from sleeper_manager.cloudflare.manager_document import editor_document
 from sleeper_manager.cloudflare.manager_games import (
+    decision_choices,
     lockable_games,
     recommendation_for,
     recorded_state,
+    reopenable_games,
 )
 from sleeper_manager.cloudflare.manager_icons import icon
 from sleeper_manager.persistence.base import RecommendationRecord
 from sleeper_manager.persistence.lock_in_opportunities import LockInOpportunityRecord
 
-LABELS = {"not_locked": "Wait", "locked": "Locked in Sleeper", "passed": "Passed"}
+LABELS = {
+    "not_locked": "Wait",
+    "locked": "Locked in Sleeper",
+    "passed": "Passed",
+    "not_lockable": "Not lockable",
+    "lockable": "Sleeper shows a lock",
+}
+_SHORT_LABELS = {
+    "not_locked": ("wait", "Wait"),
+    "locked": ("lock", "Lock"),
+    "passed": ("pass", "Pass"),
+    "not_lockable": ("pass", "Not lockable"),
+    "lockable": ("lock", "Sleeper shows a lock"),
+}
 
 
 def login_page(*, rejected: bool = False) -> FormPage:
@@ -69,10 +84,8 @@ def decision_card(
         f'<input type="radio" name="action_{index}" aria-label="{escape(LABELS[value])}" '
         f'value="{value}"{" checked" if value == action else ""}>'
         f'<span class="option">{icon(symbol)}{label}</span></label>'
-        for value, symbol, label in (
-            ("not_locked", "wait", "Wait"),
-            ("locked", "lock", "Lock"),
-            ("passed", "pass", "Pass"),
+        for value, (symbol, label) in (
+            (choice, _SHORT_LABELS[choice]) for choice in decision_choices(record)
         )
     )
     score = "—" if record.stable_score is None else f"{record.stable_score:.2f}"
@@ -163,18 +176,29 @@ def editor_page(
             )
             + "</details>"
         )
-    if active or corrections:
+    reopenable = reopenable_games(records, context, now)
+    if reopenable:
+        cards += "<details><summary>Marked ineligible · " + str(len(reopenable)) + "</summary>"
+        cards += '<p class="muted">Use this if Sleeper shows a lock for the game.</p>'
+        cards += (
+            "".join(
+                decision_card(row, context, i, now=now, plan=advice)
+                for i, row in enumerate(reopenable, start=len(active) + len(corrections))
+            )
+            + "</details>"
+        )
+    if active or corrections or reopenable:
         cards = (
             '<form method="post" action="/manage/save">'
             + hidden("csrf", csrf)
             + hidden("batch_id", uuid4().hex)
-            + hidden("count", len(active) + len(corrections))
+            + hidden("count", len(active) + len(corrections) + len(reopenable))
             + f'<h2 class="section-heading">To review <span class="count">{len(active)}</span></h2>'
             + cards
             + '<div class="save-bar"><small>Updates your plan</small>'
             '<button type="submit">Save &amp; replan ' + icon("arrow") + "</button></div></form>"
         )
-    visible = {row.key for row in (*active, *corrections)}
+    visible = {row.key for row in (*active, *corrections, *reopenable)}
     past = "".join(
         f"<li>{escape(context.names.get(row.key.player_id, row.key.player_id))} · "
         f"{escape(_moment(row.scheduled_start, context))} · {row.stable_score:.2f} pts<br>"

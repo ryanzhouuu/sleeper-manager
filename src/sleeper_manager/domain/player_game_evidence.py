@@ -24,3 +24,4 @@ class PlayerGameEvidence:
     scheduled_start: datetime | None = None
     provider_player_id: str | None = None
     eligible_positions: tuple[str, ...] = ()
+    tipoff_unverified: bool = False

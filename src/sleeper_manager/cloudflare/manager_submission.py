@@ -35,9 +35,19 @@ async def save_manager_form(
         if version != current.row_version:
             return False, False
         if action.value != (current.acknowledged_action or "not_locked"):
+            positions = current.eligible_positions or next(
+                (
+                    row.eligible_positions
+                    for row in records
+                    if row.key.player_id == key[0] and row.eligible_positions
+                ),
+                (),
+            )
             edits.append(
                 ManagerEdit(
-                    replace(current, row_version=version), action, context.actual_slot(key[0])
+                    replace(current, row_version=version, eligible_positions=positions),
+                    action,
+                    context.actual_slot(key[0]),
                 )
             )
     saved = await store.save_decisions(tuple(edits), batch_id=batch_id, now=now)

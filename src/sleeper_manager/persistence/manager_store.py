@@ -19,6 +19,7 @@ from sleeper_manager.persistence.manager_sql import (
     REMOVE_LOCK_INDEX,
     SUPERSEDE_DECISIONS,
     UPDATE_DECISION,
+    decision_evidence_values,
 )
 from sleeper_manager.workflows.manager_decisions import (
     ManagerAction,
@@ -137,6 +138,7 @@ class D1ManagerStore(D1StateRepository):
                     updated.acknowledged_action,
                     updated.acknowledged_at.isoformat() if updated.acknowledged_at else None,
                     stamp,
+                    *decision_evidence_values(updated),
                     stamp,
                     *lock_in_key_values(key),
                     current.row_version,

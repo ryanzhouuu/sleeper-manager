@@ -12,6 +12,30 @@ INJURY_DATA_UNAVAILABLE_NOTE = (
 )
 
 
+TIPOFF_CHECK = (
+    "may have been moved in close to tipoff. Check that Sleeper shows a lock; "
+    "if not, mark it Not lockable in owner controls."
+)
+
+
+def unverified_tipoff_players(state: TeamWeekState) -> tuple[str, ...]:
+    """Name open decisions only; a recorded Lock or Pass has already settled the question."""
+    settled = {row.player_id for row in state.fixed_slots} | {
+        row.player_id for row in state.passed_opportunities
+    }
+    return tuple(
+        sorted(
+            {
+                game.sleeper_player_id
+                for game in state.opportunities
+                if game.tipoff_unverified
+                and game.eligible_slot_indices
+                and game.sleeper_player_id not in settled
+            }
+        )
+    )
+
+
 def state_availability_notes(
     state: TeamWeekState,
     *,
@@ -22,6 +46,10 @@ def state_availability_notes(
     notes: list[str] = []
     if PlanningReasonCode.INJURY_DATA_UNAVAILABLE in state.warnings:
         notes.append(INJURY_DATA_UNAVAILABLE_NOTE)
+    notes.extend(
+        f"{(player_names or {}).get(player, player)} {TIPOFF_CHECK}"
+        for player in unverified_tipoff_players(state)
+    )
     seen: set[tuple[str, str, str, str]] = set()
     data_gap = False
     for opportunity in state.opportunities:

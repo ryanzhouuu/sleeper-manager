@@ -10,9 +10,11 @@ import pytest
 from sleeper_manager.cloudflare.home_document import HomeIdentity
 from sleeper_manager.cloudflare.manager_context import ManagerContext
 from sleeper_manager.cloudflare.manager_games import (
+    decision_choices,
     lockable_games,
     recommendation_for,
     recorded_state,
+    reopenable_games,
 )
 from sleeper_manager.cloudflare.manager_views import editor_page
 from sleeper_manager.domain.lock_in import LockInOpportunityStatus as Status
@@ -184,3 +186,34 @@ def test_cards_reuse_home_image_urls_with_optional_portraits(store, espn_id):  #
     assert all(image["referrerpolicy"] == "no-referrer" for image in images)
     assert "img-src https://a.espncdn.com;" in result.headers["content-security-policy"]
     assert "default-src 'none';" in result.headers["content-security-policy"]
+
+
+def test_only_a_starters_newest_open_ineligible_game_can_be_reopened(store) -> None:  # type: ignore[no-untyped-def]
+    base = replace(
+        game(store),
+        status=Status.INELIGIBLE,
+        scheduled_start=NOW - timedelta(hours=1),
+        action_deadline=NOW + timedelta(hours=1),
+        fantasy_week_end=NOW + timedelta(days=1),
+    )
+    assert reopenable_games((base,), CONTEXT, NOW) == (base,)
+    closed = replace(base, action_deadline=NOW)
+    assert reopenable_games((closed,), CONTEXT, NOW) == ()
+    benched = replace(base, key=replace(base.key, player_id="bench"))
+    assert reopenable_games((benched,), CONTEXT, NOW) == ()
+    newer = replace(
+        base,
+        key=replace(base.key, game_id="later"),
+        status=Status.FINALIZING,
+        scheduled_start=NOW - timedelta(minutes=5),
+    )
+    assert reopenable_games((base, newer), CONTEXT, NOW) == ()
+
+
+def test_choices_match_what_can_settle_the_game(store) -> None:  # type: ignore[no-untyped-def]
+    assert decision_choices(replace(game(store), status=Status.INELIGIBLE)) == (
+        "not_locked",
+        "lockable",
+    )
+    assert "not_lockable" in decision_choices(replace(game(store), tipoff_unverified=True))
+    assert "not_lockable" not in decision_choices(replace(game(store), tipoff_unverified=False))

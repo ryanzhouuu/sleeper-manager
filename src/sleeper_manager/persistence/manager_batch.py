@@ -11,11 +11,17 @@ from sleeper_manager.persistence.lock_in_opportunities import lock_in_key_values
 from sleeper_manager.persistence.manager_sql import (
     EXPIRE_OLD_TOKENS,
     INSERT_REPLAN,
+    INSERT_SCORE_RECHECK,
     REMOVE_LOCK_INDEX,
     SUPERSEDE_DECISIONS,
     UPDATE_DECISION,
+    decision_evidence_values,
 )
-from sleeper_manager.workflows.manager_decisions import ManagerEdit, reported_decision
+from sleeper_manager.workflows.manager_decisions import (
+    ManagerAction,
+    ManagerEdit,
+    reported_decision,
+)
 
 _INSERT_BATCH = """
 WITH edits AS (SELECT value AS patch FROM json_each(?)),
@@ -124,6 +130,7 @@ async def save_manager_batch(
                     result.acknowledged_action,
                     result.acknowledged_at.isoformat() if result.acknowledged_at else None,
                     stamp,
+                    *decision_evidence_values(result),
                     stamp,
                     *lock_in_key_values(key),
                     edit.current.row_version,
@@ -131,6 +138,23 @@ async def save_manager_batch(
                 ),
             )
         )
+        if edit.action is ManagerAction.LOCKABLE:
+            recheck = f"postgame:{key.game_id}:reopened:{identity}"
+            statements.append(
+                repository._statement(
+                    INSERT_SCORE_RECHECK,
+                    (
+                        sha256(recheck.encode()).hexdigest()[:32],
+                        recheck,
+                        stamp,
+                        key.game_id,
+                        result.action_deadline.isoformat(),
+                        stamp,
+                        stamp,
+                        *guard,
+                    ),
+                )
+            )
         affected = (key.league_id, key.fantasy_week, key.player_id, key.game_id, *guard)
         statements.extend(
             [
