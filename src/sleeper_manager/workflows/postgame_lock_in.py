@@ -18,7 +18,11 @@ from sleeper_manager.workflows.coordinated_postgame import deliver_coordinated_p
 from sleeper_manager.workflows.lock_in_planning import sync_live_lock_in_opportunities
 from sleeper_manager.workflows.notification_loop import NotificationLoop
 from sleeper_manager.workflows.planning_inputs import LivePlanningInputs
-from sleeper_manager.workflows.postgame_observations import summary_fingerprint, summary_wait_reason
+from sleeper_manager.workflows.postgame_observations import (
+    scored_players,
+    summary_fingerprint,
+    summary_wait_reason,
+)
 from sleeper_manager.workflows.postgame_types import (
     LOCK_IN_ACKNOWLEDGEMENT_KINDS,
     LOCK_IN_DECISION_TYPE,
@@ -84,7 +88,7 @@ async def observe_postgame(
     opportunities = tuple(item for item in due if item.key.game_id == game_id)
     if not opportunities:
         return ()
-    summary_result = await fetch_summary(game_id)
+    summary_result = await fetch_summary(game_id, scored_players(opportunities))
     decision_time = max(decision_time, summary_result.quality.retrieved_at)
     if any(row.action_deadline <= decision_time for row in opportunities):
         await repository.expire_lock_in_opportunities(decision_time)

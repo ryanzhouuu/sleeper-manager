@@ -30,6 +30,12 @@ def summary_wait_reason(
     return None
 
 
+def scored_players(opportunities: tuple[LockInOpportunityRecord, ...]) -> dict[str, str]:
+    """Map the provider IDs in a game summary to the Sleeper players being scored."""
+
+    return {item.provider_player_id: item.key.player_id for item in opportunities}
+
+
 def summary_fingerprint(summary: GameSummary) -> str:
     """Hash normalized game and box-score facts without retrieval timestamps."""
 

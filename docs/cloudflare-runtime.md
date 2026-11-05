@@ -65,8 +65,9 @@ write or reset retry timing. Each reconciliation cancels at most 50 obsolete fut
 watches, so legacy rows retire gradually without a large cleanup burst.
 D1 schedule upserts retry recognized transient connection/reset failures at most
 twice with short jittered backoff. Work claims and other writes do not gain those retries.
-Postgame wakes fetch ESPN game summaries directly, stabilize finals, and may send
-Lock, Pass, or unavailable-warning notifications. Lineup notifications include
+Postgame wakes fetch ESPN game summaries directly to detect finals, score rostered
+players from Sleeper's per-game stats, wait while a played game's row is missing or
+empty, stabilize finals, and may send Lock, Pass, or unavailable-warning notifications. Lineup notifications include
 advice without action links. Scheduled daily no-change results send one
 `daily_plan_completed` confirmation per manager-local day, including when daily and
 pre-tipoff work coalesce. The confirmation preserves availability warnings, uses

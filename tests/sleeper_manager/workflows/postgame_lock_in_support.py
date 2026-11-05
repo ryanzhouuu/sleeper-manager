@@ -138,7 +138,7 @@ def _fetcher(result: ProviderResult[GameSummary]):
 
     calls: list[str] = []
 
-    async def fetch(game_id: str) -> ProviderResult[GameSummary]:
+    async def fetch(game_id: str, players: object) -> ProviderResult[GameSummary]:
         calls.append(game_id)
         return result
 

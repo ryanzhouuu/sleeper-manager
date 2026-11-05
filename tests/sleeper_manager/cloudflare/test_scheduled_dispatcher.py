@@ -455,7 +455,7 @@ def test_due_postgame_watch_fetches_espn_summary_directly(tmp_path) -> None:  # 
         postgame_at = GAME_START + timedelta(hours=2)
         fetches: list[str] = []
 
-        async def fetch(game_id: str) -> ProviderResult[GameSummary]:
+        async def fetch(game_id: str, players: object) -> ProviderResult[GameSummary]:
             fetches.append(game_id)
             game = replace(_game(game_id), status=GameStatus.IN_PROGRESS, start_time=GAME_START)
             return ProviderResult(
@@ -508,7 +508,7 @@ def test_postgame_delivery_failure_remains_visible_and_retryable(tmp_path) -> No
         summary_result = _summary_result(_box("401", points=20), _box("402", points=8))
         first_at = GAME_START + timedelta(hours=2)
 
-        async def fetch(game_id: str) -> ProviderResult[GameSummary]:
+        async def fetch(game_id: str, players: object) -> ProviderResult[GameSummary]:
             assert game_id == "g1"
             return summary_result
 

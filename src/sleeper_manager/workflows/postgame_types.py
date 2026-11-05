@@ -1,5 +1,6 @@
 """Public postgame outcomes and provider seam, separate from orchestration."""
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -13,9 +14,11 @@ LOCK_IN_ACKNOWLEDGEMENT_KINDS = frozenset({LOCK_IN_DECISION_TYPE, "placeholder_l
 
 
 class DirectGameSummarySource(Protocol):
-    """Fetch an uncached provider summary for one scheduled postgame wake."""
+    """Fetch an uncached summary; `players` maps provider player IDs to Sleeper IDs."""
 
-    async def __call__(self, game_id: str) -> ProviderResult[GameSummary]: ...
+    async def __call__(
+        self, game_id: str, players: Mapping[str, str]
+    ) -> ProviderResult[GameSummary]: ...
 
 
 @dataclass(frozen=True, slots=True)

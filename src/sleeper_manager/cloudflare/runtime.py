@@ -34,6 +34,7 @@ from sleeper_manager.cloudflare.scheduler_types import (
     ScheduledRunStatus,
     ScheduledRunSummary,
 )
+from sleeper_manager.cloudflare.sleeper_scoring import SleeperScoredSummarySource
 from sleeper_manager.cloudflare.stage_logging import timed_stage
 from sleeper_manager.domain.runtime_policy import RuntimePolicy
 from sleeper_manager.integrations.nba.cached_provider import AsyncCachedNBAProvider
@@ -180,7 +181,10 @@ async def run_scheduled(
             scheduled_at=now,
             correlation_id=correlation,
             open_sleeper_url=open_sleeper_url,
-            fetch_game_summary=CloudflareESPNProvider(fetcher, clock=tick).game_summary,
+            fetch_game_summary=SleeperScoredSummarySource(
+                CloudflareESPNProvider(fetcher, clock=tick).game_summary,
+                CloudflareSleeperClient(fetcher).player_game_stats,
+            ),
             read_tipoff_lineup=lambda: read_tipoff_lineup(env, fetcher, tick),
             plan_policy=LIVE_PLAN_POLICY,
             clock=tick,

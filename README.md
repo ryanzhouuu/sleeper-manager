@@ -98,8 +98,8 @@ missing reports or unverified availability. Full player/game warnings remain in
 the stored recommendation trace.
 Daily, pre-tipoff, and postgame runs produce a complete team recommendation from
 the current lineup, confirmed decisions, and retained player-game observations.
-Postgame runs save a score on the first complete ESPN final and apply later
-stat corrections. Each scheduled batch polls all due games before evaluating
+Postgame runs save a score from Sleeper's game stats on the first complete ESPN
+final and apply later stat corrections. Each scheduled batch polls all due games before evaluating
 one team plan.
 Alerts lead with the deadline and ordered actions, followed by the projected weekly
 total, lineup gain, confidence, and essential warnings. Recovery instructions name

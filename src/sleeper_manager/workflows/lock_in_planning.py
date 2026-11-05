@@ -28,7 +28,11 @@ from sleeper_manager.workflows.planning_inputs import (
     PlayerEligibilityEvidence,
     ResolvedPlayerIdentity,
 )
-from sleeper_manager.workflows.postgame_observations import summary_fingerprint, summary_wait_reason
+from sleeper_manager.workflows.postgame_observations import (
+    scored_players,
+    summary_fingerprint,
+    summary_wait_reason,
+)
 from sleeper_manager.workflows.postgame_types import DirectGameSummarySource
 
 _POSTGAME_INITIAL_DELAY = timedelta(hours=2)
@@ -415,7 +419,7 @@ async def refresh_terminal_lock_in_scores(
         grouped.setdefault(record.key.game_id, []).append(record)
     for game_id, group in grouped.items():
         opportunities = tuple(group)
-        summary_result = await fetch_summary(game_id)
+        summary_result = await fetch_summary(game_id, scored_players(opportunities))
         if summary_wait_reason(summary_result, opportunities) is not None:
             continue
         fingerprint = summary_fingerprint(summary_result.records)

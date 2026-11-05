@@ -58,7 +58,7 @@ def test_all_due_finals_are_saved_before_one_team_plan(
         fetched: list[str] = []
         planner_calls: list[set[str]] = []
 
-        async def fetch(game_id: str):
+        async def fetch(game_id: str, players: object):
             """Return a complete final with both fixture players present."""
             fetched.append(game_id)
             result = _summary_result(_box("401", points=20), _box("402", points=8))

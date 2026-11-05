@@ -22,6 +22,7 @@ from sleeper_manager.cloudflare.runtime_sync import (
     runtime_policy_for_history,
     sync_cloudflare_runtime_data,
 )
+from sleeper_manager.cloudflare.sleeper_scoring import SleeperScoredSummarySource
 from sleeper_manager.config import Settings
 from sleeper_manager.domain.runtime_policy import RuntimePolicy
 from sleeper_manager.integrations.nba.cached_provider import AsyncCachedNBAProvider
@@ -119,7 +120,10 @@ async def _run_scheduled(settings: Settings) -> int:
                 scheduled_at=now,
                 correlation_id=uuid4().hex,
                 open_sleeper_url="https://sleeper.com",
-                fetch_game_summary=CloudflareESPNProvider(fetch).game_summary,
+                fetch_game_summary=SleeperScoredSummarySource(
+                    CloudflareESPNProvider(fetch).game_summary,
+                    CloudflareSleeperClient(fetch).player_game_stats,
+                ),
             )
     except (OSError, RuntimeError, ValueError) as error:
         print(redact_secrets(f"Scheduled run failed: {error}"), file=sys.stderr)
