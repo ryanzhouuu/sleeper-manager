@@ -146,7 +146,9 @@ ON projection_observations (history_version, game_start, player_id);
 CREATE TABLE IF NOT EXISTS scheduled_work (
     work_id TEXT PRIMARY KEY,
     dedupe_key TEXT NOT NULL UNIQUE,
-    kind TEXT NOT NULL CHECK (kind IN ('daily', 'pre_tipoff', 'delivery_retry', 'postgame')),
+    kind TEXT NOT NULL CHECK (
+        kind IN ('daily', 'pre_tipoff', 'delivery_retry', 'postgame', 'tipoff_evidence')
+    ),
     due_at TEXT NOT NULL,
     status TEXT NOT NULL CHECK (
         status IN ('pending', 'running', 'retry', 'completed', 'canceled')

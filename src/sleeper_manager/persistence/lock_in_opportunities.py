@@ -69,6 +69,7 @@ class LockInOpportunityRecord:
     latest_evaluation_hash: str | None = None
     trace_json: str = "{}"
     row_version: int = 0
+    tipoff_unverified: bool = False
 
 
 class LockInOpportunityRepository(Protocol):
@@ -199,6 +200,7 @@ def lock_in_opportunity_values(record: LockInOpportunityRecord) -> tuple[object,
         _datetime_value(record.acknowledged_at),
         record.latest_evaluation_hash,
         record.trace_json,
+        int(record.tipoff_unverified),
         record.row_version,
         record.created_at.isoformat(),
         record.updated_at.isoformat(),
@@ -211,7 +213,7 @@ def lock_in_opportunity_update_values(
     """Encode a full guarded update without replacing immutable identity or creation time."""
 
     values = lock_in_opportunity_values(record)
-    return values[5:33] + (values[35],) + values[:5] + (expected_version,)
+    return values[5:34] + (values[36],) + values[:5] + (expected_version,)
 
 
 def lock_in_opportunity_from_mapping(row: Mapping[str, Any]) -> LockInOpportunityRecord:
@@ -256,6 +258,7 @@ def lock_in_opportunity_from_mapping(row: Mapping[str, Any]) -> LockInOpportunit
         latest_evaluation_hash=_optional_str(row.get("latest_evaluation_hash")),
         trace_json=str(row["trace_json"]),
         row_version=int(row["row_version"]),
+        tipoff_unverified=bool(row.get("tipoff_unverified")),
     )
 
 

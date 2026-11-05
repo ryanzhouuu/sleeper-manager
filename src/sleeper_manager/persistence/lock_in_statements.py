@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS lock_in_opportunities (
     acknowledged_at TEXT,
     latest_evaluation_hash TEXT,
     trace_json TEXT NOT NULL DEFAULT '{}',
+    tipoff_unverified INTEGER NOT NULL DEFAULT 0,
     row_version INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
@@ -57,12 +58,12 @@ consecutive_direct_poll_count, current_poll_id, previous_observed_at,
 current_observed_at, stable_score, stable_fingerprint, stabilized_at,
 score_revision, current_recommendation_id, current_recommendation_kind,
 acknowledged_action, acknowledged_at, latest_evaluation_hash, trace_json,
-row_version, created_at, updated_at
+tipoff_unverified, row_version, created_at, updated_at
 """
 
 INSERT_LOCK_IN_OPPORTUNITY_SQL = f"""
 INSERT OR IGNORE INTO lock_in_opportunities ({LOCK_IN_OPPORTUNITY_COLUMNS})
-VALUES ({", ".join("?" for _ in range(36))})
+VALUES ({", ".join("?" for _ in range(37))})
 """
 
 UPDATE_LOCK_IN_OPPORTUNITY_SQL = """
@@ -76,7 +77,7 @@ UPDATE lock_in_opportunities SET
     stable_score = ?, stable_fingerprint = ?, stabilized_at = ?, score_revision = ?,
     current_recommendation_id = ?, current_recommendation_kind = ?,
     acknowledged_action = ?, acknowledged_at = ?, latest_evaluation_hash = ?,
-    trace_json = ?, row_version = row_version + 1, updated_at = ?
+    trace_json = ?, tipoff_unverified = ?, row_version = row_version + 1, updated_at = ?
 WHERE league_id = ? AND fantasy_week = ? AND roster_id = ? AND player_id = ?
   AND game_id = ? AND row_version = ?
 """

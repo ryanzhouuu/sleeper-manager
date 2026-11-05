@@ -134,6 +134,15 @@ class SQLiteStateRepository(SQLiteLockInOpportunityMixin):
                 )
                 connection.execute(SQLITE_REVISION_BACKFILL_SQL)
             connection.executescript(SQLITE_RUNTIME_SCHEMA)
+            opportunity_columns = {
+                str(row[1])
+                for row in connection.execute("PRAGMA table_info(lock_in_opportunities)")
+            }
+            if "tipoff_unverified" not in opportunity_columns:
+                connection.execute(
+                    "ALTER TABLE lock_in_opportunities "
+                    "ADD COLUMN tipoff_unverified INTEGER NOT NULL DEFAULT 0"
+                )
 
     def load_acknowledged_decisions(
         self,

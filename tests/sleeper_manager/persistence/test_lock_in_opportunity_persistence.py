@@ -1,6 +1,7 @@
 """Shared SQLite and fake-D1 contracts for live Lock-In opportunity state."""
 
 import asyncio
+import sqlite3
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -274,3 +275,45 @@ def test_phase_six_migration_preserves_existing_scheduled_work() -> None:
         ).fetchall()
     )
     assert kinds == ("daily", "postgame")
+
+
+@pytest.mark.parametrize("backend", ("sqlite", "d1"))
+def test_unverified_tipoff_flag_round_trips(backend: str, tmp_path: Path) -> None:
+    async def exercise() -> None:
+        repository = await _repository(backend, tmp_path)
+        record = _opportunity()
+        assert await repository.upsert_lock_in_opportunity(record)
+        assert not (await repository.get_lock_in_opportunity(record.key)).tipoff_unverified
+        assert await repository.update_lock_in_opportunity(
+            replace(record, tipoff_unverified=True), expected_version=0
+        )
+        assert (await repository.get_lock_in_opportunity(record.key)).tipoff_unverified
+
+    asyncio.run(exercise())
+
+
+def test_tipoff_migration_keeps_rows_and_accepts_new_values(tmp_path: Path) -> None:
+    connection = sqlite3.connect(tmp_path / "migrated.db")
+    for path in sorted(Path("infra/cloudflare/migrations").glob("*.sql")):
+        if path.name < "0007":
+            connection.executescript(path.read_text())
+    row = (
+        "'w','k','daily','2026-01-01','pending',NULL,NULL,NULL,NULL,NULL,0,NULL,NULL,NULL,"
+        "'2026-01-01','2026-01-01'"
+    )
+    connection.execute(f"INSERT INTO scheduled_work VALUES ({row})")
+    connection.commit()
+    connection.executescript(
+        Path("infra/cloudflare/migrations/0007_tipoff_evidence.sql").read_text()
+    )
+    assert connection.execute("SELECT dedupe_key FROM scheduled_work").fetchall() == [("k",)]
+    connection.execute(
+        "INSERT INTO scheduled_work (work_id,dedupe_key,kind,due_at,status,created_at,updated_at) "
+        "VALUES ('x','tip','tipoff_evidence','d','pending','d','d')"
+    )
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(lock_in_opportunities)")}
+    assert "tipoff_unverified" in columns
+    connection.execute(
+        "INSERT INTO manager_decision_changes VALUES "
+        "('c','w','l',1,1,'p','g','lockable',0,'{}','d')"
+    )
