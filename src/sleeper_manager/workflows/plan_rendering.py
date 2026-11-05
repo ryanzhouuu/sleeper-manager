@@ -259,6 +259,7 @@ def serialize_weekly_plan_trace(
         "observed_terminal_score": plan.observed_terminal_score,
         "decision_margin": plan.decision_margin,
         "confidence": plan.confidence.value,
+        "blocking_detail": plan.blocking_detail,
         "observed_assignments": [
             {
                 "slot_index": assignment.slot_index,

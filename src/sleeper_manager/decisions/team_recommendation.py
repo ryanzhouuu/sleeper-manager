@@ -84,7 +84,10 @@ def build_team_recommendation(
                 else PlanningReasonCode.ROSTER_STATE_MISMATCH,
             ),
         )
-        return _with_roster(build_weekly_plan(blocked, policy=config), state)
+        return _with_roster(
+            replace(build_weekly_plan(blocked, policy=config), blocking_detail=str(error)),
+            state,
+        )
     selected = comparison.selected if comparison else None
     locks = {(row.player_id, row.game_id): row for row in selected.locks} if selected else {}
     actions = []
@@ -232,15 +235,24 @@ def build_team_recommendation(
                 moves=moves,
                 status=PlanStatus.ACTION_REQUIRED if moves else PlanStatus.NO_ACTION,
             )
-        except WeeklyPlanError:
-            plan = build_weekly_plan(
-                replace(conditional, blocking_reasons=(PlanningReasonCode.ROSTER_STATE_MISMATCH,)),
-                policy=config,
+        except WeeklyPlanError as error:
+            plan = replace(
+                build_weekly_plan(
+                    replace(
+                        conditional,
+                        blocking_reasons=(PlanningReasonCode.ROSTER_STATE_MISMATCH,),
+                    ),
+                    policy=config,
+                ),
+                blocking_detail=str(error),
             )
     if plan.status is PlanStatus.BLOCKED:
         return _with_roster(
-            build_weekly_plan(
-                replace(state, blocking_reasons=plan.blocking_reasons), policy=config
+            replace(
+                build_weekly_plan(
+                    replace(state, blocking_reasons=plan.blocking_reasons), policy=config
+                ),
+                blocking_detail=plan.blocking_detail,
             ),
             state,
         )

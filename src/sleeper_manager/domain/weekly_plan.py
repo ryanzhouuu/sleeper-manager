@@ -66,6 +66,7 @@ class WeeklyPlan:
     forfeited_opportunities: tuple[tuple[str, str], ...] = ()
     bench_player_ids: tuple[str, ...] = ()
     undecided_scores: tuple[UndecidedScore, ...] = ()
+    blocking_detail: str | None = None
 
     def __post_init__(self) -> None:
         _require_text(self.league_id, "Plan league ID")

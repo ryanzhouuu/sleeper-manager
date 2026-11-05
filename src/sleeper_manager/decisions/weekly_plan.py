@@ -109,6 +109,7 @@ def build_weekly_plan(
                 else PlanningReasonCode.ROSTER_STATE_MISMATCH,
             ),
             planner_version,
+            blocking_detail=str(error),
         )
 
     blocking_reasons: tuple[PlanningReasonCode, ...] = ()
@@ -177,6 +178,8 @@ def _static_plan(
     status: PlanStatus,
     extra_blocking: tuple[PlanningReasonCode, ...],
     planner_version: str,
+    *,
+    blocking_detail: str | None = None,
 ) -> WeeklyPlan:
     """Preserve observed and fixed assignments when optimization cannot run."""
 
@@ -206,6 +209,7 @@ def _static_plan(
         freshness=state.freshness,
         warnings=state.warnings,
         blocking_reasons=state.blocking_reasons + extra_blocking,
+        blocking_detail=blocking_detail,
         recovery_obligations=state.recovery_obligations,
         recovery_failures=state.recovery_failures,
     )
