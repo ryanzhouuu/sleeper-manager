@@ -142,6 +142,23 @@ export function DecisionCard({
                 />
               ) : null}
               {game.placement}
+              <span aria-hidden="true">·</span>
+              <span
+                className="decision-deadline"
+                data-urgency={remaining?.urgency ?? "later"}
+              >
+                <ControlIcon kind="not_locked" />
+                {game.start === game.deadline ? null : (
+                  <>
+                    Tips off{" "}
+                    <ControlTime value={game.start} timezone={timezone} />{" "}
+                    ·{" "}
+                  </>
+                )}
+                Lock by{" "}
+                <ControlTime value={game.deadline} timezone={timezone} />
+                {remaining ? <> · {remaining.text}</> : null}
+              </span>
             </p>
           </div>
         </div>
@@ -184,20 +201,6 @@ export function DecisionCard({
           </label>
         ))}
       </fieldset>
-      <p
-        className="decision-deadline"
-        data-urgency={remaining?.urgency ?? "later"}
-      >
-        <ControlIcon kind="not_locked" />
-        {game.start === game.deadline ? null : (
-          <>
-            Tips off <ControlTime value={game.start} timezone={timezone} />{" "}
-            ·{" "}
-          </>
-        )}
-        Lock by <ControlTime value={game.deadline} timezone={timezone} />
-        {remaining ? <> · {remaining.text}</> : null}
-      </p>
     </section>
   );
 }
