@@ -104,3 +104,9 @@ export function groupDecisionsByDay(
   }
   return [...days.values()];
 }
+
+export function saveSummary(changed: number, dirty: boolean): string {
+  if (changed > 0)
+    return `${changed} unsaved ${changed === 1 ? "change" : "changes"}`;
+  return dirty ? "No unsaved changes" : "Updates your plan";
+}

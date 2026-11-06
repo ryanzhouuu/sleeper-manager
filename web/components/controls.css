@@ -353,7 +353,10 @@
   background: #11161df5;
 }
 .control-save-bar small {
-  font-size: 0.7rem;
+  font-size: 0.75rem;
+}
+.control-save-bar small[data-changed="true"] {
+  color: #facc15;
 }
 .controls-page details {
   margin-top: 0.3rem;

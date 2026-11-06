@@ -8,6 +8,7 @@ import {
   dayKey,
   groupDecisionsByDay,
   recordedNote,
+  saveSummary,
 } from "./decision-display";
 
 const game = (parseControlDocument(fixture) as ManagerDocument).active[0];
@@ -91,5 +92,14 @@ describe("decision days", () => {
     expect(
       dayKey(new Date("2026-11-07T03:00:00Z").getTime(), "America/Chicago"),
     ).toBe("2026-11-06");
+  });
+});
+
+describe("save summary", () => {
+  it("counts unsaved changes and notices reverted edits", () => {
+    expect(saveSummary(0, false)).toBe("Updates your plan");
+    expect(saveSummary(1, true)).toBe("1 unsaved change");
+    expect(saveSummary(3, true)).toBe("3 unsaved changes");
+    expect(saveSummary(0, true)).toBe("No unsaved changes");
   });
 });

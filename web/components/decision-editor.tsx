@@ -1,11 +1,15 @@
 /** The editor preserves the Worker's indexed batch form and correction history. */
-import type { FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import type { ControlOperation, ManagerDocument } from "@/lib/control-types";
 import { ACTION_LABELS } from "@/lib/control-document";
 import { ControlIcon, ControlTime, DecisionCard } from "./decision-card";
 import { ControlStatus } from "./control-status";
 import { useNow } from "./use-now";
-import { dayKey, groupDecisionsByDay } from "@/lib/decision-display";
+import {
+  dayKey,
+  groupDecisionsByDay,
+  saveSummary,
+} from "@/lib/decision-display";
 
 export function DecisionEditor({
   document,
@@ -30,6 +34,20 @@ export function DecisionEditor({
   const games = [...document.active, ...document.saved, ...document.reopenable];
   const now = useNow();
   const today = now === null ? null : dayKey(now, document.timezone);
+  const [edits, setEdits] = useState({ batch: "", count: 0 });
+  const changed = edits.batch === document.batch_id ? edits.count : 0;
+
+  /** Server-rendered defaults mark each game's saved choice, so changes need no extra state. */
+  function trackEdits(event: FormEvent<HTMLFormElement>) {
+    const checked = event.currentTarget.querySelectorAll<HTMLInputElement>(
+      'input[type="radio"]:checked',
+    );
+    setEdits({
+      batch: document.batch_id,
+      count: [...checked].filter((input) => !input.defaultChecked).length,
+    });
+    onEdit();
+  }
   return (
     <>
       {document.pending ? (
@@ -90,7 +108,7 @@ export function DecisionEditor({
           method="post"
           action="/manage/api/save"
           onSubmit={(event) => onSubmit(event, "save")}
-          onChange={onEdit}
+          onChange={trackEdits}
         >
           <fieldset disabled={busy} className="control-fieldset">
             <input type="hidden" name="csrf" value={document.csrf} />
@@ -158,7 +176,9 @@ export function DecisionEditor({
               </details>
             ) : null}
             <div className="control-save-bar">
-              <small>{dirty ? "Unsaved choices" : "Updates your plan"}</small>
+              <small data-changed={changed > 0}>
+                {saveSummary(changed, dirty)}
+              </small>
               <button type="submit">
                 Save &amp; replan <ControlIcon kind="arrow" />
               </button>
