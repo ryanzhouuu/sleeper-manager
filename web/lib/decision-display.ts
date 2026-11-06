@@ -18,15 +18,32 @@ export function adviceFor(advisor: string): Advice {
     case "Wait":
       return { tone: "wait", text: "Hold for now" };
     case "Unavailable":
-      return { tone: "none", text: "No advice right now" };
+      return { tone: "none", text: "No suggestion right now" };
     default:
       return { tone: "none", text: advisor };
   }
 }
 
-/** "Wait" is the Worker's default recorded state and repeats the selected choice. */
-export function recordedNote(saved: string): string | null {
-  return saved === "Wait" ? null : saved;
+export type RecordedTone = "lock" | "pass" | "alert" | "none";
+
+export interface RecordedStatus {
+  tone: RecordedTone;
+  text: string;
+}
+
+const ALERT_STATES = new Set([
+  "Eligibility unverified",
+  "Check Sleeper",
+  "Not lockable",
+]);
+
+/** The Worker's recorded state is what the planner believes already happened, not advice. */
+export function recordedStatus(saved: string): RecordedStatus {
+  if (saved === "Wait") return { tone: "none", text: "Nothing recorded yet" };
+  if (saved === "Locked in Sleeper") return { tone: "lock", text: saved };
+  if (saved.startsWith("Passed")) return { tone: "pass", text: saved };
+  if (ALERT_STATES.has(saved)) return { tone: "alert", text: saved };
+  return { tone: "none", text: saved };
 }
 
 export type Urgency = "closed" | "soon" | "later";

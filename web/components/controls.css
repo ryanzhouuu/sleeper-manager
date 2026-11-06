@@ -219,17 +219,42 @@
   font-size: 0.65rem;
   letter-spacing: 0.08em;
 }
-.decision-advice {
-  display: flex;
+.decision-status {
+  display: grid;
+  grid-template-columns: 7.5rem minmax(0, 1fr);
+  gap: 0.4rem 0;
+  margin: 0.9rem 0 0;
+  font-size: 0.85rem;
+}
+.decision-advice,
+.decision-recorded {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   align-items: center;
-  gap: 0.5rem;
-  margin-top: 0.9rem;
-  padding: 0.55rem 0.7rem;
-  border-left: 2px solid #4a5a6b;
+  min-height: 2.4rem;
+  padding: 0.4rem 0.7rem;
+  border-radius: 6px;
+}
+.decision-status dt {
+  color: #94a5b6;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+.decision-status dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.2rem 0.45rem;
+  margin: 0;
+  min-width: 0;
+}
+.decision-advice {
+  border-left: 3px solid #4a5a6b;
   border-radius: 0 6px 6px 0;
   background: #1f2934;
   color: #c5d3e0;
-  font-size: 0.85rem;
+  font-weight: 500;
 }
 .decision-advice--lock {
   border-left-color: #8bd6b0;
@@ -243,15 +268,41 @@
 }
 .decision-advice--none {
   color: #94a5b6;
+  font-weight: 400;
 }
 .decision-recorded {
-  margin-top: 0.5rem;
-  color: #d6a4a4;
-  font-size: 0.75rem;
+  border: 1px dashed #344252;
+  color: #c5d3e0;
+}
+.decision-recorded--lock {
+  color: #8bd6b0;
+}
+.decision-recorded--pass {
+  color: #e4bd7c;
+}
+.decision-recorded--alert {
+  color: #e8a5a5;
+}
+.decision-recorded--none {
+  color: #94a5b6;
+}
+.decision-unsaved {
+  display: none;
+  color: #facc15;
+}
+.decision-card:has(.decision-choice input:checked:not([checked]))
+  .decision-unsaved {
+  display: inline;
+}
+@media (max-width: 420px) {
+  .decision-status {
+    grid-template-columns: 7rem minmax(0, 1fr);
+    font-size: 0.8rem;
+  }
 }
 .decision-legend {
   padding: 0;
-  margin: 0.9rem 0 0.45rem;
+  margin: 0 0 0.45rem;
   color: #94a5b6;
   font-size: 0.75rem;
 }
@@ -260,7 +311,7 @@
   gap: 0.4rem;
   border: 0;
   padding: 0;
-  margin: 0;
+  margin: 1rem 0 0;
 }
 .decision-choice {
   position: relative;

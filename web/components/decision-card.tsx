@@ -1,12 +1,13 @@
-/** Native radio groups record the owner's choice independently of advisor recommendations. */
+/** Native radio groups record the owner's choice independently of planner suggestions. */
 import Image from "next/image";
 import { ACTION_LABELS } from "@/lib/control-document";
 import type { DecisionAction, DecisionGame } from "@/lib/control-types";
 import {
   adviceFor,
   countdown,
-  recordedNote,
+  recordedStatus,
   type AdviceTone,
+  type RecordedTone,
 } from "@/lib/decision-display";
 
 const CHOICE_TEXT: Record<DecisionAction, string> = {
@@ -17,14 +18,23 @@ const CHOICE_TEXT: Record<DecisionAction, string> = {
   lockable: "Sleeper shows a lock",
 };
 
-const ADVICE_ICONS: Record<AdviceTone, DecisionAction | null> = {
+type IconKind = DecisionAction | "arrow" | "alert";
+
+const ADVICE_ICONS: Record<AdviceTone, IconKind | null> = {
   lock: "locked",
   pass: "passed",
   wait: "not_locked",
   none: null,
 };
 
-export function ControlIcon({ kind }: { kind: DecisionAction | "arrow" }) {
+const RECORDED_ICONS: Record<RecordedTone, IconKind | null> = {
+  lock: "locked",
+  pass: "passed",
+  alert: "alert",
+  none: null,
+};
+
+export function ControlIcon({ kind }: { kind: IconKind }) {
   const paths = {
     not_locked: (
       <>
@@ -56,6 +66,12 @@ export function ControlIcon({ kind }: { kind: DecisionAction | "arrow" }) {
       </>
     ),
     arrow: <path d="M4 12h16m-6-6l6 6-6 6" />,
+    alert: (
+      <>
+        <circle cx="12" cy="12" r="8" />
+        <path d="M12 8v5m0 3h.01" />
+      </>
+    ),
   };
   return (
     <svg
@@ -88,17 +104,30 @@ export function ControlTime({
   return <time dateTime={value}>{label}</time>;
 }
 
-function AdviceLine({ advisor }: { advisor: string }) {
+/** Suggestion and record share one grid so their labels and values line up. */
+function StatusRows({ advisor, saved }: { advisor: string; saved: string }) {
   const advice = adviceFor(advisor);
-  const icon = ADVICE_ICONS[advice.tone];
+  const record = recordedStatus(saved);
+  const adviceIcon = ADVICE_ICONS[advice.tone];
+  const recordIcon = RECORDED_ICONS[record.tone];
   return (
-    <p
-      className={`decision-advice decision-advice--${advice.tone}`}
-      aria-label={`Advisor: ${advisor}`}
-    >
-      {icon ? <ControlIcon kind={icon} /> : null}
-      <span>{advice.text}</span>
-    </p>
+    <dl className="decision-status">
+      <div className={`decision-advice decision-advice--${advice.tone}`}>
+        <dt>Planner suggests</dt>
+        <dd>
+          {adviceIcon ? <ControlIcon kind={adviceIcon} /> : null}
+          {advice.text}
+        </dd>
+      </div>
+      <div className={`decision-recorded decision-recorded--${record.tone}`}>
+        <dt>Recorded</dt>
+        <dd>
+          {recordIcon ? <ControlIcon kind={recordIcon} /> : null}
+          {record.text}
+          <span className="decision-unsaved"> · changed, not saved</span>
+        </dd>
+      </div>
+    </dl>
   );
 }
 
@@ -113,7 +142,6 @@ export function DecisionCard({
   timezone: string;
   now?: number | null;
 }) {
-  const recorded = recordedNote(game.saved);
   const remaining = now === null ? null : countdown(game.deadline, now);
   return (
     <section className="decision-card" aria-label={game.name}>
@@ -166,18 +194,13 @@ export function DecisionCard({
           <small>pts</small>
         </div>
       </div>
-      <AdviceLine advisor={game.advisor} />
-      {recorded ? (
-        <p className="decision-recorded" aria-label={`Recorded: ${game.saved}`}>
-          Recorded · {game.saved}
-        </p>
-      ) : null}
+      <StatusRows advisor={game.advisor} saved={game.saved} />
       <input type="hidden" name={`player_id_${index}`} value={game.player_id} />
       <input type="hidden" name={`game_id_${index}`} value={game.game_id} />
       <input type="hidden" name={`version_${index}`} value={game.version} />
       <fieldset className="decision-choices">
         <legend className="decision-legend">
-          What you did in Sleeper
+          Update what happened in Sleeper
           <span className="control-sr"> for {game.name}</span>
         </legend>
         {game.choices.map((action) => (

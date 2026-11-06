@@ -7,7 +7,7 @@ import {
   countdown,
   dayKey,
   groupDecisionsByDay,
-  recordedNote,
+  recordedStatus,
   saveSummary,
 } from "./decision-display";
 
@@ -23,7 +23,7 @@ describe("decision display wording", () => {
     expect(adviceFor("Wait").text).toBe("Hold for now");
     expect(adviceFor("Unavailable")).toEqual({
       tone: "none",
-      text: "No advice right now",
+      text: "No suggestion right now",
     });
   });
 
@@ -34,11 +34,18 @@ describe("decision display wording", () => {
     });
   });
 
-  it("hides the default recorded state that repeats the selection", () => {
-    expect(recordedNote("Wait")).toBeNull();
-    expect(recordedNote("Eligibility unverified")).toBe(
-      "Eligibility unverified",
-    );
+  it("describes the recorded state as a past outcome with its own tone", () => {
+    expect(recordedStatus("Wait")).toEqual({
+      tone: "none",
+      text: "Nothing recorded yet",
+    });
+    expect(recordedStatus("Locked in Sleeper").tone).toBe("lock");
+    expect(recordedStatus("Passed · lock window closed").tone).toBe("pass");
+    expect(recordedStatus("Eligibility unverified").tone).toBe("alert");
+    expect(recordedStatus("Automatic final score")).toEqual({
+      tone: "none",
+      text: "Automatic final score",
+    });
   });
 });
 

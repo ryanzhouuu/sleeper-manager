@@ -65,8 +65,8 @@ describe("consolidated control pages", () => {
     expect(html).toContain('action="/manage/api/save"');
     expect(html).toContain('name="version_0" value="0"');
     expect(html).toContain('name="action_0" checked="" value="not_locked"');
-    expect(html).toContain('aria-label="Advisor: Pass"');
-    expect(html).not.toContain("Recorded");
+    expect(html).toMatch(/<dt>Planner suggests<\/dt><dd>.*Pass on this game/);
+    expect(html).toMatch(/<dt>Recorded<\/dt><dd>.*Nothing recorded yet/);
     expect(html).toContain("32.80");
     expect(html).toContain("Save &amp; replan");
   });

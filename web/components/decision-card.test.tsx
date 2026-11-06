@@ -22,8 +22,8 @@ describe("decision cards", () => {
     expect(html).toContain("32.80");
     expect(html).not.toContain('name="score');
     expect(html).toContain('name="version_2" value="0"');
-    expect(html).toContain('aria-label="Advisor: Pass"');
-    expect(html).not.toContain("Recorded");
+    expect(html).toMatch(/<dt>Planner suggests<\/dt><dd>.*Pass on this game/);
+    expect(html).toMatch(/<dt>Recorded<\/dt><dd>.*Nothing recorded yet/);
     expect(html).toContain('name="action_2" checked="" value="not_locked"');
   });
 
@@ -37,9 +37,10 @@ describe("decision cards", () => {
     );
     expect(html).toContain("decision-advice--lock");
     expect(html).toContain("Lock this game in Sleeper");
-    expect(html).toContain("What you did in Sleeper");
-    expect(html).toContain("Recorded · Eligibility unverified");
-    expect(html).toContain("Not yet");
+    expect(html).toContain("decision-recorded--alert");
+    expect(html).toMatch(/<dt>Recorded<\/dt><dd>.*Eligibility unverified/);
+    expect(html).toContain("Update what happened in Sleeper");
+    expect(html).toContain("changed, not saved");
   });
 
   it("adds a relative countdown only once the client clock is known", () => {

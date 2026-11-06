@@ -264,9 +264,12 @@ export function DecisionEditor({
                 content: (
                   <div className="control-help">
                     <p>
-                      The highlighted line on each game is the advisor&apos;s
-                      suggestion. The buttons record what you actually did in
-                      Sleeper.
+                      <strong>Planner suggests</strong> · What the planner wants
+                      you to do next in Sleeper.
+                    </p>
+                    <p>
+                      <strong>Recorded</strong> · What the planner believes has
+                      already happened. Use the buttons to correct it.
                     </p>
                     <p>
                       <strong>Not yet</strong> · You have not locked or passed.
