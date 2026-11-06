@@ -42,6 +42,17 @@ describe("decision cards", () => {
     expect(html).toContain("Not yet");
   });
 
+  it("adds a relative countdown only once the client clock is known", () => {
+    const deadline = new Date(game.deadline).getTime();
+    const card = (now: number | null) =>
+      renderToStaticMarkup(
+        <DecisionCard game={game} index={0} timezone="UTC" now={now} />,
+      );
+    expect(card(null)).not.toContain(" · in ");
+    expect(card(deadline - 30 * 60_000)).toContain('data-urgency="soon"');
+    expect(card(deadline - 30 * 60_000)).toContain("in 30m");
+  });
+
   it("offers the actions that settle an uncertain game", () => {
     const html = renderToStaticMarkup(
       <DecisionCard

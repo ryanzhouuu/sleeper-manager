@@ -118,6 +118,22 @@
   padding-bottom: 1.2rem;
   border-bottom: 1px solid var(--rule);
 }
+.control-plan--ready {
+  padding: 1rem;
+  border: 1px solid #2d3946;
+  border-left: 2px solid var(--accent);
+  border-radius: 0 10px 10px 0;
+  background: #19222c;
+}
+.control-eyebrow {
+  color: #94a5b6;
+  font-size: 0.75rem;
+}
+.control-plan-title {
+  margin-top: 0.2rem;
+  color: #edf3f8;
+  font-weight: 500;
+}
 .control-plan > p + p,
 .control-plan form {
   margin-top: 0.6rem;
@@ -141,6 +157,14 @@
   background: #293746;
   padding: 0.1rem 0.4rem;
   border-radius: 4px;
+}
+.decision-day {
+  margin-top: 1rem;
+}
+.decision-day-title {
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 500;
 }
 .decision-card {
   border: 1px solid #2d3946;
@@ -298,6 +322,12 @@
   margin-top: 0.7rem;
   color: #94a5b6;
   font-size: 0.7rem;
+}
+.decision-deadline[data-urgency="soon"] {
+  color: #facc15;
+}
+.decision-deadline[data-urgency="closed"] {
+  color: #f87171;
 }
 .control-sr {
   position: absolute;

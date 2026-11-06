@@ -97,7 +97,7 @@ export function ManagerScreen({ initial }: { initial: ControlDocument }) {
         <h1>Game decisions</h1>
         {document.status === "ready" ? (
           <p className="control-muted">
-            W{document.week} · {document.timezone}
+            Week {document.week} · {document.timezone}
           </p>
         ) : null}
       </header>

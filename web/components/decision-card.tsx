@@ -4,6 +4,7 @@ import { ACTION_LABELS } from "@/lib/control-document";
 import type { DecisionAction, DecisionGame } from "@/lib/control-types";
 import {
   adviceFor,
+  countdown,
   recordedNote,
   type AdviceTone,
 } from "@/lib/decision-display";
@@ -105,12 +106,15 @@ export function DecisionCard({
   game,
   index,
   timezone,
+  now = null,
 }: {
   game: DecisionGame;
   index: number;
   timezone: string;
+  now?: number | null;
 }) {
   const recorded = recordedNote(game.saved);
+  const remaining = now === null ? null : countdown(game.deadline, now);
   return (
     <section className="decision-card" aria-label={game.name}>
       <div className="decision-head">
@@ -180,7 +184,10 @@ export function DecisionCard({
           </label>
         ))}
       </fieldset>
-      <p className="decision-deadline">
+      <p
+        className="decision-deadline"
+        data-urgency={remaining?.urgency ?? "later"}
+      >
         <ControlIcon kind="not_locked" />
         {game.start === game.deadline ? null : (
           <>
@@ -189,6 +196,7 @@ export function DecisionCard({
           </>
         )}
         Lock by <ControlTime value={game.deadline} timezone={timezone} />
+        {remaining ? <> · {remaining.text}</> : null}
       </p>
     </section>
   );

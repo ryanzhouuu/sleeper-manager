@@ -4,6 +4,8 @@ import type { ControlOperation, ManagerDocument } from "@/lib/control-types";
 import { ACTION_LABELS } from "@/lib/control-document";
 import { ControlIcon, ControlTime, DecisionCard } from "./decision-card";
 import { ControlStatus } from "./control-status";
+import { useNow } from "./use-now";
+import { dayKey, groupDecisionsByDay } from "@/lib/decision-display";
 
 export function DecisionEditor({
   document,
@@ -26,6 +28,8 @@ export function DecisionEditor({
   ) => void;
 }) {
   const games = [...document.active, ...document.saved, ...document.reopenable];
+  const now = useNow();
+  const today = now === null ? null : dayKey(now, document.timezone);
   return (
     <>
       {document.pending ? (
@@ -55,11 +59,11 @@ export function DecisionEditor({
           )}
         </section>
       ) : document.plan ? (
-        <details className="control-plan">
-          <summary>Team plan</summary>
-          <h2 className="label">{document.plan.title}</h2>
+        <section className="control-plan control-plan--ready">
+          <p className="control-eyebrow">Team plan</p>
+          <h2 className="control-plan-title">{document.plan.title}</h2>
           <pre>{document.plan.message}</pre>
-        </details>
+        </section>
       ) : (
         <section className="control-plan">
           <p>Plan unavailable</p>
@@ -96,14 +100,24 @@ export function DecisionEditor({
               To review <span>{document.active.length}</span>
             </h2>
             {document.active.length ? (
-              document.active.map((game, index) => (
-                <DecisionCard
-                  game={game}
-                  index={index}
-                  timezone={document.timezone}
-                  key={`${game.player_id}:${game.game_id}`}
-                />
-              ))
+              groupDecisionsByDay(document.active, document.timezone).map(
+                (day) => (
+                  <div className="decision-day" key={day.key}>
+                    <h3 className="decision-day-title">
+                      {day.key === today ? `Today · ${day.label}` : day.label}
+                    </h3>
+                    {day.games.map(({ game, index }) => (
+                      <DecisionCard
+                        game={game}
+                        index={index}
+                        timezone={document.timezone}
+                        now={now}
+                        key={`${game.player_id}:${game.game_id}`}
+                      />
+                    ))}
+                  </div>
+                ),
+              )
             ) : (
               <p className="control-muted">No lockable games yet.</p>
             )}

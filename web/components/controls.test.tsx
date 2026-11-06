@@ -71,6 +71,14 @@ describe("consolidated control pages", () => {
     expect(html).toContain("Save &amp; replan");
   });
 
+  it("shows the team plan up front and groups games by tip-off day", () => {
+    const html = editor();
+    expect(html).toContain("Team plan");
+    expect(html).toContain("Review your latest game.");
+    expect(html).not.toContain("<summary>Team plan");
+    expect(html).toContain('class="decision-day-title">Wed, Oct 21</h3>');
+  });
+
   it("shows a loading status and keeps stale advice hidden while replanning", () => {
     const html = editor({ pending: true, plan: null });
     expect(html).toContain('role="status"');
