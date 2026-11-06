@@ -142,7 +142,6 @@ export function DecisionCard({
                 />
               ) : null}
               {game.placement}
-              <span aria-hidden="true">·</span>
               <span
                 className="decision-deadline"
                 data-urgency={remaining?.urgency ?? "later"}
