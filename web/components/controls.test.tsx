@@ -79,6 +79,17 @@ describe("consolidated control pages", () => {
     expect(html).toContain('class="decision-day-title">Wed, Oct 21</h3>');
   });
 
+  it("submits the decision form from the sidebar save button", () => {
+    const html = editor();
+    expect(html).toContain('<form id="decision-form"');
+    const form = html.slice(
+      html.indexOf('<form id="decision-form"'),
+      html.indexOf("</form>", html.indexOf('<form id="decision-form"')),
+    );
+    expect(form).not.toContain('type="submit"');
+    expect(html).toContain('type="submit" form="decision-form"');
+  });
+
   it("shows a loading status and keeps stale advice hidden while replanning", () => {
     const html = editor({ pending: true, plan: null });
     expect(html).toContain('role="status"');
