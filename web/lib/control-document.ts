@@ -6,7 +6,7 @@ import type {
 } from "./control-types";
 
 export const ACTION_LABELS: Record<DecisionAction, string> = {
-  not_locked: "Wait",
+  not_locked: "Not yet locked",
   locked: "Locked in Sleeper",
   passed: "Passed",
   not_lockable: "Not lockable",

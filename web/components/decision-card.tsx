@@ -2,13 +2,25 @@
 import Image from "next/image";
 import { ACTION_LABELS } from "@/lib/control-document";
 import type { DecisionAction, DecisionGame } from "@/lib/control-types";
+import {
+  adviceFor,
+  recordedNote,
+  type AdviceTone,
+} from "@/lib/decision-display";
 
 const CHOICE_TEXT: Record<DecisionAction, string> = {
-  not_locked: "Wait",
-  locked: "Lock",
-  passed: "Pass",
+  not_locked: "Not yet",
+  locked: "Locked",
+  passed: "Passed",
   not_lockable: "Not lockable",
   lockable: "Sleeper shows a lock",
+};
+
+const ADVICE_ICONS: Record<AdviceTone, DecisionAction | null> = {
+  lock: "locked",
+  pass: "passed",
+  wait: "not_locked",
+  none: null,
 };
 
 export function ControlIcon({ kind }: { kind: DecisionAction | "arrow" }) {
@@ -75,29 +87,17 @@ export function ControlTime({
   return <time dateTime={value}>{label}</time>;
 }
 
-function Badge({
-  state,
-  source,
-}: {
-  state: string;
-  source: "Advisor" | "Recorded";
-}) {
-  const label = state.split(" · ")[0].replace("Locked in Sleeper", "Locked");
-  const tone = ["Lock", "Locked"].includes(label)
-    ? "lock"
-    : ["Pass", "Passed"].includes(label)
-      ? "pass"
-      : label === "Wait"
-        ? "wait"
-        : "alert";
+function AdviceLine({ advisor }: { advisor: string }) {
+  const advice = adviceFor(advisor);
+  const icon = ADVICE_ICONS[advice.tone];
   return (
-    <span
-      className={`control-chip control-chip--${tone}`}
-      aria-label={`${source}: ${state}`}
-      title={state}
+    <p
+      className={`decision-advice decision-advice--${advice.tone}`}
+      aria-label={`Advisor: ${advisor}`}
     >
-      {label}
-    </span>
+      {icon ? <ControlIcon kind={icon} /> : null}
+      <span>{advice.text}</span>
+    </p>
   );
 }
 
@@ -110,6 +110,7 @@ export function DecisionCard({
   index: number;
   timezone: string;
 }) {
+  const recorded = recordedNote(game.saved);
   return (
     <section className="decision-card" aria-label={game.name}>
       <div className="decision-head">
@@ -136,8 +137,7 @@ export function DecisionCard({
                   referrerPolicy="no-referrer"
                 />
               ) : null}
-              {game.placement} ·{" "}
-              <ControlTime value={game.start} timezone={timezone} />
+              {game.placement}
             </p>
           </div>
         </div>
@@ -146,21 +146,20 @@ export function DecisionCard({
           <small>pts</small>
         </div>
       </div>
-      <div className="decision-states">
-        <span>
-          <span className="control-muted">Plan</span>
-          <Badge state={game.advisor} source="Advisor" />
-        </span>
-        <span>
-          <span className="control-muted">Saved</span>
-          <Badge state={game.saved} source="Recorded" />
-        </span>
-      </div>
+      <AdviceLine advisor={game.advisor} />
+      {recorded ? (
+        <p className="decision-recorded" aria-label={`Recorded: ${game.saved}`}>
+          Recorded · {game.saved}
+        </p>
+      ) : null}
       <input type="hidden" name={`player_id_${index}`} value={game.player_id} />
       <input type="hidden" name={`game_id_${index}`} value={game.game_id} />
       <input type="hidden" name={`version_${index}`} value={game.version} />
       <fieldset className="decision-choices">
-        <legend className="control-sr">Your choice for {game.name}</legend>
+        <legend className="decision-legend">
+          What you did in Sleeper
+          <span className="control-sr"> for {game.name}</span>
+        </legend>
         {game.choices.map((action) => (
           <label
             className="decision-choice"
@@ -183,8 +182,13 @@ export function DecisionCard({
       </fieldset>
       <p className="decision-deadline">
         <ControlIcon kind="not_locked" />
-        <span className="control-sr">Lock window ends </span>
-        <ControlTime value={game.deadline} timezone={timezone} />
+        {game.start === game.deadline ? null : (
+          <>
+            Tips off <ControlTime value={game.start} timezone={timezone} />{" "}
+            ·{" "}
+          </>
+        )}
+        Lock by <ControlTime value={game.deadline} timezone={timezone} />
       </p>
     </section>
   );

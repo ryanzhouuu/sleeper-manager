@@ -23,8 +23,23 @@ describe("decision cards", () => {
     expect(html).not.toContain('name="score');
     expect(html).toContain('name="version_2" value="0"');
     expect(html).toContain('aria-label="Advisor: Pass"');
-    expect(html).toContain('aria-label="Recorded: Wait"');
+    expect(html).not.toContain("Recorded");
     expect(html).toContain('name="action_2" checked="" value="not_locked"');
+  });
+
+  it("separates the advisor's suggestion from the owner's Sleeper record", () => {
+    const html = renderToStaticMarkup(
+      <DecisionCard
+        game={{ ...game, advisor: "Lock", saved: "Eligibility unverified" }}
+        index={0}
+        timezone="America/Chicago"
+      />,
+    );
+    expect(html).toContain("decision-advice--lock");
+    expect(html).toContain("Lock this game in Sleeper");
+    expect(html).toContain("What you did in Sleeper");
+    expect(html).toContain("Recorded · Eligibility unverified");
+    expect(html).toContain("Not yet");
   });
 
   it("offers the actions that settle an uncertain game", () => {

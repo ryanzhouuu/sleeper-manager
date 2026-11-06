@@ -198,13 +198,18 @@ export function DecisionEditor({
       <details className="control-help">
         <summary>How it works</summary>
         <p>
-          <strong>Wait</strong> · Undecided.
+          The highlighted line on each game is the advisor&apos;s suggestion.
+          The buttons record what you actually did in Sleeper.
         </p>
         <p>
-          <strong>Lock</strong> · Already locked in Sleeper.
+          <strong>Not yet</strong> · You have not locked or passed.
         </p>
         <p>
-          <strong>Pass</strong> · Choose not to lock. Substitution optional.
+          <strong>Locked</strong> · You locked this game in Sleeper.
+        </p>
+        <p>
+          <strong>Passed</strong> · You chose not to lock. Substitution
+          optional.
         </p>
         <p>Saving updates the plan, not your Sleeper lineup.</p>
       </details>
