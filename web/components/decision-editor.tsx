@@ -4,6 +4,7 @@ import type { ControlOperation, ManagerDocument } from "@/lib/control-types";
 import { ACTION_LABELS } from "@/lib/control-document";
 import { ControlIcon, ControlTime, DecisionCard } from "./decision-card";
 import { ControlStatus } from "./control-status";
+import { InfoTabs } from "./info-tabs";
 import { useNow } from "./use-now";
 import {
   dayKey,
@@ -190,63 +191,82 @@ export function DecisionEditor({
           No lockable games yet.
         </section>
       )}
-      {document.past.length ? (
-        <details>
-          <summary>Past games</summary>
-          <ul>
-            {document.past.map((game, index) => (
-              <li key={index}>
-                {game.name} ·{" "}
-                <ControlTime value={game.start} timezone={document.timezone} />{" "}
-                · {game.score.toFixed(2)} pts
-                <br />
-                <span className="control-muted">{game.state}</span>
-              </li>
-            ))}
-          </ul>
-        </details>
-      ) : null}
-      <details>
-        <summary>History</summary>
-        <ul>
-          {document.history.length ? (
-            document.history.map((entry, index) => (
-              <li key={index}>
-                {entry.name} · game {entry.game_id}
-                <br />
-                {ACTION_LABELS[entry.previous]} → {ACTION_LABELS[entry.action]}
-                <br />
-                <small>
-                  <ControlTime
-                    value={entry.recorded_at}
-                    timezone={document.timezone}
-                  />
-                </small>
-              </li>
-            ))
-          ) : (
-            <li className="control-muted">No manual corrections yet.</li>
-          )}
-        </ul>
-      </details>
-      <details className="control-help">
-        <summary>How it works</summary>
-        <p>
-          The highlighted line on each game is the advisor&apos;s suggestion.
-          The buttons record what you actually did in Sleeper.
-        </p>
-        <p>
-          <strong>Not yet</strong> · You have not locked or passed.
-        </p>
-        <p>
-          <strong>Locked</strong> · You locked this game in Sleeper.
-        </p>
-        <p>
-          <strong>Passed</strong> · You chose not to lock. Substitution
-          optional.
-        </p>
-        <p>Saving updates the plan, not your Sleeper lineup.</p>
-      </details>
+      <InfoTabs
+        label="Week details"
+        tabs={[
+          {
+            id: "past",
+            label: `Past · ${document.past.length}`,
+            content: document.past.length ? (
+              <ul>
+                {document.past.map((game, index) => (
+                  <li key={index}>
+                    {game.name} ·{" "}
+                    <ControlTime
+                      value={game.start}
+                      timezone={document.timezone}
+                    />{" "}
+                    · {game.score.toFixed(2)} pts
+                    <br />
+                    <span className="control-muted">{game.state}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="control-muted">No finished games yet.</p>
+            ),
+          },
+          {
+            id: "history",
+            label: "History",
+            content: document.history.length ? (
+              <ul>
+                {document.history.map((entry, index) => (
+                  <li key={index}>
+                    {entry.name} · game {entry.game_id}
+                    <br />
+                    {ACTION_LABELS[entry.previous]} →{" "}
+                    {ACTION_LABELS[entry.action]}
+                    <br />
+                    <small>
+                      <ControlTime
+                        value={entry.recorded_at}
+                        timezone={document.timezone}
+                      />
+                    </small>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="control-muted">No manual corrections yet.</p>
+            ),
+          },
+          {
+            id: "help",
+            label: "How it works",
+            content: (
+              <div className="control-help">
+                <p>
+                  The highlighted line on each game is the advisor&apos;s
+                  suggestion. The buttons record what you actually did in
+                  Sleeper.
+                </p>
+                <p>
+                  <strong>Not yet</strong> · You have not locked or passed.
+                </p>
+                <p>
+                  <strong>Locked</strong> · You locked this game in Sleeper.
+                </p>
+                <p>
+                  <strong>Passed</strong> · You chose not to lock. Substitution
+                  optional.
+                </p>
+                <p>Saving updates the plan, not your Sleeper lineup.</p>
+              </div>
+            ),
+          },
+        ]}
+      />
       <footer className="control-footer">
         <span className="control-muted">Sleeper · Lock-In</span>
         <form

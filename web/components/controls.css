@@ -372,6 +372,36 @@
   margin-top: 0.75rem;
   font-size: 0.85rem;
 }
+.info-tabs {
+  margin-top: 0.5rem;
+}
+.info-tablist {
+  display: flex;
+  gap: 1.25rem;
+  border-bottom: 1px solid var(--rule);
+}
+.controls-page .info-tab {
+  min-height: 40px;
+  padding: 0.4rem 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  margin-bottom: -1px;
+  background: none;
+  color: #94a5b6;
+  font-size: 0.8rem;
+}
+.controls-page .info-tab[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: #edf3f8;
+}
+.info-panel {
+  padding-top: 0.25rem;
+}
+.info-panel > p {
+  margin-top: 0.75rem;
+  font-size: 0.85rem;
+}
 .control-help {
   color: #94a5b6;
   font-size: 0.8rem;

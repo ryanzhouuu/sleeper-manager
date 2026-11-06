@@ -115,6 +115,18 @@ describe("consolidated control pages", () => {
     expect(html).not.toContain('name="action_1"');
   });
 
+  it("collects past games, history, and help into server-rendered tabs", () => {
+    const html = editor();
+    expect(html).toContain('role="tablist" aria-label="Week details"');
+    expect(html).toMatch(
+      /id="info-tab-past"[^>]*aria-selected="true"[^>]*>Past · 0</,
+    );
+    expect(html).toContain("No finished games yet.");
+    expect(html).toContain("No manual corrections yet.");
+    expect(html).toMatch(/id="info-panel-help"[^>]*hidden=""/);
+    expect(html).not.toContain("<summary>History");
+  });
+
   it("requires an explicit same-origin confirmation form and escapes advice", () => {
     const html = renderToStaticMarkup(<ConfirmationScreen initial={preview} />);
     expect(html.match(/<form[^>]*>/)?.[0]).toContain('method="post"');
