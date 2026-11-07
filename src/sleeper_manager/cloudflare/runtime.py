@@ -281,6 +281,8 @@ def _capture_provider_failure(error: ProviderHTTPError) -> str:
         resource = "player_catalog"
     elif path.endswith("/state/nba"):
         resource = "league_state"
+    elif path.endswith("/graphql"):
+        resource = "matchup_legs"
     elif "/matchups/" in path:
         resource = "matchups"
     elif "/transactions/" in path:

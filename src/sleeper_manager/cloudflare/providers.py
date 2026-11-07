@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import Callable
+import json
+from collections.abc import Callable, Mapping
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode
@@ -73,11 +74,32 @@ class _CloudflareJSONClient:
             )
         return payload
 
-    async def _request(self, url: str, *, fallback_url: str | None = None) -> Any:
+    async def post_object(self, url: str, body: Mapping[str, Any]) -> dict[str, Any]:
+        payload = await self._request(
+            url,
+            request={
+                "method": "POST",
+                "body": json.dumps(body),
+                "headers": {"content-type": "application/json"},
+            },
+        )
+        if not isinstance(payload, dict):
+            raise ProviderPayloadError(f"{self._provider} returned a non-object payload for {url}")
+        return payload
+
+    async def _request(
+        self,
+        url: str,
+        *,
+        fallback_url: str | None = None,
+        request: Mapping[str, Any] | None = None,
+    ) -> Any:
         """Spend at most two attempts, switching hosts only for transport failures."""
         for attempt, resource in enumerate((url, fallback_url or url)):
             try:
-                response = await asyncio.wait_for(self._fetch(resource), timeout=self._timeout)
+                response = await asyncio.wait_for(
+                    self._fetch(resource, **(request or {})), timeout=self._timeout
+                )
             except Exception as error:
                 if attempt == 0:
                     continue
@@ -110,10 +132,12 @@ class CloudflareSleeperClient:
         *,
         base_url: str = "https://api.sleeper.app/v1",
         stats_base_url: str = "https://api.sleeper.com/stats/nba",
+        graphql_url: str = "https://sleeper.com/graphql",
         timeout: timedelta = timedelta(seconds=15),
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._stats_base_url = stats_base_url.rstrip("/")
+        self._graphql_url = graphql_url
         self._client = _CloudflareJSONClient(fetcher, provider="Sleeper", timeout=timeout)
 
     def _url(self, path: str) -> str:
@@ -148,6 +172,19 @@ class CloudflareSleeperClient:
         """Read one player's regular-season game rows, grouped by fantasy week."""
         query = urlencode({"season_type": "regular", "season": season, "grouping": "week"})
         return await self._client.object(f"{self._stats_base_url}/player/{player_id}?{query}")
+
+    async def matchup_legs(self, league_id: str, week: int) -> object:
+        """Read each roster's submitted locks from Sleeper's unauthenticated GraphQL API."""
+        query = (
+            f"query matchup_legs {{ matchup_legs_raw(league_id: {json.dumps(league_id)}, "
+            f"round: {int(week)}) {{ roster_id matchup_id points starters starters_games }} }}"
+        )
+        payload = await self._client.post_object(self._graphql_url, {"query": query})
+        data = payload.get("data")
+        legs = data.get("matchup_legs_raw") if isinstance(data, dict) else None
+        if payload.get("errors") or not isinstance(legs, list):
+            raise ProviderPayloadError("Sleeper GraphQL did not return matchup legs")
+        return legs
 
 
 class CloudflareESPNProvider:

@@ -1,0 +1,38 @@
+{
+  "data": {
+    "matchup_legs_raw": [
+      {
+        "round": 3,
+        "leg": 3,
+        "roster_id": 6,
+        "matchup_id": 2,
+        "points": null,
+        "starters": ["2090", "2091", "2092", "2093", "2094", "2095", "2096", "2097", "2098"],
+        "starters_games": {"2090": "g-nop", "2093": "g-bos"},
+        "subs": null,
+        "picks": null,
+        "bans": null,
+        "custom_points": null,
+        "proj_points": null,
+        "max_points": null,
+        "player_map": null
+      },
+      {
+        "round": 3,
+        "leg": 3,
+        "roster_id": 7,
+        "matchup_id": 2,
+        "points": null,
+        "starters": ["3090", "3091", "3092", "3093", "3094", "3095", "3096", "3097", "3098"],
+        "starters_games": null,
+        "subs": null,
+        "picks": null,
+        "bans": null,
+        "custom_points": null,
+        "proj_points": null,
+        "max_points": null,
+        "player_map": null
+      }
+    ]
+  }
+}

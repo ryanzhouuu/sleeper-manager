@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from sleeper_manager.cloudflare.providers import ProviderHTTPError
-from sleeper_manager.cloudflare.runtime import run_scheduled
+from sleeper_manager.cloudflare.runtime import _capture_provider_failure, run_scheduled
 from sleeper_manager.cloudflare.scheduler_types import ScheduledRunStatus
 from sleeper_manager.persistence.d1 import D1_SCHEMA
 from sleeper_manager.workflows.forecast_collection import ForecastCapturePolicy
@@ -94,3 +94,9 @@ def test_capture_failure_logs_safe_provider_details(
         "Forecast capture failed at collection: ProviderHTTPError "
         "provider=ESPN status=400 resource=roster\n"
     )
+
+
+def test_capture_failure_names_the_sleeper_graphql_route() -> None:
+    error = ProviderHTTPError("Sleeper", 503, "https://sleeper.com/graphql")
+
+    assert _capture_provider_failure(error) == " provider=Sleeper status=503 resource=matchup_legs"

@@ -45,6 +45,16 @@ class SequenceFetch:
         return value
 
 
+class RecordingFetch(SequenceFetch):
+    def __init__(self, *responses: object) -> None:
+        super().__init__(*responses)
+        self.requests: list[dict[str, Any]] = []
+
+    async def __call__(self, url: str, **kwargs: Any) -> Response:
+        self.requests.append({"url": url, **kwargs})
+        return await super().__call__(url)
+
+
 def _fixture(path: str) -> Any:
     return json.loads((FIXTURES / path).read_text())
 
@@ -58,6 +68,46 @@ def test_sleeper_player_game_stats_reads_the_stats_host() -> None:
     assert fetch.urls == [
         "https://api.sleeper.com/stats/nba/player/1511?season_type=regular&season=2026&grouping=week"
     ]
+
+
+def test_sleeper_matchup_legs_posts_unauthenticated_graphql() -> None:
+    fetch = RecordingFetch(Response(200, {"data": {"matchup_legs_raw": []}}))
+
+    assert asyncio.run(CloudflareSleeperClient(fetch).matchup_legs("L", 3)) == []
+
+    (request,) = fetch.requests
+    assert request["url"] == "https://sleeper.com/graphql"
+    assert request["method"] == "POST"
+    assert "authorization" not in {key.lower() for key in request["headers"]}
+    query = json.loads(request["body"])["query"]
+    assert 'matchup_legs_raw(league_id: "L", round: 3)' in query
+    assert "starters_games" in query
+    assert "mutation" not in query
+
+
+@pytest.mark.parametrize(
+    "payload",
+    (
+        {"data": {"matchup_legs_raw": None}, "errors": [{"message": "x"}]},
+        {"data": {"matchup_legs_raw": []}, "errors": [{"message": "x"}]},
+        {"data": {"matchup_legs_raw": None}},
+        {"data": None},
+        [],
+    ),
+)
+def test_sleeper_matchup_legs_graphql_errors_raise_payload_error(payload: Any) -> None:
+    fetch = RecordingFetch(Response(200, payload))
+
+    with pytest.raises(ProviderPayloadError):
+        asyncio.run(CloudflareSleeperClient(fetch).matchup_legs("L", 3))
+
+
+def test_sleeper_matchup_legs_retries_transient_http_once() -> None:
+    fetch = RecordingFetch(Response(503, {}), Response(200, {"data": {"matchup_legs_raw": []}}))
+
+    assert asyncio.run(CloudflareSleeperClient(fetch).matchup_legs("L", 3)) == []
+    assert len(fetch.requests) == 2
+    assert all(request["method"] == "POST" for request in fetch.requests)
 
 
 @pytest.mark.parametrize("status", (429, 500, 503))
