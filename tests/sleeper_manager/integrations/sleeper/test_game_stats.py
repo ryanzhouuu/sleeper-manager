@@ -6,6 +6,7 @@ from sleeper_manager.domain.scoring import BoxScoreLine
 from sleeper_manager.integrations.sleeper.game_stats import (
     SleeperGameStatsError,
     box_score_line,
+    game_stats_by_id,
     player_game_stats,
 )
 
@@ -59,3 +60,30 @@ def test_line_includes_fouls_and_defaults_omitted_counts_to_zero() -> None:
 def test_line_rejects_values_that_are_not_counts(value: object) -> None:
     with pytest.raises(SleeperGameStatsError):
         box_score_line({"pts": value})
+
+
+def test_game_stats_by_id_matches_the_sleeper_game_id() -> None:
+    payload = {
+        "2": [{"date": "2026-11-04", "game_id": "g-tor", "stats": {"pts": 13.0}}],
+        "3": [{"date": "2026-11-04", "game_id": "g-nop", "stats": STATS}],
+    }
+
+    assert game_stats_by_id(payload, "g-nop") == STATS
+    assert game_stats_by_id(payload, "g-missing") is None
+
+
+def test_game_stats_by_id_keeps_empty_stats_distinct_from_a_missing_row() -> None:
+    assert game_stats_by_id({"3": [{"game_id": "g-nop", "stats": None}]}, "g-nop") == {}
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"3": [{"game_id": "g-nop", "stats": {}}], "4": [{"game_id": "g-nop", "stats": {}}]},
+        {"3": [{"game_id": "g-nop", "stats": "bad"}]},
+        {"3": "bad"},
+    ],
+)
+def test_game_stats_by_id_rejects_untrustworthy_payloads(payload: dict[str, object]) -> None:
+    with pytest.raises(SleeperGameStatsError):
+        game_stats_by_id(payload, "g-nop")

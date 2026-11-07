@@ -17,6 +17,16 @@ def player_game_stats(payload: Mapping[str, Any], game_date: date) -> Mapping[st
     Sleeper also publishes empty stats for a game the player missed or that has not posted.
     """
 
+    return _single_game(payload, "date", game_date.isoformat())
+
+
+def game_stats_by_id(payload: Mapping[str, Any], game_id: str) -> Mapping[str, Any] | None:
+    """Return the stats for the Sleeper game id a lock names, or None without a row."""
+
+    return _single_game(payload, "game_id", game_id)
+
+
+def _single_game(payload: Mapping[str, Any], key: str, value: str) -> Mapping[str, Any] | None:
     matches: list[Mapping[str, Any]] = []
     for rows in payload.values():
         if not isinstance(rows, list):
@@ -24,12 +34,12 @@ def player_game_stats(payload: Mapping[str, Any], game_date: date) -> Mapping[st
         for row in rows:
             if not isinstance(row, Mapping):
                 raise SleeperGameStatsError("Sleeper stat row must be an object")
-            if row.get("date") == game_date.isoformat():
+            if row.get(key) == value:
                 matches.append(row)
     if not matches:
         return None
     if len(matches) > 1:
-        raise SleeperGameStatsError(f"Sleeper has {len(matches)} stat rows for {game_date}")
+        raise SleeperGameStatsError(f"Sleeper has {len(matches)} stat rows for {key} {value}")
     stats = matches[0].get("stats") or {}
     if not isinstance(stats, Mapping):
         raise SleeperGameStatsError("Sleeper stats must be an object")
