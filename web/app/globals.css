@@ -136,6 +136,15 @@ ul {
   padding-left: 1ch;
 }
 
+.side-row .score {
+  display: grid;
+  justify-items: end;
+}
+
+.lock-progress {
+  color: var(--accent);
+}
+
 .roster-row {
   grid-template-columns: 4ch 20px minmax(0, 1fr) var(--positions-width) 16px 3ch;
 }

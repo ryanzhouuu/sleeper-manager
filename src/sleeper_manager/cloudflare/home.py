@@ -36,6 +36,7 @@ from sleeper_manager.cloudflare.home_roster import (
     roster_rows,
     roster_standings,
 )
+from sleeper_manager.cloudflare.live_score import home_matchup_scores, scored_sides
 from sleeper_manager.cloudflare.providers import CloudflareProviderError
 from sleeper_manager.cloudflare.routes import RouteResponse
 from sleeper_manager.domain.nba import (
@@ -74,6 +75,10 @@ class HomeSleeper(Protocol):
     async def players(self, *, active: bool = True) -> dict[str, dict[str, Any]]: ...
 
     async def state(self) -> dict[str, Any]: ...
+
+    async def matchup_legs(self, league_id: str, week: int) -> object: ...
+
+    async def player_game_stats(self, player_id: str, season: int) -> dict[str, Any]: ...
 
 
 class HomeSchedule(Protocol):
@@ -132,6 +137,22 @@ async def build_home(
     if matchup is None:
         return _league_unavailable()
     manager_side, opponent_side = matchup
+    if week > 0:
+        manager_side, opponent_side = scored_sides(
+            manager_side,
+            opponent_side,
+            await home_matchup_scores(
+                sleeper,
+                repository,
+                league.scoring_settings,
+                league_id,
+                week,
+                manager_roster.roster_id,
+                timezone_name=timezone_name,
+                now=now,
+            ),
+            manager_roster.roster_id,
+        )
     loaded_identities = await load_player_identities(
         sleeper, repository, timezone_name=timezone_name, now=now
     )

@@ -39,6 +39,14 @@ class FakeSleeper:
             {"roster_id": 1, "matchup_id": 7, "points": True, "starters": ["known"]},
             {"roster_id": 2, "matchup_id": 7, "points": 9},
         ]
+        self.legs_payload: list[dict[str, object]] = [
+            {"roster_id": 1, "matchup_id": 7, "points": None, "starters": ["known"]},
+            {"roster_id": 2, "matchup_id": 7, "points": None, "starters": ["other"]},
+        ]
+        self.legs_error: BaseException | None = None
+        self.legs_calls = 0
+        self.stats_payload: dict[str, dict[str, object]] = {}
+        self.stats_calls: list[str] = []
         self.manager_settings: dict[str, object] | None = {
             "wins": 2,
             "losses": 1,
@@ -115,6 +123,18 @@ class FakeSleeper:
         del league_id, week
         self.matchup_calls += 1
         return list(self.matchup_payload)
+
+    async def matchup_legs(self, league_id: str, week: int) -> object:
+        del league_id, week
+        self.legs_calls += 1
+        if self.legs_error is not None:
+            raise self.legs_error
+        return list(self.legs_payload)
+
+    async def player_game_stats(self, player_id: str, season: int) -> dict[str, object]:
+        assert season == 2026
+        self.stats_calls.append(player_id)
+        return self.stats_payload.get(player_id, {})
 
     async def players(self, *, active: bool = True) -> dict[str, dict[str, object]]:
         del active
@@ -221,11 +241,11 @@ def test_build_home_returns_roster_with_null_score_and_missing_player(tmp_path) 
     assert [row["slot"] for row in document["roster"]] == ["PG", "BN"]
     assert document["roster"][0]["name"] == "Known Player"
     assert document["roster"][1]["name"] is None
-    assert document["matchup"]["manager"]["score"] is None
+    assert document["matchup"]["manager"]["score"] == 0.0
     assert document["matchup"]["manager"]["image_url"] == (
         "https://sleepercdn.com/avatars/thumbs/abc"
     )
-    assert document["matchup"]["opponent"]["score"] == 9.0
+    assert document["matchup"]["opponent"]["score"] == 0.0
     assert [item["player_name"] for item in document["games"]["items"]] == ["Known Player"]
     assert document["games"]["items"][0]["home"] is True
     assert document["games"]["items"][0]["opponent"] == "BOS"
@@ -297,11 +317,15 @@ def test_build_home_bye_week_omits_opponent(tmp_path) -> None:  # type: ignore[n
     sleeper.matchup_payload = [
         {"roster_id": 1, "matchup_id": None, "points": 3, "starters": ["known"]}
     ]
+    sleeper.legs_payload = [
+        {"roster_id": 1, "matchup_id": None, "points": 3, "starters": ["known"]}
+    ]
 
     document = _build(sleeper, FakeSchedule(), _repository(tmp_path)).payload
 
     assert document["matchup"]["opponent"] is None
     assert document["matchup"]["manager"]["score"] == 3.0
+    assert document["matchup"]["manager"]["score_final"] is True
 
 
 def test_build_home_week_zero_does_not_request_matchups(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -311,6 +335,7 @@ def test_build_home_week_zero_does_not_request_matchups(tmp_path) -> None:  # ty
     document = _build(sleeper, FakeSchedule(), _repository(tmp_path)).payload
 
     assert sleeper.matchup_calls == 0
+    assert sleeper.legs_calls == 0
     assert document["matchup"]["opponent"] is None
     assert document["matchup"]["manager"]["score"] is None
 
@@ -434,9 +459,9 @@ def test_build_home_keeps_manager_when_opponent_owner_is_missing(tmp_path) -> No
 
     document = _build(sleeper, FakeSchedule(), _repository(tmp_path)).payload
 
-    assert document["matchup"]["manager"]["score"] is None
+    assert document["matchup"]["manager"]["score"] == 0.0
     assert document["matchup"]["opponent"]["name"] is None
-    assert document["matchup"]["opponent"]["score"] == 9.0
+    assert document["matchup"]["opponent"]["score"] == 0.0
     assert document["roster"][0]["name"] == "Known Player"
 
 
@@ -501,3 +526,112 @@ def test_build_home_drops_blank_positions_and_non_string_injury(tmp_path) -> Non
     assert row["name"] == "Known Player"
     assert row["positions"] == ["PG"]
     assert row["injury_status"] is None
+
+
+BIG_GAME = {"pts": 40.0, "reb": 5.0, "ast": 5.0, "stl": 2.0, "to": 4.0, "tpm": 5.0}
+SCORING = {"pts": 1, "reb": 1.2, "ast": 1.5, "stl": 2, "to": -1, "tpm": 0.5, "bonus_pt_40p": 2}
+
+
+class ScoredSleeper(FakeSleeper):
+    async def league(self, league_id: str) -> dict[str, object]:
+        league = await super().league(league_id)
+        return {**league, "scoring_settings": SCORING}
+
+
+def _locked_sleeper() -> ScoredSleeper:
+    sleeper = ScoredSleeper()
+    sleeper.matchup_payload = [
+        {"roster_id": 1, "matchup_id": 7, "points": 999, "starters": ["known"]},
+        {"roster_id": 2, "matchup_id": 7, "points": 999, "starters": ["other"]},
+    ]
+    sleeper.legs_payload = [
+        {
+            "roster_id": 1,
+            "matchup_id": 7,
+            "points": None,
+            "starters": [f"s{index}" for index in range(9)],
+            "starters_games": {"known": "g-nop"},
+        },
+        {
+            "roster_id": 2,
+            "matchup_id": 7,
+            "points": None,
+            "starters": [f"o{index}" for index in range(9)],
+            "starters_games": {"other": "g-bos"},
+        },
+    ]
+    sleeper.stats_payload = {
+        "known": {"3": [{"game_id": "g-nop", "stats": BIG_GAME}]},
+        "other": {"3": [{"game_id": "g-bos", "stats": {"pts": 12.0}}]},
+    }
+    return sleeper
+
+
+def test_home_scores_both_sides_from_locked_games(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    matchup = _build(_locked_sleeper(), FakeSchedule(), _repository(tmp_path)).payload["matchup"]
+
+    assert matchup["manager"]["score"] == 58.0
+    assert matchup["manager"]["score_final"] is False
+    assert matchup["manager"]["locked"] == 1
+    assert matchup["manager"]["starters"] == 9
+    assert matchup["manager"]["lock_data"] == "ready"
+    assert matchup["opponent"]["score"] == 12.0
+    assert matchup["opponent"]["lock_data"] == "ready"
+
+
+def test_home_marks_lock_data_unavailable_when_graphql_fails(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    sleeper = _locked_sleeper()
+    sleeper.legs_error = CloudflareProviderError("graphql down")
+
+    response = _build(sleeper, FakeSchedule(), _repository(tmp_path))
+
+    assert response.status_code == 200
+    for side in ("manager", "opponent"):
+        assert response.payload["matchup"][side]["score"] is None
+        assert response.payload["matchup"][side]["locked"] is None
+        assert response.payload["matchup"][side]["lock_data"] == "unavailable"
+
+
+def test_home_marks_lock_data_unavailable_when_legs_are_malformed(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    sleeper = _locked_sleeper()
+    sleeper.legs_payload = [{"roster_id": "1"}]
+
+    matchup = _build(sleeper, FakeSchedule(), _repository(tmp_path)).payload["matchup"]
+
+    assert matchup["manager"]["lock_data"] == "unavailable"
+
+
+def test_home_marks_side_pending_when_locked_stats_are_missing(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    sleeper = _locked_sleeper()
+    sleeper.stats_payload = {"other": sleeper.stats_payload["other"]}
+
+    matchup = _build(sleeper, FakeSchedule(), _repository(tmp_path)).payload["matchup"]
+
+    assert matchup["manager"]["score"] is None
+    assert matchup["manager"]["locked"] == 1
+    assert matchup["manager"]["lock_data"] == "pending"
+    assert matchup["opponent"]["score"] == 12.0
+
+
+def test_home_marks_side_pending_when_a_stats_read_fails(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    class FailingStats(ScoredSleeper):
+        async def player_game_stats(self, player_id: str, season: int) -> dict[str, object]:
+            raise CloudflareProviderError("stats down")
+
+    sleeper = FailingStats()
+    sleeper.legs_payload = _locked_sleeper().legs_payload
+
+    matchup = _build(sleeper, FakeSchedule(), _repository(tmp_path)).payload["matchup"]
+
+    assert matchup["manager"]["lock_data"] == "pending"
+    assert matchup["manager"]["score"] is None
+
+
+def test_home_caches_completed_locked_game_stats_for_the_day(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    sleeper = _locked_sleeper()
+    repository = _repository(tmp_path)
+
+    _build(sleeper, FakeSchedule(), repository)
+    _build(sleeper, FakeSchedule(), repository)
+
+    assert sorted(sleeper.stats_calls) == ["known", "other"]

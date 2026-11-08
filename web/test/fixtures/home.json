@@ -14,7 +14,11 @@
         "losses": 1,
         "ties": 0
       },
-      "points_for": 812.4
+      "points_for": 812.4,
+      "score_final": false,
+      "locked": 4,
+      "starters": 9,
+      "lock_data": "ready"
     },
     "opponent": {
       "name": "Away Team",
@@ -25,7 +29,11 @@
         "losses": 1,
         "ties": 1
       },
-      "points_for": 700.5
+      "points_for": 700.5,
+      "score_final": false,
+      "locked": 3,
+      "starters": 9,
+      "lock_data": "ready"
     }
   },
   "roster": [

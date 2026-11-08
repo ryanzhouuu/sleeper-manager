@@ -49,6 +49,50 @@ describe("WeekBlock", () => {
   });
 });
 
+describe("WeekBlock lock progress", () => {
+  const manager = document.matchup.manager;
+  const render = (side: typeof manager) =>
+    renderToStaticMarkup(
+      <WeekBlock
+        league={document.league}
+        matchup={{ manager: side, opponent: null }}
+      />,
+    );
+
+  it("shows the live score with the locked count", () => {
+    const html = render({ ...manager, score: 58, locked: 1, starters: 9 });
+
+    expect(html).toContain("58.0");
+    expect(html).toContain("1/9 locked");
+  });
+
+  it("marks a final score", () => {
+    const html = render({ ...manager, score: 383, score_final: true });
+
+    expect(html).toContain("383.0");
+    expect(html).toContain("final");
+    expect(html).not.toContain("locked");
+  });
+
+  it("says when lock data is unavailable", () => {
+    const html = render({
+      ...manager,
+      score: null,
+      locked: null,
+      lock_data: "unavailable",
+    });
+
+    expect(html).toContain("lock data unavailable");
+    expect(html).not.toContain("142.6");
+  });
+
+  it("says when locked stats are pending", () => {
+    const html = render({ ...manager, score: null, lock_data: "pending" });
+
+    expect(html).toContain("4/9 locked · stats pending");
+  });
+});
+
 describe("RecommendationBlock", () => {
   it("marks an action-required plan", () => {
     const html = renderToStaticMarkup(

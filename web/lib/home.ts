@@ -9,12 +9,18 @@ export interface TeamRecord {
   ties: number;
 }
 
+export type LockData = "ready" | "pending" | "unavailable";
+
 export interface MatchupSide {
   name: string | null;
   score: number | null;
   image_url: string | null;
   record: TeamRecord | null;
   points_for: number | null;
+  score_final: boolean;
+  locked: number | null;
+  starters: number | null;
+  lock_data: LockData;
 }
 
 export interface RosterEntry {
@@ -58,6 +64,7 @@ export type HomeResult =
   { status: "ok"; document: HomeDocument } | { status: "unavailable" };
 
 const SECTION_STATUSES: readonly string[] = ["ready", "empty", "unavailable"];
+const LOCK_DATA: readonly string[] = ["ready", "pending", "unavailable"];
 const PLAN_STATUSES: readonly string[] = [
   "action_required",
   "no_action",
@@ -118,7 +125,22 @@ function side(value: unknown): MatchupSide {
     image_url: nullableString(fields.image_url),
     record: teamRecord(fields.record),
     points_for: nullableNumber(fields.points_for),
+    // Workers deployed before lock-in scoring omit the lock fields.
+    score_final: fields.score_final === true,
+    locked: nullableInteger(fields.locked),
+    starters: nullableInteger(fields.starters),
+    lock_data: lockData(fields.lock_data),
   };
+}
+
+function lockData(value: unknown): LockData {
+  if (value === undefined) {
+    return "ready";
+  }
+  if (typeof value !== "string" || !LOCK_DATA.includes(value)) {
+    throw new InvalidDocument("lock_data");
+  }
+  return value as LockData;
 }
 
 // Workers deployed before records, positions, and injury status omit them.
@@ -243,6 +265,10 @@ function integer(value: unknown): number {
 
 function nullableString(value: unknown): string | null {
   return value === null || value === undefined ? null : string(value);
+}
+
+function nullableInteger(value: unknown): number | null {
+  return value === null || value === undefined ? null : integer(value);
 }
 
 function nullableNumber(value: unknown): number | null {

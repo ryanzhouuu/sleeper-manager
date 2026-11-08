@@ -1,4 +1,4 @@
-import type { GameItem, TeamRecord } from "./home";
+import type { GameItem, MatchupSide, TeamRecord } from "./home";
 
 export const MISSING = "—";
 
@@ -72,4 +72,23 @@ export function formatPointsFor(points: number): string {
 
 export function formatPositions(positions: readonly string[]): string {
   return positions.length > 0 ? positions.join("/") : MISSING;
+}
+
+export function formatLockProgress(
+  side: Pick<MatchupSide, "score_final" | "locked" | "starters" | "lock_data">,
+): string | null {
+  if (side.lock_data === "unavailable") {
+    return "lock data unavailable";
+  }
+  if (side.score_final) {
+    return "final";
+  }
+  const count =
+    side.locked === null || side.starters === null
+      ? null
+      : `${side.locked}/${side.starters} locked`;
+  if (side.lock_data === "pending") {
+    return count === null ? "stats pending" : `${count} · stats pending`;
+  }
+  return count;
 }

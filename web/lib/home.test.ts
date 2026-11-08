@@ -60,11 +60,26 @@ describe("parseHomeDocument", () => {
     expect(document.games.items[0].injury_status).toBe("DTD");
   });
 
+  it("reads lock progress for each side", () => {
+    const document = parseHomeDocument(fixture);
+
+    expect(document.matchup.manager).toMatchObject({
+      score_final: false,
+      locked: 4,
+      starters: 9,
+      lock_data: "ready",
+    });
+  });
+
   it("defaults fields an older worker omits", () => {
     const document = parseHomeDocument(
       withFields({
         "matchup.manager.record": REMOVE,
         "matchup.manager.points_for": REMOVE,
+        "matchup.manager.score_final": REMOVE,
+        "matchup.manager.locked": REMOVE,
+        "matchup.manager.starters": REMOVE,
+        "matchup.manager.lock_data": REMOVE,
         "roster.0.positions": REMOVE,
         "roster.0.injury_status": REMOVE,
         "games.items.0.injury_status": REMOVE,
@@ -73,6 +88,12 @@ describe("parseHomeDocument", () => {
 
     expect(document.matchup.manager.record).toBeNull();
     expect(document.matchup.manager.points_for).toBeNull();
+    expect(document.matchup.manager).toMatchObject({
+      score_final: false,
+      locked: null,
+      starters: null,
+      lock_data: "ready",
+    });
     expect(document.roster[0].positions).toEqual([]);
     expect(document.roster[0].injury_status).toBeNull();
     expect(document.games.items[0].injury_status).toBeNull();
@@ -114,6 +135,8 @@ describe("parseHomeDocument", () => {
     ["a missing roster", { roster: REMOVE }],
     ["a string score", { "matchup.manager.score": "142.6" }],
     ["a fractional win count", { "matchup.manager.record.wins": 1.5 }],
+    ["an unknown lock data state", { "matchup.manager.lock_data": "stale" }],
+    ["a fractional lock count", { "matchup.manager.locked": 1.5 }],
     ["a non-string position", { "roster.0.positions": ["PG", 3] }],
   ])("rejects %s", (_, changes) => {
     expect(() => parseHomeDocument(withFields(changes))).toThrow();

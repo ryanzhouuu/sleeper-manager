@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import {
   MISSING,
   formatLocalTime,
+  formatLockProgress,
   formatPointsFor,
   formatPositions,
   formatRecord,
@@ -58,6 +59,7 @@ export function WeekBlock({
 }
 
 function SideRow({ side }: { side: MatchupSide }) {
+  const progress = formatLockProgress(side);
   return (
     <li className="row side-row">
       <span className="cell">
@@ -70,8 +72,11 @@ function SideRow({ side }: { side: MatchupSide }) {
       <span className="number">
         {side.points_for === null ? null : formatPointsFor(side.points_for)}
       </span>
-      <span className="number">
+      <span className="number score">
         {side.score === null ? null : formatScore(side.score)}
+        {progress === null ? null : (
+          <span className="lock-progress">{progress}</span>
+        )}
       </span>
     </li>
   );

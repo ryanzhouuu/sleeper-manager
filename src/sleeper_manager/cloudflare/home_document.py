@@ -48,6 +48,10 @@ class HomeSide:
     image_url: str | None
     record: TeamRecord | None = None
     points_for: float | None = None
+    score_final: bool = False
+    locked: int | None = None
+    starters: int | None = None
+    lock_data: Literal["ready", "pending", "unavailable"] = "unavailable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,6 +216,10 @@ def _side(side: HomeSide) -> dict[str, Any]:
             else {"wins": record.wins, "losses": record.losses, "ties": record.ties}
         ),
         "points_for": side.points_for,
+        "score_final": side.score_final,
+        "locked": side.locked,
+        "starters": side.starters,
+        "lock_data": side.lock_data,
     }
 
 

@@ -167,6 +167,35 @@ def test_assemble_home_game_row_uses_player_image_fields() -> None:
     assert set(document) == {"league", "matchup", "roster", "games", "recommendation"}
 
 
+def test_assemble_home_side_carries_lock_progress() -> None:
+    document = assemble_home(
+        league_name="Lock In",
+        week=3,
+        timezone_name="America/Chicago",
+        manager=HomeSide(
+            name="Home Team",
+            score=58.0,
+            image_url=None,
+            locked=1,
+            starters=9,
+            lock_data="ready",
+        ),
+        opponent=HomeSide(name="Away Team", score=None, image_url=None),
+        roster=(),
+        games_status="empty",
+        games=(),
+        recommendation_status="empty",
+    )
+
+    manager = document["matchup"]["manager"]
+    assert manager["score"] == 58.0
+    assert manager["score_final"] is False
+    assert manager["locked"] == 1
+    assert manager["starters"] == 9
+    assert manager["lock_data"] == "ready"
+    assert document["matchup"]["opponent"]["lock_data"] == "unavailable"
+
+
 @pytest.mark.parametrize(
     ("trace_json", "expected"),
     [
