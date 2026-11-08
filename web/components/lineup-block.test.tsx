@@ -37,6 +37,33 @@ describe("LineupBlock", () => {
     expect(bench).toContain("unverified");
   });
 
+  it("renders each game as a state-tagged box with the opponent logo", () => {
+    const brunson = rows(
+      renderToStaticMarkup(
+        <LineupBlock lineup={document.lineup} timeZone={timeZone} />,
+      ),
+    )[0];
+
+    expect(brunson).toContain('class="game-box" data-state="lockable"');
+    expect(brunson).toContain('class="game-box" data-state="upcoming"');
+    expect(brunson).toContain(
+      'src="https://a.espncdn.com/i/teamlogos/nba/500/tor.png" alt="TOR"',
+    );
+  });
+
+  it("places the decision above the game boxes", () => {
+    const tatum = rows(
+      renderToStaticMarkup(
+        <LineupBlock lineup={document.lineup} timeZone={timeZone} />,
+      ),
+    )[1];
+
+    expect(tatum.indexOf('class="decision"')).toBeGreaterThan(-1);
+    expect(tatum.indexOf('class="decision"')).toBeLessThan(
+      tatum.indexOf('class="lineup-games"'),
+    );
+  });
+
   it("shows a sacrifice decision with before and after totals", () => {
     const tatum = rows(
       renderToStaticMarkup(

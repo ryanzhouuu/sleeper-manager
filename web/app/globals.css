@@ -151,38 +151,112 @@ ul {
 }
 
 .lineup-games {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(20ch, 1fr));
+  gap: 0.5rem;
+  margin-left: calc(5ch + 1ch);
+}
+
+.game-box {
+  --state: var(--rule);
   display: flex;
   flex-direction: column;
-  padding-left: calc(5ch + 1ch);
+  gap: 0.125rem;
+  min-width: 0;
+  padding: 0.5rem 0.625rem;
+  background: var(--background);
+  border: 1px solid var(--rule);
+  box-shadow: inset 0 3px 0 var(--state);
 }
 
-.lineup-game {
-  display: grid;
-  grid-template-columns: 11ch minmax(0, 1fr) 6ch;
-  column-gap: 1ch;
-  align-items: baseline;
-}
-
-.lineup-game .number:nth-child(3) {
-  justify-self: end;
-}
-
-.game-state {
+.game-box[data-overridable] {
   grid-column: 1 / -1;
+}
+
+.game-box-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1ch;
   color: var(--accent);
 }
 
-.lineup-game[data-state="locked"] .game-state,
-.lineup-game[data-state="lockable"] .game-state {
+.game-score {
   color: var(--text);
+  font-weight: 500;
 }
 
-.lineup-game[data-state="unverified"] .game-state {
-  color: #facc15;
+.game-opponent {
+  display: flex;
+  align-items: center;
+  gap: 0.5ch;
+  min-width: 0;
+}
+
+.game-state {
+  color: var(--state);
+  font-weight: 500;
+}
+
+.game-deadline {
+  color: var(--accent);
+}
+
+.game-box[data-state="locked"] {
+  --state: #4ade80;
+  border-color: var(--state);
+  background: color-mix(in srgb, var(--state) 10%, var(--background));
+}
+
+.game-box[data-state="locked"] .game-state::before {
+  content: "✓ ";
+}
+
+.game-box[data-state="lockable"] {
+  --state: var(--accent);
+  border-color: var(--state);
+}
+
+.game-box[data-state="live"] {
+  --state: #fb923c;
+}
+
+.game-box[data-state="live"] .game-state::before {
+  content: "● ";
+}
+
+.game-box[data-state="upcoming"] {
+  --state: var(--rule);
+}
+
+.game-box[data-state="upcoming"] .game-state {
+  color: var(--accent);
+}
+
+.game-box[data-state="unverified"] {
+  --state: #facc15;
+  border-color: var(--state);
+}
+
+.game-box[data-state^="passed"],
+.game-box[data-state="not_eligible"] {
+  --state: var(--rule);
+  border-style: dashed;
+  background: transparent;
+  box-shadow: none;
+  opacity: 0.6;
+}
+
+.game-box[data-state^="passed"] .game-state,
+.game-box[data-state="not_eligible"] .game-state {
+  color: var(--accent);
+}
+
+.game-box[data-state^="passed"] .game-score {
+  text-decoration: line-through;
 }
 
 .decision {
-  margin: 0.25rem 0 0 calc(5ch + 1ch);
+  margin: 0.25rem 0 0.5rem calc(5ch + 1ch);
   padding-left: 1ch;
   border-left: 2px solid var(--accent);
 }
@@ -309,4 +383,11 @@ ul {
   display: block;
   object-fit: cover;
   border-radius: 0;
+}
+
+@media (max-width: 30rem) {
+  .lineup-games,
+  .decision {
+    margin-left: 0;
+  }
 }

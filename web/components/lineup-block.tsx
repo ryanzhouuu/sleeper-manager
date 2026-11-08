@@ -56,9 +56,12 @@ export function LineupBlock({
                 <span className="text">{row.name ?? MISSING}</span>
                 <span className="text">{row.nba_team ?? ""}</span>
               </div>
+              {row.decision ? (
+                <DecisionLine decision={row.decision} timeZone={timeZone} />
+              ) : null}
               <ul className="lineup-games">
                 {row.games.map((game, gameIndex) => (
-                  <GameLine
+                  <GameBox
                     key={gameIndex}
                     game={game}
                     playerId={row.player_id}
@@ -66,9 +69,6 @@ export function LineupBlock({
                   />
                 ))}
               </ul>
-              {row.decision ? (
-                <DecisionLine decision={row.decision} timeZone={timeZone} />
-              ) : null}
             </li>
           ))}
         </ul>
@@ -77,7 +77,7 @@ export function LineupBlock({
   );
 }
 
-function GameLine({
+function GameBox({
   game,
   playerId,
   timeZone,
@@ -87,22 +87,38 @@ function GameLine({
   timeZone: string;
 }) {
   return (
-    <li className="lineup-game" data-state={game.state}>
-      <span className="number">{formatGameMoment(game.start, timeZone)}</span>
-      <span className="text">
-        {game.home === null
-          ? (game.opponent ?? MISSING)
-          : opponentLabel({ home: game.home, opponent: game.opponent })}
-      </span>
-      <span className="number">
-        {game.score === null ? "" : formatScore(game.score)}
-      </span>
-      <span className="game-state">
-        {GAME_STATE_LABELS[game.state]}
-        {game.deadline
-          ? ` · lock by ${formatGameMoment(game.deadline, timeZone)}`
-          : ""}
-      </span>
+    <li
+      className="game-box"
+      data-state={game.state}
+      data-overridable={game.overridable || undefined}
+    >
+      <div className="game-box-head">
+        <span className="number">{formatGameMoment(game.start, timeZone)}</span>
+        <span className="game-score number">
+          {game.score === null ? "" : formatScore(game.score)}
+        </span>
+      </div>
+      <div className="game-opponent">
+        <Mark
+          src={game.opponent_image_url}
+          alt={game.opponent ?? ""}
+          size={16}
+        />
+        <span className="text">
+          {game.home === null
+            ? (game.opponent ?? MISSING)
+            : opponentLabel({ home: game.home, opponent: game.opponent })}
+        </span>
+      </div>
+      <p className="game-state">{GAME_STATE_LABELS[game.state]}</p>
+      {game.deadline ? (
+        <p className="game-deadline">
+          lock by{" "}
+          <span className="number">
+            {formatGameMoment(game.deadline, timeZone)}
+          </span>
+        </p>
+      ) : null}
       {game.overridable &&
       playerId !== null &&
       game.game_id !== null &&

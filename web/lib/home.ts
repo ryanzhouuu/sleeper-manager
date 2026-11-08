@@ -68,6 +68,7 @@ export interface LineupGame {
   game_id: string | null;
   start: Date;
   opponent: string | null;
+  opponent_image_url: string | null;
   home: boolean | null;
   score: number | null;
   state: GameStateName;
@@ -221,6 +222,7 @@ function lineupGame(value: unknown): LineupGame {
     game_id: nullableString(fields.game_id),
     start: instant(fields.start),
     opponent: nullableString(fields.opponent),
+    opponent_image_url: nullableString(fields.opponent_image_url),
     home: fields.home === null ? null : flag(fields.home),
     score: nullableNumber(fields.score),
     state: member(fields.state, GAME_STATES) as GameStateName,
