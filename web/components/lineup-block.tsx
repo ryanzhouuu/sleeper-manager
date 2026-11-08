@@ -40,13 +40,14 @@ export function LineupBlock({
   lineup: LineupRow[];
   timeZone: string;
 }) {
+  const columns = Math.max(1, ...lineup.map((row) => row.games.length));
   return (
     <section className="block">
       <h2 className="label">lineup</h2>
       {lineup.length === 0 ? (
         <p>no lineup yet.</p>
       ) : (
-        <ul className="lineup">
+        <ul className="lineup" style={{ "--games": columns } as CSSProperties}>
           {lineup.map((row, index) => (
             <li className="lineup-row" key={index}>
               <div className="row lineup-head">
@@ -60,10 +61,7 @@ export function LineupBlock({
               {row.decision ? (
                 <DecisionLine decision={row.decision} timeZone={timeZone} />
               ) : null}
-              <ul
-                className="lineup-games"
-                style={{ "--games": row.games.length } as CSSProperties}
-              >
+              <ul className="lineup-games">
                 {row.games.map((game, gameIndex) => (
                   <GameBox
                     key={gameIndex}

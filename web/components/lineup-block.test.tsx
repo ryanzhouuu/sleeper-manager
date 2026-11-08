@@ -51,6 +51,14 @@ describe("LineupBlock", () => {
     );
   });
 
+  it("sizes every game box for the player with the most games", () => {
+    const html = renderToStaticMarkup(
+      <LineupBlock lineup={document.lineup} timeZone={timeZone} />,
+    );
+
+    expect(html).toContain('<ul class="lineup" style="--games:2"');
+  });
+
   it("places the decision above the game boxes", () => {
     const tatum = rows(
       renderToStaticMarkup(
