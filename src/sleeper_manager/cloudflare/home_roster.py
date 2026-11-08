@@ -117,7 +117,7 @@ def _roster_row(
 ) -> RosterRow:
     identity = None if player_id is None else identities.get(player_id)
     if identity is None:
-        return RosterRow(slot=slot, name=None, nba_team=None, espn_id=None)
+        return RosterRow(slot=slot, name=None, nba_team=None, espn_id=None, player_id=player_id)
     return RosterRow(
         slot=slot,
         name=identity.name,
@@ -125,6 +125,7 @@ def _roster_row(
         espn_id=identity.espn_id,
         positions=identity.positions,
         injury_status=identity.injury_status,
+        player_id=player_id,
     )
 
 

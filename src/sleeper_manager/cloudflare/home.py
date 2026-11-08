@@ -14,6 +14,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import ValidationError
 
+from sleeper_manager.cloudflare.dashboard_lineup import home_lineup
 from sleeper_manager.cloudflare.home_cache import decode_schedule, read_home_cache, write_home_cache
 from sleeper_manager.cloudflare.home_document import (
     GameRow,
@@ -137,22 +138,25 @@ async def build_home(
     if matchup is None:
         return _league_unavailable()
     manager_side, opponent_side = matchup
+    scores = (
+        await home_matchup_scores(
+            sleeper,
+            repository,
+            league.scoring_settings,
+            league_id,
+            week,
+            manager_roster.roster_id,
+            timezone_name=timezone_name,
+            now=now,
+        )
+        if week > 0
+        else None
+    )
     if week > 0:
         manager_side, opponent_side = scored_sides(
-            manager_side,
-            opponent_side,
-            await home_matchup_scores(
-                sleeper,
-                repository,
-                league.scoring_settings,
-                league_id,
-                week,
-                manager_roster.roster_id,
-                timezone_name=timezone_name,
-                now=now,
-            ),
-            manager_roster.roster_id,
+            manager_side, opponent_side, scores, manager_roster.roster_id
         )
+    manager_score = None if scores is None else scores.get(manager_roster.roster_id)
     loaded_identities = await load_player_identities(
         sleeper, repository, timezone_name=timezone_name, now=now
     )
@@ -180,6 +184,16 @@ async def build_home(
         now=now,
     )
     recommendation = await _recommendation(repository, league_id, week, now=now)
+    lineup, plan = await home_lineup(
+        repository,
+        league_id,
+        week,
+        manager_roster.roster_id,
+        rows,
+        games if games_status == "ready" else (),
+        now=now,
+        sleeper_locks=None if manager_score is None else manager_score.lock_dates,
+    )
     return RouteResponse(
         200,
         assemble_home(
@@ -196,6 +210,9 @@ async def build_home(
             recommendation_title=recommendation[2],
             recommendation_message=recommendation[3],
             recommendation_deadline=recommendation[4],
+            lineup=lineup,
+            plan=plan,
+            lock_data=manager_side.lock_data,
         ),
     )
 
@@ -384,6 +401,7 @@ async def _games(
                 opponent=game.opponent,
                 home=game.home,
                 injury_status=player.injury_status,
+                player_id=player.player_id,
             )
             for player in players
             for game in labeled

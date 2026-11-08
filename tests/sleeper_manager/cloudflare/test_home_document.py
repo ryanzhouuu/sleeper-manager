@@ -164,7 +164,16 @@ def test_assemble_home_game_row_uses_player_image_fields() -> None:
     assert item["opponent_image_url"].endswith("/bos.png")
     assert item["start"] == TIPOFF.isoformat()
     assert document["recommendation"] == {"status": "empty"}
-    assert set(document) == {"league", "matchup", "roster", "games", "recommendation"}
+    assert set(document) == {
+        "league",
+        "matchup",
+        "roster",
+        "games",
+        "recommendation",
+        "lineup",
+        "plan",
+        "lock_data",
+    }
 
 
 def test_assemble_home_side_carries_lock_progress() -> None:

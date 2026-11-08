@@ -64,6 +64,7 @@ class RosterRow:
     espn_id: str | None
     positions: tuple[str, ...] = ()
     injury_status: str | None = None
+    player_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +77,7 @@ class GameRow:
     opponent: str | None
     home: bool
     injury_status: str | None = None
+    player_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,6 +176,9 @@ def assemble_home(
     recommendation_title: str | None = None,
     recommendation_message: str | None = None,
     recommendation_deadline: datetime | None = None,
+    lineup: Sequence[dict[str, Any]] = (),
+    plan: dict[str, Any] | None = None,
+    lock_data: Literal["ready", "pending", "unavailable"] = "unavailable",
 ) -> dict[str, Any]:
     """Build the public document. Unavailable games contribute no items."""
     if games_status == "unavailable":
@@ -201,6 +206,9 @@ def assemble_home(
         "roster": [_roster_item(row) for row in roster],
         "games": {"status": games_status, "items": game_items},
         "recommendation": recommendation,
+        "lineup": list(lineup),
+        "plan": plan or {},
+        "lock_data": lock_data,
     }
 
 

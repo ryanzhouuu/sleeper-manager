@@ -56,8 +56,10 @@ forecast archive checks, and the local `run-scheduled` command.
 ## HTTP
 
 `GET /health` returns `{"status": "ok"}`. `GET /home` returns the public roster, matchup, games, and
-weekly recommendation document. `/home` does not accept credentials and its body
-omits ids, tokens, and secrets.
+weekly recommendation document, plus a `lineup` of each player's games with derived
+lock states and the planner's decision, and a `plan` summary. `/home` does not accept
+credentials; its body omits league and user ids, tokens, and secrets. Lineup rows carry
+public Sleeper player ids and ESPN game ids so the owner override can name a game.
 
 Python Workers require the `python_workers` compatibility flag and are currently
 in beta. Use `uvx --from workers-py pywrangler dev` for local Worker development.

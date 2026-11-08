@@ -250,9 +250,9 @@ def test_build_home_returns_roster_with_null_score_and_missing_player(tmp_path) 
     assert document["games"]["items"][0]["home"] is True
     assert document["games"]["items"][0]["opponent"] == "BOS"
     assert document["recommendation"] == {"status": "empty"}
-    rendered = str(document)
-    assert "user-1" not in rendered
-    assert "league-1" not in rendered
+    rendered = str({key: value for key, value in document.items() if key != "lineup"})
+    assert "user-1" not in str(document)
+    assert "league-1" not in str(document)
     assert "known" not in rendered
 
 
@@ -635,3 +635,56 @@ def test_home_caches_completed_locked_game_stats_for_the_day(tmp_path) -> None: 
     _build(sleeper, FakeSchedule(), repository)
 
     assert sorted(sleeper.stats_calls) == ["known", "other"]
+
+
+def test_home_includes_lineup_rows_and_plan_summary(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from sleeper_manager.domain.lock_in import LockInOpportunityStatus
+    from sleeper_manager.persistence.lock_in_opportunities import (
+        LockInOpportunityKey,
+        LockInOpportunityRecord,
+    )
+
+    repository = _repository(tmp_path)
+    asyncio.run(
+        repository.upsert_lock_in_opportunity(
+            LockInOpportunityRecord(
+                key=LockInOpportunityKey("league-1", 3, 1, "known", "NOP-0"),
+                provider_player_id="55",
+                scheduled_start=TIPOFF,
+                action_deadline=TIPOFF + timedelta(days=1),
+                fantasy_week_end=TIPOFF + timedelta(days=3),
+                status=LockInOpportunityStatus.SCHEDULED,
+                next_check_at=TIPOFF,
+                created_at=NOW,
+                updated_at=NOW,
+            )
+        )
+    )
+
+    document = _build(FakeSleeper(), FakeSchedule(), repository).payload
+
+    first = document["lineup"][0]
+    assert (first["slot"], first["slot_index"], first["player_id"]) == ("PG", 0, "known")
+    assert [(game["game_id"], game["state"], game["opponent"]) for game in first["games"]] == [
+        ("NOP-0", "upcoming", "BOS")
+    ]
+    assert document["lineup"][1]["slot"] == "BN"
+    assert document["plan"] == {
+        "status": None,
+        "team_before": None,
+        "team_after": None,
+        "confidence": None,
+        "p10": None,
+        "p90": None,
+    }
+    assert document["lock_data"] == "ready"
+
+
+def test_home_lineup_reports_unavailable_lock_data(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    sleeper = FakeSleeper()
+    sleeper.legs_error = CloudflareProviderError("graphql down")
+
+    document = _build(sleeper, FakeSchedule(), _repository(tmp_path)).payload
+
+    assert document["lock_data"] == "unavailable"
+    assert [row["slot"] for row in document["lineup"]] == ["PG", "BN"]

@@ -1,5 +1,6 @@
 import asyncio
 from collections.abc import Mapping
+from datetime import date
 from typing import Any
 
 from sleeper_manager.cloudflare.live_score import SideScore, side_score
@@ -96,3 +97,11 @@ def test_side_score_is_pending_when_a_locked_game_has_empty_stats() -> None:
     reader = stats({"2090": [{"game_id": "g-nop", "stats": {}}]})
 
     assert score(leg(starters_games={"2090": "g-nop"}), reader).pending is True
+
+
+def test_side_score_reports_each_locked_games_eastern_date() -> None:
+    reader = stats({"2090": [{"game_id": "g-nop", "date": "2026-11-05", "stats": BIG_GAME}]})
+
+    result = score(leg(starters_games={"2090": "g-nop"}), reader)
+
+    assert dict(result.lock_dates) == {"2090": date(2026, 11, 5)}
