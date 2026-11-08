@@ -117,7 +117,7 @@ def _evaluation_message(evaluation: LockInEvaluation) -> str:
     instruction = (
         "Lock the game in Sleeper."
         if evaluation.kind is LockInEvaluationKind.LOCK
-        else "Leave this game unlocked in Sleeper. The player can stay starting or be substituted."
+        else "Pass on this game."
     )
     return (
         f"Observed game score: {evaluation.observed_score:.2f} pts.\n\n"

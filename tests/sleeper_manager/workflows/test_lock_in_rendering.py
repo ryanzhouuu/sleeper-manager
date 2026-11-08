@@ -61,8 +61,8 @@ def test_actionable_messages_show_selected_and_alternative_team_totals(
     if kind is LockInEvaluationKind.LOCK:
         assert "Lock the game in Sleeper." in message
     else:
-        assert "Leave this game unlocked in Sleeper." in message
-        assert "The player can stay starting or be substituted." in message
+        assert "Pass on this game." in message
+        assert "unlocked" not in message
     assert "confirm" not in message.lower()
     assert "record" not in message.lower()
 
