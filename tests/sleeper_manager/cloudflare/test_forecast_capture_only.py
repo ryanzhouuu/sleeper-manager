@@ -35,7 +35,6 @@ def test_forecast_capture_runs_without_activating_advice(
             "sleeper_manager.cloudflare.runtime.capture_scheduled_forecast", capture
         )
         env = SimpleNamespace(
-            ACKNOWLEDGEMENT_BASE_URL="https://example.test/ack",
             NTFY_TOPIC="test-topic",
             SLEEPER_LEAGUE_ID="league-1",
             SLEEPER_USER_ID="user-1",
@@ -80,7 +79,6 @@ def test_capture_failure_logs_safe_provider_details(
             "sleeper_manager.cloudflare.runtime.capture_scheduled_forecast", fail_capture
         )
         env = SimpleNamespace(
-            ACKNOWLEDGEMENT_BASE_URL="https://example.test/ack",
             NTFY_TOPIC="test-topic",
             SLEEPER_LEAGUE_ID="league-1",
             SLEEPER_USER_ID="user-1",

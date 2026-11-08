@@ -2,7 +2,6 @@ import asyncio
 import sqlite3
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from urllib.parse import parse_qs, urlparse
 
 from sleeper_manager.notifications.base import Notification
 from sleeper_manager.notifications.dispatcher import NotificationDispatcher
@@ -43,47 +42,30 @@ def request() -> RecommendationRequest:
     )
 
 
-def test_notification_loop_persists_actions_and_suppresses_duplicates(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def _loop(tmp_path, sender, **kwargs):  # type: ignore[no-untyped-def]
     repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
     asyncio.run(repository.initialize())
+    return NotificationLoop(repository, NotificationDispatcher(sender), clock=lambda: NOW, **kwargs)
+
+
+def test_notification_loop_suppresses_duplicates(tmp_path) -> None:  # type: ignore[no-untyped-def]
     sender = RecordingSender()
-    workflow = NotificationLoop(
-        repository,
-        NotificationDispatcher(sender),
-        acknowledgement_base_url="https://example.test/ack",
-        clock=lambda: NOW,
-    )
+    workflow = _loop(tmp_path, sender)
 
     first = asyncio.run(workflow.run(request()))
     second = asyncio.run(workflow.run(request()))
 
     assert first.status == "created"
     assert first.notification is not None
-    assert len(first.notification.actions) == 2
     assert first.delivery is not None and first.delivery.succeeded
     assert second.status == "duplicate"
     assert second.notification is None
     assert len(sender.messages) == 1
 
-    acknowledgement_actions = first.notification.actions
-    tokens = {
-        parse_qs(urlparse(action.url).query)["token"][0] for action in acknowledgement_actions
-    }
-    assert len(tokens) == 2
-    with (tmp_path / "state.db").open("rb") as file:
-        assert all(token.encode() not in file.read() for token in tokens)
-
 
 def test_notification_loop_retries_after_all_delivery_attempts_fail(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
-    asyncio.run(repository.initialize())
     sender = RecordingSender(fail=True)
-    workflow = NotificationLoop(
-        repository,
-        NotificationDispatcher(sender),
-        acknowledgement_base_url="https://example.test/ack",
-        clock=lambda: NOW,
-    )
+    workflow = _loop(tmp_path, sender)
 
     first = asyncio.run(workflow.run(request()))
     second = asyncio.run(workflow.run(request()))
@@ -105,75 +87,37 @@ def test_notification_loop_retries_after_all_delivery_attempts_fail(tmp_path) ->
     assert attempts == [(1,), (2,)]
 
 
-def test_lineup_recommendations_omit_navigation_and_acknowledgements(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
-    asyncio.run(repository.initialize())
+def test_lock_in_notification_has_no_acknowledgement_actions(tmp_path) -> None:  # type: ignore[no-untyped-def]
     sender = RecordingSender()
-    workflow = NotificationLoop(
-        repository,
-        NotificationDispatcher(sender),
-        acknowledgement_base_url="https://example.test/ack",
-        clock=lambda: NOW,
-        acknowledgement_kinds=frozenset({"placeholder_lock_in"}),
-    )
-
-    result = asyncio.run(
-        workflow.run(replace(request(), decision_type=WEEKLY_LINEUP_DECISION_TYPE))
-    )
-
-    assert result.status == "created"
-    assert result.notification is not None
-    assert result.notification.actions == ()
-    connection = sqlite3.connect(tmp_path / "state.db")
-    try:
-        token_rows = connection.execute(
-            "SELECT COUNT(*) FROM action_tokens WHERE recommendation_id = ?",
-            (result.recommendation.recommendation_id,),
-        ).fetchone()
-    finally:
-        connection.close()
-    assert token_rows[0] == 0
-    assert len(sender.messages) == 1
-
-
-def test_default_configuration_still_suppresses_lineup_acknowledgements(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
-    asyncio.run(repository.initialize())
-    sender = RecordingSender()
-    workflow = NotificationLoop(
-        repository,
-        NotificationDispatcher(sender),
-        acknowledgement_base_url="https://example.test/ack",
-        clock=lambda: NOW,
-    )
-
-    result = asyncio.run(
-        workflow.run(replace(request(), decision_type=WEEKLY_LINEUP_DECISION_TYPE))
-    )
-
-    assert result.notification is not None
-    assert result.notification.actions == ()
-
-
-def test_configured_acknowledgement_kinds_keep_creating_actions(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
-    asyncio.run(repository.initialize())
-    sender = RecordingSender()
-    workflow = NotificationLoop(
-        repository,
-        NotificationDispatcher(sender),
-        acknowledgement_base_url="https://example.test/ack",
-        clock=lambda: NOW,
-        acknowledgement_kinds=frozenset({"placeholder_lock_in"}),
-    )
+    workflow = _loop(tmp_path, sender)
 
     result = asyncio.run(workflow.run(request()))
 
     assert result.notification is not None
-    assert [action.label for action in result.notification.actions] == [
-        "Locked",
-        "Pass",
-    ]
+    assert result.notification.actions == ()
+    connection = sqlite3.connect(tmp_path / "state.db")
+    try:
+        (token_rows,) = connection.execute("SELECT COUNT(*) FROM action_tokens").fetchone()
+    finally:
+        connection.close()
+    assert token_rows == 0
+
+
+def test_notifications_link_only_to_the_dashboard(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    sender = RecordingSender()
+    workflow = _loop(tmp_path, sender, dashboard_url="https://dashboard.test/")
+
+    for decision_type in ("placeholder_lock_in", WEEKLY_LINEUP_DECISION_TYPE):
+        result = asyncio.run(workflow.run(replace(request(), decision_type=decision_type)))
+        assert result.notification is not None
+        (action,) = result.notification.actions
+        assert (action.label, action.url, action.method, action.kind) == (
+            "Open dashboard",
+            "https://dashboard.test/",
+            "GET",
+            "view",
+        )
+        assert "/ack" not in action.url
 
 
 def test_concurrent_identical_runs_send_one_notification(tmp_path) -> None:  # type: ignore[no-untyped-def]
@@ -195,7 +139,6 @@ def test_concurrent_identical_runs_send_one_notification(tmp_path) -> None:  # t
         workflow = NotificationLoop(
             repository,
             NotificationDispatcher(sender),
-            acknowledgement_base_url="https://example.test/ack",
             clock=lambda: NOW,
         )
         first_task = asyncio.create_task(workflow.run(request()))

@@ -1,7 +1,7 @@
 # Web app
 
-The dashboard (`/`), owner decision editor (`/manage`), and notification review
-(`/ack`) deploy together as one Next.js app. They share the
+The dashboard (`/`) and owner decision editor (`/manage`) deploy together as one
+Next.js app. They share the
 dashboard's dark monospace UI. Saving shows progress in place; pending plans refresh
 for up to one minute, pausing while choices are edited. A stale save refreshes current
 decisions and asks for another review rather than resubmitting rejected choices.
@@ -11,11 +11,10 @@ validation. Set server-only `HOME_URL` to `https://<worker-host>/home`. Never us
 `NEXT_PUBLIC_` variable for owner credentials or Worker secrets.
 
 Private reads use `GET /manage/api`. Owner writes use
-`POST /manage/api/{login,save,replan,logout}`; scoped notification confirmations use
-`POST /ack/submit`. These fixed server routes validate browser POST origins, forward
+`POST /manage/api/{login,save,replan,logout}`. These fixed server routes validate browser POST origins, forward
 only the owner session cookie and bounded URL-encoded forms, and request JSON from
 the Worker. Private responses are never cached. Worker sessions, CSRF proofs,
-decision versions, and explicit confirmation requirements remain authoritative.
+and decision versions remain authoritative.
 
 Deploy the updated Worker before using the new private endpoints. Existing direct
 Worker HTML links remain compatible.
@@ -36,10 +35,9 @@ Worker HTML links remain compatible.
 4. Deploy the Vercel project and sign in at `https://<app-host>/manage` with the
    existing owner access key. The browser receives a new signed session cookie for
    the app's origin; a previous Worker-origin session does not carry over.
-5. Set the Worker's `ACKNOWLEDGEMENT_BASE_URL` to `https://<app-host>/ack` in the
-   canonical Wrangler configuration and redeploy the Worker. New notifications then
-   open the Next.js confirmation page. Existing notification URLs still work on the
-   Worker. Do not run the planner on Vercel or configure duplicate cron jobs.
+5. Optionally set the Worker's `DASHBOARD_URL` to `https://<app-host>/` and redeploy
+   the Worker so notifications link to the dashboard. Do not run the planner on
+   Vercel or configure duplicate cron jobs.
 
 No database migrations or new paid services are required for this UI consolidation.
 The app server forwards authenticated traffic, so no browser CORS configuration or

@@ -1,19 +1,17 @@
-"""End-to-end live Lock-In capture, advice, acknowledgement, and score correction."""
+"""End-to-end live Lock-In capture, advice, Sleeper lock sync, and score correction."""
 
 from __future__ import annotations
 
 import asyncio
 from datetime import timedelta
-from urllib.parse import parse_qs, urlparse
 
 from sleeper_manager.domain.lock_in import LockInOpportunityStatus
 from sleeper_manager.domain.planning import PlanningGameStatus
-from sleeper_manager.persistence.base import AcknowledgementAction, AcknowledgementOutcome
 from sleeper_manager.persistence.lock_in_opportunities import LockInOpportunityKey
-from sleeper_manager.persistence.tokens import hash_action_token
 from sleeper_manager.workflows.lock_in_planning import refresh_terminal_lock_in_scores
 from sleeper_manager.workflows.planning_inputs import build_live_team_week_state
 from sleeper_manager.workflows.postgame_lock_in import run_postgame_lock_in
+from sleeper_manager.workflows.sleeper_locks import sync_sleeper_locks
 from tests.sleeper_manager.workflows.postgame_lock_in_support import (
     LATER_START,
     POLICY,
@@ -23,10 +21,11 @@ from tests.sleeper_manager.workflows.postgame_lock_in_support import (
     _prepare,
     _summary_result,
 )
+from tests.sleeper_manager.workflows.test_sleeper_locks import FakeLockReader
 
 
-def test_lock_in_live_loop_ack_correction_and_later_planning(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """Capture tipoff evidence, lock, acknowledge, then use a corrected fixed score."""
+def test_lock_in_live_loop_sleeper_lock_correction_and_later_planning(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Capture tipoff evidence, advise, read the lock from Sleeper, then use a corrected score."""
 
     async def exercise() -> None:
         repository, inputs, notifications, sender = await _prepare(tmp_path)
@@ -46,16 +45,16 @@ def test_lock_in_live_loop_ack_correction_and_later_planning(tmp_path) -> None: 
         )
         assert notified.outcome == "notified"
         assert len(sender.messages) == 1
-        token = parse_qs(urlparse(sender.messages[0].actions[0].url).query)["token"][0]
-        consumed = await repository.consume_action_token(
-            hash_action_token(token),
-            AcknowledgementAction.LOCKED,
-            SECOND_POLL,
+        reader = FakeLockReader(
+            [{"roster_id": 1, "starters": ["p1", "p2"], "starters_games": {"p1": "s-g1"}}],
+            {"p1": {"1": [{"game_id": "s-g1", "date": "2026-01-07", "stats": {"pts": 20.0}}]}},
+        )
+        assert await sync_sleeper_locks(
+            inputs, reader=reader, repository=repository, now=SECOND_POLL
         )
         locked = await repository.get_lock_in_opportunity(
             LockInOpportunityKey("league-1", 1, 1, "p1", "g1")
         )
-        assert consumed.outcome is AcknowledgementOutcome.APPLIED
         assert locked is not None
         assert locked.status is LockInOpportunityStatus.ACKNOWLEDGED_LOCKED
         assert locked.stable_score == 20.0

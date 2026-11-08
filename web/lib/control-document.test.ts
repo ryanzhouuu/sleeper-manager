@@ -44,25 +44,19 @@ describe("control documents", () => {
     expect(() => parseControlDocument({ ...fixture, ...changes })).toThrow();
   });
 
-  it("accepts only explicit lock/pass confirmations and bounded tokens", () => {
-    const preview = {
-      status: "confirmation",
-      heading: "Confirm",
-      title: "Player",
-      message: "Advice",
-      instruction: "Confirm your action",
-      label: "Confirm",
-      token: "test-token",
-      action: "locked",
-    };
-    expect(parseControlDocument(preview)).toEqual(preview);
-    for (const changes of [
-      { action: "not_locked" },
-      { token: "" },
-      { token: "x".repeat(257) },
-    ]) {
-      expect(() => parseControlDocument({ ...preview, ...changes })).toThrow();
-    }
+  it("rejects confirmation documents now that locks come from Sleeper", () => {
+    expect(() =>
+      parseControlDocument({
+        status: "confirmation",
+        heading: "Confirm",
+        title: "Player",
+        message: "Advice",
+        instruction: "Confirm your action",
+        label: "Confirm",
+        token: "test-token",
+        action: "locked",
+      }),
+    ).toThrow();
   });
 
   it("rejects unknown responses and HTML instead of assuming success", () => {

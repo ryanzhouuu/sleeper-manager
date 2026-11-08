@@ -118,26 +118,6 @@ export function parseControlDocument(value: unknown): ControlDocument {
         title: text(row.title),
         ...(row.message === undefined ? {} : { message: text(row.message) }),
       };
-    case "confirmation": {
-      const decision = action(row.action);
-      const token = text(row.token);
-      if (
-        (decision !== "locked" && decision !== "passed") ||
-        !token ||
-        token.length > 256
-      )
-        throw new Error("Invalid confirmation");
-      return {
-        status: "confirmation",
-        heading: text(row.heading),
-        title: text(row.title),
-        message: text(row.message),
-        instruction: text(row.instruction),
-        label: text(row.label),
-        token,
-        action: decision,
-      };
-    }
     case "ready": {
       const timezone = text(row.timezone);
       new Intl.DateTimeFormat("en-US", { timeZone: timezone });

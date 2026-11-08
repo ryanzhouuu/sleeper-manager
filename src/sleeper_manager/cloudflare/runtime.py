@@ -48,7 +48,6 @@ from sleeper_manager.workflows.forecast_collection import (
 )
 from sleeper_manager.workflows.notification_loop import NotificationLoop
 from sleeper_manager.workflows.planning_policy import LIVE_PLAN_POLICY
-from sleeper_manager.workflows.postgame_lock_in import LOCK_IN_ACKNOWLEDGEMENT_KINDS
 
 
 def _value(env: Any, name: str, default: str = "") -> str:
@@ -99,16 +98,6 @@ async def run_scheduled(
     now = scheduled_at or scheduled_at_from_controller(controller) or datetime.now(UTC)
     tick = clock or ((lambda: now) if scheduled_at is not None else (lambda: datetime.now(UTC)))
     correlation = correlation_id or uuid4().hex
-    acknowledgement_base_url = _value(env, "ACKNOWLEDGEMENT_BASE_URL").rstrip("?")
-    if not acknowledgement_base_url:
-        return ScheduledRunSummary(
-            correlation_id=correlation,
-            scheduled_at=now,
-            status=ScheduledRunStatus.BLOCKED,
-            claimed_count=0,
-            failure_category=FailureCategory.CONFIGURATION,
-            detail="acknowledgement_url_missing",
-        ).as_dict()
     try:
         dispatcher = build_dispatcher(env, fetcher)
     except ValueError:
@@ -144,9 +133,8 @@ async def run_scheduled(
     notifications = NotificationLoop(
         repository,
         dispatcher,
-        acknowledgement_base_url=acknowledgement_base_url,
+        dashboard_url=_value(env, "DASHBOARD_URL") or None,
         clock=tick,
-        acknowledgement_kinds=LOCK_IN_ACKNOWLEDGEMENT_KINDS,
     )
     open_sleeper_url = _value(env, "OPEN_SLEEPER_URL", "https://sleeper.com")
     if not planning_only:

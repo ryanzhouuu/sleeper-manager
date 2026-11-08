@@ -105,10 +105,7 @@ def test_first_complete_final_notifies_lock_with_acknowledgement_actions(
         assert stored.consecutive_direct_poll_count == 2
         assert stored.score_revision == 1
         assert len(sender.messages) == 1
-        assert [action.label for action in sender.messages[0].actions] == [
-            "Locked",
-            "Pass",
-        ]
+        assert sender.messages[0].actions == ()
         assert first.recommendation is not None
         assert first.recommendation.decision_type == LOCK_IN_DECISION_TYPE
         assert "Projected week: 28.0 pts" in sender.messages[0].message

@@ -43,20 +43,8 @@ export interface ManagerDocument {
   }[];
 }
 
-export interface ConfirmationDocument {
-  status: "confirmation";
-  heading: string;
-  title: string;
-  message: string;
-  instruction: string;
-  label: string;
-  token: string;
-  action: "locked" | "passed";
-}
-
 export type ControlDocument =
   | ManagerDocument
-  | ConfirmationDocument
   | { status: "login"; rejected: boolean }
   | { status: "message"; title: string; message?: string }
   | { status: "saved" };

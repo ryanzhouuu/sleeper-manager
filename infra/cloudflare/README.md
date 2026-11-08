@@ -16,8 +16,8 @@ npx wrangler d1 create sleeper-manager-state
 npx wrangler d1 create sleeper-manager-forecast-archive
 ```
 
-Copy the returned database ID to `wrangler.toml`. Set the Worker URL in
-`ACKNOWLEDGEMENT_BASE_URL` as `https://<worker-host>/ack`.
+Copy the returned database ID to `wrangler.toml`. Optionally set `DASHBOARD_URL`
+to the dashboard so notifications include an "Open dashboard" link.
 
 Store these as Worker secrets rather than committing them:
 
@@ -55,9 +55,7 @@ forecast archive checks, and the local `run-scheduled` command.
 
 ## HTTP
 
-`GET /health` returns `{"status": "ok"}`. `GET /ack` displays a confirmation form
-without changing state. A same-origin `POST /ack` records the action only after an
-explicit submission. `GET /home` returns the public roster, matchup, games, and
+`GET /health` returns `{"status": "ok"}`. `GET /home` returns the public roster, matchup, games, and
 weekly recommendation document. `/home` does not accept credentials and its body
 omits ids, tokens, and secrets.
 
@@ -87,16 +85,15 @@ the entire save; successful saves retain correction history and queue one plan.
 Confirmed locks remain visible with correction controls. Expired or forfeited
 scores move to history with an automatic outcome and reason.
 
-The [Next.js app](../../web/README.md) serves the dashboard, `/manage` editor, and
-`/ack` confirmation pages on one Vercel origin. The Worker retains the same routes
-for existing direct links and provides their JSON data to Next.js server routes.
+The [Next.js app](../../web/README.md) serves the dashboard and `/manage` editor on
+one Vercel origin. The Worker provides their JSON data to Next.js server routes.
 Set a non-empty `MANAGER_ACCESS_KEY` as a Worker secret. Any non-empty length is
 accepted; a long, randomly generated key is recommended.
 The login form exchanges it for an HttpOnly, Secure, SameSite=Strict cookie scoped
 to `/manage`; rotating the secret invalidates existing sessions. Without this
 secret the editor returns 503. Public `/home` never includes the key or session.
 
-The existing `/manage` and `/ack` routes also accept `Accept: application/json` for
+The existing `/manage` routes also accept `Accept: application/json` for
 the Next.js UI. JSON uses the same owner authentication, CSRF, token validation,
 version checks, and no-store policy as HTML. Editor documents contain private row
 versions, CSRF proofs, and correction history; fetch them only on the server or

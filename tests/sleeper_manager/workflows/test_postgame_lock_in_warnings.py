@@ -16,7 +16,6 @@ from sleeper_manager.workflows.lock_in_planning import sync_live_lock_in_opportu
 from sleeper_manager.workflows.notification_loop import NotificationLoop
 from sleeper_manager.workflows.planning_inputs import LiveProjectionResult
 from sleeper_manager.workflows.postgame_lock_in import (
-    LOCK_IN_ACKNOWLEDGEMENT_KINDS,
     LOCK_IN_DECISION_TYPE,
     LOCK_IN_WARNING_TYPE,
     run_postgame_lock_in,
@@ -120,9 +119,7 @@ def test_unavailable_warning_omits_acknowledgement_buttons(tmp_path) -> None:  #
         notifications = NotificationLoop(
             repository,
             NotificationDispatcher(sender),
-            acknowledgement_base_url="https://example.test/ack",
             clock=lambda: POSTGAME,
-            acknowledgement_kinds=LOCK_IN_ACKNOWLEDGEMENT_KINDS,
         )
         summary = _summary_result(_box("401", points=20), _box("402", points=8))
         await run_postgame_lock_in(
@@ -246,9 +243,7 @@ def test_scoring_bonuses_and_dnps_use_discovered_policy(tmp_path) -> None:  # ty
         notifications = NotificationLoop(
             repository,
             NotificationDispatcher(sender),
-            acknowledgement_base_url="https://example.test/ack",
             clock=lambda: POSTGAME,
-            acknowledgement_kinds=LOCK_IN_ACKNOWLEDGEMENT_KINDS,
         )
         summary = _summary_result(
             _box("401", points=50),
@@ -312,9 +307,7 @@ def test_final_eligible_game_remains_a_choice_until_confirmed(tmp_path) -> None:
         notifications = NotificationLoop(
             repository,
             NotificationDispatcher(sender),
-            acknowledgement_base_url="https://example.test/ack",
             clock=lambda: POSTGAME,
-            acknowledgement_kinds=LOCK_IN_ACKNOWLEDGEMENT_KINDS,
         )
         summary = _summary_result(_box("401", points=20), _box("402", points=8))
         notifications._clock = lambda: SECOND_POLL

@@ -31,7 +31,7 @@ def isolated_cli_settings(monkeypatch: pytest.MonkeyPatch) -> None:
         "NTFY_TOPIC",
         "NTFY_ACCESS_TOKEN",
         "DISCORD_WEBHOOK_URL",
-        "ACKNOWLEDGEMENT_BASE_URL",
+        "DASHBOARD_URL",
         "STATE_BACKEND",
         "TIMEZONE",
         "SQLITE_PATH",
@@ -110,14 +110,6 @@ def test_notification_requires_notification_config(
     assert "Notification configuration is incomplete" in capsys.readouterr().err
 
 
-def test_notification_requires_acknowledgement_url(
-    isolated_cli_settings: None, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setenv("NTFY_TOPIC", "alerts")
-    assert main(["test-notification"]) == 2
-    assert "ACKNOWLEDGEMENT_BASE_URL" in capsys.readouterr().err
-
-
 def test_check_forecast_capture_rejects_non_sqlite_backend(
     isolated_cli_settings: None, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -186,13 +178,3 @@ def test_run_scheduled_requires_notification_config(
     monkeypatch.setenv("SLEEPER_USER_ID", "user-1")
     assert main(["run-scheduled"]) == 2
     assert "Notification configuration is incomplete" in capsys.readouterr().err
-
-
-def test_run_scheduled_requires_acknowledgement_url(
-    isolated_cli_settings: None, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setenv("SLEEPER_LEAGUE_ID", "league-1")
-    monkeypatch.setenv("SLEEPER_USER_ID", "user-1")
-    monkeypatch.setenv("NTFY_TOPIC", "alerts")
-    assert main(["run-scheduled"]) == 2
-    assert "ACKNOWLEDGEMENT_BASE_URL" in capsys.readouterr().err

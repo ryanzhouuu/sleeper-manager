@@ -10,7 +10,6 @@ from sleeper_manager.persistence.base import RecommendationRecord
 
 LOCK_IN_DECISION_TYPE = "live_lock_in"
 LOCK_IN_WARNING_TYPE = "live_lock_in_unavailable"
-LOCK_IN_ACKNOWLEDGEMENT_KINDS = frozenset({LOCK_IN_DECISION_TYPE, "placeholder_lock_in"})
 
 
 class DirectGameSummarySource(Protocol):

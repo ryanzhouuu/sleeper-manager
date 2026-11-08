@@ -69,7 +69,6 @@ def test_recovery_stays_pending_until_the_observed_lineup_changes(
         notifications = NotificationLoop(
             repository,
             NotificationDispatcher(sender),
-            acknowledgement_base_url="https://example.test/ack",
             clock=lambda: NOW,
         )
         inputs = _trial_inputs()
@@ -145,7 +144,6 @@ def test_conflicting_confirmed_position_returns_observed_lineup_without_moves(
         notifications = NotificationLoop(
             repository,
             NotificationDispatcher(sender),
-            acknowledgement_base_url="https://example.test/ack",
             clock=lambda: NOW,
         )
         evidence = AcknowledgedDecisionEvidence(
@@ -227,7 +225,6 @@ def test_legacy_trace_does_not_invent_recovery_provenance(backend: str, tmp_path
         notifications = NotificationLoop(
             repository,
             NotificationDispatcher(RecordingSender()),
-            acknowledgement_base_url="https://example.test/ack",
             clock=lambda: at,
         )
         result = await run_daily_plan(

@@ -243,7 +243,6 @@ def test_overlapping_wakes_send_one_notification(tmp_path) -> None:  # type: ign
         notifications = NotificationLoop(
             repository,
             NotificationDispatcher(sender),
-            acknowledgement_base_url="https://example.test/ack",
             clock=lambda: NOW,
         )
         collect, calls = _collector(_assembly())
@@ -287,7 +286,6 @@ def test_failed_delivery_retries_the_same_recommendation(tmp_path) -> None:  # t
         first_loop = NotificationLoop(
             repository,
             NotificationDispatcher(failing),
-            acknowledgement_base_url="https://example.test/ack",
             clock=lambda: NOW,
         )
         collect, calls = _collector(_assembly())
@@ -316,7 +314,6 @@ def test_failed_delivery_retries_the_same_recommendation(tmp_path) -> None:  # t
         retry_loop = NotificationLoop(
             repository,
             NotificationDispatcher(succeeding),
-            acknowledgement_base_url="https://example.test/ack",
             clock=lambda: NOW,
         )
         second = await dispatch_due_work(
@@ -347,7 +344,6 @@ def test_scheduled_runtime_never_sends_placeholder() -> None:
         database = FakeD1()
         await database.exec(D1_SCHEMA)
         env = SimpleNamespace(
-            ACKNOWLEDGEMENT_BASE_URL="https://example.test/ack",
             NTFY_TOPIC="topic",
             NTFY_BASE_URL="https://ntfy.test",
             NTFY_ACCESS_TOKEN="",
@@ -404,7 +400,6 @@ def test_forecast_capture_does_not_change_the_planning_summary() -> None:
             raise AssertionError(url)
 
         without_archive = SimpleNamespace(
-            ACKNOWLEDGEMENT_BASE_URL="https://example.test/ack",
             NTFY_TOPIC="topic",
             NTFY_BASE_URL="https://ntfy.test",
             NTFY_ACCESS_TOKEN="",

@@ -36,7 +36,6 @@ from sleeper_manager.workflows.forecast_collection import capture_scheduled_fore
 from sleeper_manager.workflows.notification_loop import (
     NotificationLoop,
 )
-from sleeper_manager.workflows.postgame_lock_in import LOCK_IN_ACKNOWLEDGEMENT_KINDS
 
 
 class _HttpxFetchResponse:
@@ -63,9 +62,6 @@ async def _run_scheduled(settings: Settings) -> int:
     if not settings.notifications_configured:
         print("Notification configuration is incomplete", file=sys.stderr)
         return 2
-    if not settings.acknowledgement_base_url:
-        print("Set ACKNOWLEDGEMENT_BASE_URL before running scheduled work", file=sys.stderr)
-        return 2
     try:
         repository = AsyncSQLiteStateRepository(settings.sqlite_path)
         await repository.initialize()
@@ -78,8 +74,7 @@ async def _run_scheduled(settings: Settings) -> int:
         notifications = NotificationLoop(
             repository,
             build_notification_dispatcher(settings),
-            acknowledgement_base_url=settings.acknowledgement_base_url,
-            acknowledgement_kinds=LOCK_IN_ACKNOWLEDGEMENT_KINDS,
+            dashboard_url=settings.dashboard_url or None,
         )
         now = datetime.now(UTC)
         env = SimpleNamespace(

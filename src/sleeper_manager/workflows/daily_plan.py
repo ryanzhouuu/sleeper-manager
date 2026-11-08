@@ -268,7 +268,6 @@ async def _run_weekly_lineup_workflow(
         open_sleeper_url=open_sleeper_url,
         trace_json=trace,
         idempotency_key=idempotency_key,
-        acknowledgement_targets=confirmations,
     )
     result = await notifications.run(request)
     outcome: Literal["notified", "duplicate", "blocked", "delivery_failed"]

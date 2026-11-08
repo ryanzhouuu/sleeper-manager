@@ -41,7 +41,6 @@ from sleeper_manager.workflows.notification_loop import (
     NotificationLoop,
     default_placeholder_request,
 )
-from sleeper_manager.workflows.postgame_lock_in import LOCK_IN_ACKNOWLEDGEMENT_KINDS
 from sleeper_manager.workflows.runtime_commands import _run_scheduled, _sync_cloudflare_runtime_data
 
 
@@ -279,9 +278,6 @@ async def _test_notification(settings: Settings) -> int:
     if not settings.notifications_configured:
         print("Notification configuration is incomplete", file=sys.stderr)
         return 2
-    if not settings.acknowledgement_base_url:
-        print("Set ACKNOWLEDGEMENT_BASE_URL before sending a test notification", file=sys.stderr)
-        return 2
     try:
         repository = AsyncSQLiteStateRepository(settings.sqlite_path)
         await repository.initialize()
@@ -290,8 +286,7 @@ async def _test_notification(settings: Settings) -> int:
         result = await NotificationLoop(
             repository,
             dispatcher,
-            acknowledgement_base_url=settings.acknowledgement_base_url,
-            acknowledgement_kinds=LOCK_IN_ACKNOWLEDGEMENT_KINDS,
+            dashboard_url=settings.dashboard_url or None,
         ).run(
             default_placeholder_request(
                 league_id=settings.sleeper_league_id or "local-diagnostic",

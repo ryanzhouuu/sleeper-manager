@@ -1,4 +1,4 @@
-"""Serve public reads, scoped confirmations, owner controls, Cron, and planning queues.
+"""Serve public reads, owner controls, Cron, and planning queues.
 
 Cron captures forecasts and publishes wakes; queue consumers execute durable due work.
 Bindings and secrets come from the Worker environment.
@@ -6,9 +6,8 @@ Bindings and secrets come from the Worker environment.
 
 import json
 from datetime import UTC, datetime
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
-from sleeper_manager.cloudflare.confirmation import confirmation
 from sleeper_manager.cloudflare.form_pages import json_page
 from sleeper_manager.cloudflare.home import build_home
 from sleeper_manager.cloudflare.manager_routes import manage
@@ -45,14 +44,6 @@ except ImportError:  # pragma: no cover - the Workers SDK exists only in the dep
     Response = _FallbackResponse
 
 
-def _query_values(url: str) -> dict[str, str]:
-    return {
-        key: values[0]
-        for key, values in parse_qs(urlparse(url).query, keep_blank_values=False).items()
-        if values
-    }
-
-
 def _env_value(env: object, name: str, default: str = "") -> str:
     """Read one Worker binding. Missing and explicit None both use the default."""
     value = getattr(env, name, default)
@@ -60,7 +51,7 @@ def _env_value(env: object, name: str, default: str = "") -> str:
 
 
 class Default(_WorkerEntrypoint):  # type: ignore[misc]
-    """Workers SDK entry: home and confirmation HTTP plus the five-minute Cron."""
+    """Workers SDK entry: home and owner-control HTTP plus the five-minute Cron."""
 
     async def fetch(self, request):  # type: ignore[no-untyped-def]
         parsed = urlparse(request.url)
@@ -90,19 +81,7 @@ class Default(_WorkerEntrypoint):  # type: ignore[misc]
                 now=datetime.now(UTC),
             )
             return Response.json(result.payload, status=result.status_code)
-        if parsed.path != "/ack":
-            return Response("Not found", status=404)
-
-        form = await confirmation(
-            request,
-            D1ManagerStore(self.env.sleeper_manager_state),
-            _query_values(request.url),
-            now=datetime.now(UTC),
-            env=self.env,
-        )
-        if request.headers.get("accept") == "application/json":
-            form = json_page(form)
-        return Response(form.body, status=form.status, headers=form.headers)
+        return Response("Not found", status=404)
 
     async def scheduled(self, controller, env, ctx):  # type: ignore[no-untyped-def]
         del env, ctx

@@ -24,7 +24,6 @@ from sleeper_manager.workflows.postgame_observations import (
     summary_wait_reason,
 )
 from sleeper_manager.workflows.postgame_types import (
-    LOCK_IN_ACKNOWLEDGEMENT_KINDS,
     LOCK_IN_DECISION_TYPE,
     LOCK_IN_WARNING_TYPE,
     DirectGameSummarySource,
@@ -205,7 +204,6 @@ async def _defer_opportunities(
 
 __all__ = (
     "DirectGameSummarySource",
-    "LOCK_IN_ACKNOWLEDGEMENT_KINDS",
     "LOCK_IN_DECISION_TYPE",
     "LOCK_IN_WARNING_TYPE",
     "PostgameLockInResult",

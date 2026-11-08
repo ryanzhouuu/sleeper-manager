@@ -48,7 +48,6 @@ def test_local_schedule_passes_archives_and_completed_collection_clock(tmp_path,
         sleeper_league_id="fixture",
         sleeper_user_id="fixture",
         ntfy_topic="fixture",
-        acknowledgement_base_url="https://fixture.example/ack",
         sqlite_path=tmp_path / "state.db",
     )
     assert asyncio.run(module._run_scheduled(settings)) == 0

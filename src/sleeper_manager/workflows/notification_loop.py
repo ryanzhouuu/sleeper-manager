@@ -1,11 +1,9 @@
-"""Persist idempotent advice and issue confirmations only for explicitly named player actions."""
+"""Persist idempotent advice and deliver it with at most a link to the dashboard."""
 
-import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from hashlib import sha256
 from typing import Literal, Protocol
-from urllib.parse import urlencode
 
 from sleeper_manager.notifications.base import Notification, NotificationAction
 from sleeper_manager.notifications.dispatcher import (
@@ -13,20 +11,13 @@ from sleeper_manager.notifications.dispatcher import (
     NotificationDispatcher,
 )
 from sleeper_manager.persistence.base import (
-    AcknowledgementAction,
-    ActionTokenRecord,
     AsyncStateRepository,
     DeliveryAttemptRecord,
     RecommendationRecord,
 )
-from sleeper_manager.persistence.tokens import generate_action_token, hash_action_token
-from sleeper_manager.workflows.plan_rendering import WEEKLY_LINEUP_DECISION_TYPE
 
 DAILY_PLAN_DELAYED_KIND = "daily_plan_delayed"
 DAILY_PLAN_COMPLETED_KIND = "daily_plan_completed"
-_UNACKNOWLEDGEABLE_KINDS = frozenset(
-    {WEEKLY_LINEUP_DECISION_TYPE, DAILY_PLAN_DELAYED_KIND, DAILY_PLAN_COMPLETED_KIND}
-)
 
 
 class Clock(Protocol):
@@ -47,7 +38,6 @@ class RecommendationRequest:
     open_sleeper_url: str
     trace_json: str = "{}"
     idempotency_key: str | None = None
-    acknowledgement_targets: tuple[RecommendationRecord, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,24 +54,25 @@ class NotificationLoop:
         repository: AsyncStateRepository,
         dispatcher: NotificationDispatcher,
         *,
-        acknowledgement_base_url: str,
+        dashboard_url: str | None = None,
         clock: Clock | None = None,
-        acknowledgement_kinds: frozenset[str] | None = None,
     ) -> None:
-        if not acknowledgement_base_url:
-            raise ValueError("acknowledgement base URL is required")
         self._repository = repository
         self._dispatcher = dispatcher
-        self._acknowledgement_base_url = acknowledgement_base_url.rstrip("?")
-        # None issues acknowledgements for every kind: an
-        # explicit set restricts them to those kinds, so an empty set disables them.
-        self._acknowledgement_kinds = acknowledgement_kinds
+        self._actions = (
+            (
+                NotificationAction(
+                    label="Open dashboard",
+                    url=dashboard_url,
+                    method="GET",
+                    kind="view",
+                    clear=False,
+                ),
+            )
+            if dashboard_url
+            else ()
+        )
         self._clock = clock or (lambda: datetime.now(UTC))
-
-    def _action_url(self, token: str, action: AcknowledgementAction) -> str:
-        query = urlencode({"token": token, "action": action.value})
-        separator = "&" if "?" in self._acknowledgement_base_url else "?"
-        return f"{self._acknowledgement_base_url}{separator}{query}"
 
     @staticmethod
     def _recommendation_id(idempotency_key: str) -> str:
@@ -166,67 +157,13 @@ class NotificationLoop:
         request: RecommendationRequest,
         now: datetime,
     ) -> NotificationLoopResult:
-        """Deliver advice with only the configured acknowledgement actions."""
-        requires_acknowledgements = request.decision_type not in _UNACKNOWLEDGEABLE_KINDS and (
-            self._acknowledgement_kinds is None
-            or request.decision_type in self._acknowledgement_kinds
-        )
-        actions: list[NotificationAction] = []
-        targets = request.acknowledgement_targets
-        if not targets:
-            payload = json.loads(request.trace_json)
-            target_ids = (
-                payload.get("confirmation_targets", []) if isinstance(payload, dict) else []
-            )
-            restored = []
-            for identity in target_ids:
-                target = await self._repository.get_recommendation(identity)
-                if (
-                    target is not None
-                    and target.status.value == "pending"
-                    and target.league_id == request.league_id
-                    and target.fantasy_week == request.fantasy_week
-                ):
-                    restored.append(target)
-            targets = tuple(restored)
-        if requires_acknowledgements and not targets:
-            targets = (recommendation,)
-        for target in targets:
-            target_name = json.loads(target.trace_json).get("player_name", target.player_id)
-            if (
-                self._acknowledgement_kinds is not None
-                and target.decision_type not in self._acknowledgement_kinds
-            ):
-                continue
-            for acknowledgement_action, label in (
-                (AcknowledgementAction.LOCKED, "Locked"),
-                (AcknowledgementAction.PASSED, "Pass"),
-            ):
-                raw_token = generate_action_token()
-                await self._repository.create_action_token(
-                    ActionTokenRecord(
-                        token_hash=hash_action_token(raw_token),
-                        recommendation_id=target.recommendation_id,
-                        action=acknowledgement_action,
-                        created_at=now,
-                        expires_at=target.deadline or request.deadline,
-                    )
-                )
-                actions.append(
-                    NotificationAction(
-                        label=f"{target_name}: {label}" if len(targets) > 1 else label,
-                        url=self._action_url(raw_token, acknowledgement_action),
-                        method="GET",
-                        kind="view",
-                        clear=False,
-                    )
-                )
+        """Deliver informational advice; lock state is read from Sleeper, never reported here."""
         notification = Notification(
             title=request.title,
             message=request.message,
             priority=4,
             tags=("basketball", "warning"),
-            actions=tuple(actions),
+            actions=self._actions,
         )
         delivery = await self._dispatcher.send_with_result(notification)
         attempt_number = await self._repository.next_delivery_attempt_number(

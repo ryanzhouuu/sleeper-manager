@@ -16,7 +16,7 @@ from tests.sleeper_manager.workflows.test_notification_loop import NOW, request
 
 
 @pytest.mark.parametrize("decision_type", [WEEKLY_LINEUP_DECISION_TYPE, "placeholder_lock_in"])
-def test_discord_advice_omits_sleeper_navigation_and_retains_acknowledgements(
+def test_discord_advice_omits_navigation_and_acknowledgement_links(
     tmp_path, decision_type: str
 ) -> None:  # type: ignore[no-untyped-def]
     async def exercise() -> None:
@@ -28,7 +28,6 @@ def test_discord_advice_omits_sleeper_navigation_and_retains_acknowledgements(
             NotificationDispatcher(
                 CloudflareDiscordSender("https://discord.example/webhook", fetcher=fetch)
             ),
-            acknowledgement_base_url="https://example.test/ack",
             clock=lambda: NOW,
         )
         advice = replace(request(), decision_type=decision_type)
@@ -40,11 +39,6 @@ def test_discord_advice_omits_sleeper_navigation_and_retains_acknowledgements(
         content = json.loads(fetch.requests[0]["body"])["content"]
         assert advice.open_sleeper_url not in content
         assert "Open Sleeper" not in content
-        assert content.startswith(f"**{advice.title}**\n{advice.message}")
-        if decision_type == WEEKLY_LINEUP_DECISION_TYPE:
-            assert content == f"**{advice.title}**\n{advice.message}"
-        else:
-            assert "[Locked](https://example.test/ack?" in content
-            assert "[Pass](https://example.test/ack?" in content
+        assert content == f"**{advice.title}**\n{advice.message}"
 
     asyncio.run(exercise())

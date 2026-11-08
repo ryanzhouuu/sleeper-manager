@@ -87,7 +87,6 @@ def test_cron_captures_before_enqueue_without_claiming_or_collecting(monkeypatch
         monkeypatch.setattr("sleeper_manager.cloudflare.runtime._capture_forecast", capture)
         monkeypatch.setattr("sleeper_manager.cloudflare.runtime.dispatch_due_work", unexpected)
         env = SimpleNamespace(
-            ACKNOWLEDGEMENT_BASE_URL="https://example.test/ack",
             NTFY_TOPIC="test-topic",
             sleeper_manager_state=database,
             PLANNING_QUEUE=OrderedQueue(),
@@ -113,7 +112,6 @@ def test_enqueue_failure_keeps_work_unclaimed_for_next_cron(monkeypatch) -> None
                 raise OSError("queue unavailable")
 
         env = SimpleNamespace(
-            ACKNOWLEDGEMENT_BASE_URL="https://example.test/ack",
             NTFY_TOPIC="test-topic",
             sleeper_manager_state=database,
             PLANNING_QUEUE=BrokenQueue(),
@@ -154,7 +152,6 @@ def test_duplicate_queued_wakes_collect_and_deliver_only_once(monkeypatch) -> No
             "sleeper_manager.cloudflare.runtime.notify_delayed_daily_planning", unexpected
         )
         env = SimpleNamespace(
-            ACKNOWLEDGEMENT_BASE_URL="https://example.test/ack",
             sleeper_manager_state=database,
             PLANNING_QUEUE=Queue(),
             SLEEPER_LEAGUE_ID="league-1",
@@ -197,7 +194,6 @@ def test_failed_collection_remains_durable_for_a_later_queued_wake(monkeypatch) 
             "sleeper_manager.cloudflare.runtime.collect_cloudflare_planning_inputs", collect
         )
         env = SimpleNamespace(
-            ACKNOWLEDGEMENT_BASE_URL="https://example.test/ack",
             sleeper_manager_state=database,
         )
         first = await run_queued_planning(env, None, PlanningWake(NOW).to_body(), now=NOW)
@@ -235,7 +231,6 @@ def test_queued_planning_persists_actual_completion_time(monkeypatch) -> None:  
             "sleeper_manager.cloudflare.runtime.collect_cloudflare_planning_inputs", collect
         )
         env = SimpleNamespace(
-            ACKNOWLEDGEMENT_BASE_URL="https://example.test/ack",
             sleeper_manager_state=database,
         )
         result = await run_queued_planning(

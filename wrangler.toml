@@ -28,7 +28,7 @@ enabled = true
 [vars]
 NTFY_BASE_URL = "https://ntfy.sh"
 OPEN_SLEEPER_URL = "https://sleeper.com"
-ACKNOWLEDGEMENT_BASE_URL = "https://locksmith.ryanzhouuu.workers.dev/ack"
+# DASHBOARD_URL: optional dashboard link attached to notifications.
 
 [secrets]
 required = ["DISCORD_WEBHOOK_URL", "SLEEPER_LEAGUE_ID", "SLEEPER_USER_ID"]

@@ -1,4 +1,4 @@
-"""Confirmation buttons open the review form instead of submitting a background request."""
+"""View actions open a page instead of submitting a background request."""
 
 import asyncio
 import json
@@ -10,30 +10,22 @@ from sleeper_manager.cloudflare.notifications import CloudflareNtfySender
 from sleeper_manager.notifications.base import Notification, NotificationAction
 from sleeper_manager.notifications.ntfy import NtfySender
 from tests.sleeper_manager.cloudflare.test_cloudflare_notifications import RecordingFetch
-from tests.sleeper_manager.cloudflare.test_cloudflare_routes import create_notification
 
 
 def review_message() -> Notification:
     return Notification(
         title="Review",
-        message="Record your action after doing it in Sleeper",
+        message="Lock advice",
         actions=(
             NotificationAction(
-                "Locked",
-                "https://worker.test/ack?token=test&action=locked",
+                "Open dashboard",
+                "https://dashboard.test/",
                 method="GET",
                 kind="view",
                 clear=False,
             ),
         ),
     )
-
-
-def test_workflow_generates_browser_review_actions(tmp_path):  # type: ignore[no-untyped-def]
-    _, result = create_notification(tmp_path)
-    assert result.notification.actions
-    for action in result.notification.actions:
-        assert action.kind == "view" and action.method == "GET" and action.clear is False
 
 
 def test_worker_ntfy_opens_review_instead_of_posting_token():

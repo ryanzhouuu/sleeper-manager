@@ -7,8 +7,7 @@ type WorkerPath =
   | "/manage/login"
   | "/manage/save"
   | "/manage/replan"
-  | "/manage/logout"
-  | "/ack";
+  | "/manage/logout";
 const RESPONSE_HEADERS = {
   "cache-control": "no-store",
   "referrer-policy": "same-origin",
@@ -66,9 +65,9 @@ async function fetchControl(
   });
 }
 
-/** Server-rendered GETs cannot consume a confirmation or mutate owner decisions. */
+/** Server-rendered GETs cannot mutate owner decisions. */
 export async function loadControl(
-  path: "/manage" | "/ack",
+  path: "/manage",
   cookie = "",
   query = "",
 ): Promise<ControlDocument> {

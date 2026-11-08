@@ -149,7 +149,6 @@ class _Harness:
         self.loop = NotificationLoop(
             self.repository,
             NotificationDispatcher(self.sender),
-            acknowledgement_base_url="https://example.test/ack",
             clock=lambda: NOW,
         )
 

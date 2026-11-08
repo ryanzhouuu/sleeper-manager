@@ -10,7 +10,7 @@ from sleeper_manager.cloudflare.form_pages import form_values
 from sleeper_manager.cloudflare.manager_auth import csrf_proof, issue_session
 from sleeper_manager.cloudflare.manager_routes import manage
 from sleeper_manager.domain.lock_in import LockInOpportunityStatus as Status
-from tests.sleeper_manager.cloudflare.test_confirmation import request
+from tests.sleeper_manager.cloudflare.form_request_support import request
 from tests.sleeper_manager.cloudflare.test_manager_controls import (
     CHANGE_ID,
     SECRET,

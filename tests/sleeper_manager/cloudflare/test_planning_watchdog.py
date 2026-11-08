@@ -50,7 +50,6 @@ async def _setup(tmp_path, *, work=WORK, fail=False):  # type: ignore[no-untyped
     notifications = NotificationLoop(
         repository,
         NotificationDispatcher(sender),
-        acknowledgement_base_url="https://example.test/ack",
         clock=lambda: NOW,
     )
     return repository, sender, notifications

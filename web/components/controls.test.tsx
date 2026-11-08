@@ -2,11 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import fixture from "@/test/fixtures/controls.json";
 import { parseControlDocument } from "@/lib/control-document";
-import type {
-  ConfirmationDocument,
-  ManagerDocument,
-} from "@/lib/control-types";
-import { ConfirmationScreen } from "./confirmation-screen";
+import type { ManagerDocument } from "@/lib/control-types";
 import { DecisionEditor } from "./decision-editor";
 import { ManagerScreen } from "./manager-screen";
 import { ControlStatus } from "./control-status";
@@ -19,17 +15,6 @@ vi.mock("next/image", () => ({
 }));
 
 const document = parseControlDocument(fixture) as ManagerDocument;
-const preview: ConfirmationDocument = {
-  status: "confirmation",
-  heading: "Confirm your Sleeper lock",
-  title: "Example <player>",
-  message: "<script>untrusted</script>",
-  instruction: "Save only after locking this game in Sleeper.",
-  label: "I locked this game in Sleeper",
-  token: "test-token",
-  action: "locked",
-};
-
 function editor(
   changes: Partial<ManagerDocument> = {},
   dirty = false,
@@ -136,26 +121,6 @@ describe("consolidated control pages", () => {
     expect(html).toContain("No manual corrections yet.");
     expect(html).toMatch(/id="info-panel-help"[^>]*hidden=""/);
     expect(html).not.toContain("<summary>History");
-  });
-
-  it("requires an explicit same-origin confirmation form and escapes advice", () => {
-    const html = renderToStaticMarkup(<ConfirmationScreen initial={preview} />);
-    expect(html.match(/<form[^>]*>/)?.[0]).toContain('method="post"');
-    expect(html).toContain('action="/ack/submit"');
-    expect(html).toContain('name="token" value="test-token"');
-    expect(html).toContain("&lt;script&gt;untrusted&lt;/script&gt;");
-    expect(html).not.toContain("<script>");
-    expect(html).toContain('href="/manage"');
-  });
-
-  it("does not offer a confirmation form for expired or replaced links", () => {
-    const html = renderToStaticMarkup(
-      <ConfirmationScreen
-        initial={{ status: "message", title: "Confirmation expired" }}
-      />,
-    );
-    expect(html).toContain("Confirmation expired");
-    expect(html).not.toContain("<form");
   });
 
   it("announces loading while hiding the decorative animation from assistive technology", () => {

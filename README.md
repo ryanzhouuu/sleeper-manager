@@ -53,10 +53,10 @@ Settings load from environment variables or `.env`.
 | `NTFY_BASE_URL` | ntfy service root | `https://ntfy.sh` |
 | `NTFY_ACCESS_TOKEN` | Optional ntfy auth | Empty |
 | `DISCORD_WEBHOOK_URL` | Enables Discord delivery | Empty |
-| `ACKNOWLEDGEMENT_BASE_URL` | Notification action callbacks | Empty |
+| `DASHBOARD_URL` | Dashboard link attached to notifications | Empty |
 
-Notification commands need `NTFY_TOPIC` or `DISCORD_WEBHOOK_URL`. Interactive
-notifications also need `ACKNOWLEDGEMENT_BASE_URL`.
+Notification commands need `NTFY_TOPIC` or `DISCORD_WEBHOOK_URL`. Notifications are
+informational: lock state is read from Sleeper, so they carry no Locked/Pass actions.
 The checked-in Worker configuration requires Discord; store its webhook URL as a
 Cloudflare secret as described in [Cloudflare deployment](infra/cloudflare/README.md).
 

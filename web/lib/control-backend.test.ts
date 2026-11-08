@@ -167,22 +167,6 @@ describe("server-to-Worker controls", () => {
     expect((await loadControl("/manage")).status).toBe("message");
   });
 
-  it("uses GET for confirmation previews and sends only their scoped query", async () => {
-    fetchMock.mockResolvedValue(
-      Response.json(
-        { status: "message", title: "Confirmation expired" },
-        { status: 410 },
-      ),
-    );
-    expect(
-      await loadControl("/ack", "", "token=test-token&action=locked"),
-    ).toEqual({ status: "message", title: "Confirmation expired" });
-    expect(String(fetchMock.mock.calls[0][0])).toBe(
-      "https://worker.test/ack?token=test-token&action=locked",
-    );
-    expect(fetchMock.mock.calls[0][1]?.method).toBe("GET");
-  });
-
   it("rejects unknown owner endpoints and unavailable configuration", async () => {
     expect(
       (

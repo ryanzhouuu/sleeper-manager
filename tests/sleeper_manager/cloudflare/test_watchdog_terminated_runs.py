@@ -42,7 +42,6 @@ def test_watchdog_alert_precedes_repeated_termination(monkeypatch: pytest.Monkey
             "sleeper_manager.cloudflare.runtime.collect_cloudflare_planning_inputs", terminate
         )
         env = SimpleNamespace(
-            ACKNOWLEDGEMENT_BASE_URL="https://example.test/ack",
             SLEEPER_LEAGUE_ID="league-1",
             sleeper_manager_state=database,
         )

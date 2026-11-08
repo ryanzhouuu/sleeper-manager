@@ -23,7 +23,6 @@ from sleeper_manager.workflows.lock_in_planning import sync_live_lock_in_opportu
 from sleeper_manager.workflows.notification_loop import NotificationLoop
 from sleeper_manager.workflows.planning_inputs import LiveProjectionResult
 from sleeper_manager.workflows.postgame_lock_in import (
-    LOCK_IN_ACKNOWLEDGEMENT_KINDS,
     run_postgame_lock_in,
 )
 from tests.sleeper_manager.workflows.planning_inputs_support import (
@@ -157,9 +156,7 @@ async def _prepare(tmp_path):  # type: ignore[no-untyped-def]
     notifications = NotificationLoop(
         repository,
         NotificationDispatcher(sender),
-        acknowledgement_base_url="https://example.test/ack",
         clock=lambda: POSTGAME,
-        acknowledgement_kinds=LOCK_IN_ACKNOWLEDGEMENT_KINDS,
     )
     return repository, inputs, notifications, sender
 

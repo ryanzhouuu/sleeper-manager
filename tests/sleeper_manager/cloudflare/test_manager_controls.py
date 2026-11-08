@@ -18,7 +18,7 @@ from sleeper_manager.cloudflare.manager_auth import (
 )
 from sleeper_manager.cloudflare.manager_context import ManagerContext
 from sleeper_manager.cloudflare.manager_routes import manage
-from tests.sleeper_manager.cloudflare.test_confirmation import request
+from tests.sleeper_manager.cloudflare.form_request_support import request
 from tests.sleeper_manager.persistence.test_manager_store import KEY, NOW, row
 from tests.sleeper_manager.persistence.test_manager_store import store as store
 

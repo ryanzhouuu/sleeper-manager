@@ -204,7 +204,6 @@ def _workflow(tmp_path, *, clock=lambda: NOW):
     notifications = NotificationLoop(
         repository,
         NotificationDispatcher(sender),
-        acknowledgement_base_url="https://example.test/ack",
         clock=clock,
     )
     return repository, sender, notifications
