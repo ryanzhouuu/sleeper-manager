@@ -35,7 +35,10 @@ from sleeper_manager.workflows.game_availability import (
     OfficialAvailabilitySource,
     collect_official_game_evidence,
 )
-from sleeper_manager.workflows.lock_in_evidence import merge_lock_in_opportunity_evidence
+from sleeper_manager.workflows.lock_in_evidence import (
+    merge_lock_in_opportunity_evidence,
+    without_manual_passes,
+)
 from sleeper_manager.workflows.planning_history import player_game_evidence
 from sleeper_manager.workflows.planning_inputs import (
     AvailabilityResourceResult,
@@ -232,7 +235,7 @@ async def collect_live_planning_inputs(
             schedule_results=tuple(schedule_results),
             availability_results=(availability_result,),
             projections=tuple(projections),
-            acknowledgements=acknowledgements,
+            acknowledgements=without_manual_passes(acknowledgements),
             player_game_evidence=tuple(player_game_evidence(row) for row in history),
             identity_quality_reports=tuple(identity_reports),
             catalog_version=_catalog_version(catalog),

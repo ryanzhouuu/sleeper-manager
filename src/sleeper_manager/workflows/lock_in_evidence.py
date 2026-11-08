@@ -12,17 +12,11 @@ LOCK_IN_OPPORTUNITY_PROVENANCE = "lock_in_opportunity_v1"
 def evidence_from_lock_in_opportunity(
     record: LockInOpportunityRecord,
 ) -> AcknowledgedDecisionEvidence | None:
-    """Return fixed Lock or Pass evidence for later planning, or None if not terminal."""
+    """Return fixed Lock evidence for later planning, or None if not locked.
 
-    if record.status is LockInOpportunityStatus.ACKNOWLEDGED_PASSED:
-        return AcknowledgedDecisionEvidence(
-            decision_id=_decision_id(record),
-            player_id=record.key.player_id,
-            game_id=record.key.game_id,
-            action=AcknowledgedAction.PASS,
-            decided_at=record.acknowledged_at or record.updated_at,
-            provenance=LOCK_IN_OPPORTUNITY_PROVENANCE,
-        )
+    A manual Pass is not evidence: the planner decides passes itself.
+    """
+
     if (
         record.status is LockInOpportunityStatus.AUTOMATIC_FINAL
         and record.updated_at < record.fantasy_week_end
@@ -70,6 +64,14 @@ def merge_lock_in_opportunity_evidence(
     return kept + tuple(converted)
 
 
+def without_manual_passes(
+    evidence: tuple[AcknowledgedDecisionEvidence, ...],
+) -> tuple[AcknowledgedDecisionEvidence, ...]:
+    """Drop reported passes so the planner, not a past report, decides each pass."""
+
+    return tuple(item for item in evidence if item.action is not AcknowledgedAction.PASS)
+
+
 def _decision_id(record: LockInOpportunityRecord) -> str:
     """Reuse the recommendation identity when present; otherwise name the automatic final."""
 
@@ -86,4 +88,5 @@ __all__ = [
     "LOCK_IN_OPPORTUNITY_PROVENANCE",
     "evidence_from_lock_in_opportunity",
     "merge_lock_in_opportunity_evidence",
+    "without_manual_passes",
 ]

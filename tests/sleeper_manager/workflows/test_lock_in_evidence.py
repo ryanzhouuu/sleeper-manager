@@ -11,6 +11,7 @@ from sleeper_manager.persistence.lock_in_opportunities import (
 from sleeper_manager.workflows.lock_in_evidence import (
     evidence_from_lock_in_opportunity,
     merge_lock_in_opportunity_evidence,
+    without_manual_passes,
 )
 
 
@@ -51,3 +52,48 @@ def test_lock_in_evidence_prefers_opportunity_score() -> None:
     assert converted is not None
     assert merged == (converted,)
     assert merged[0].accepted_fantasy_score == 24.0
+
+
+def test_acknowledged_passed_row_is_not_planning_evidence() -> None:
+    now = datetime(2026, 1, 8, tzinfo=UTC)
+    record = LockInOpportunityRecord(
+        key=LockInOpportunityKey("league-1", 1, 1, "p1", "g1"),
+        provider_player_id="401",
+        scheduled_start=now,
+        action_deadline=now,
+        fantasy_week_end=now,
+        status=LockInOpportunityStatus.ACKNOWLEDGED_PASSED,
+        next_check_at=now,
+        created_at=now,
+        updated_at=now,
+        acknowledged_action="passed",
+        acknowledged_at=now,
+    )
+
+    assert evidence_from_lock_in_opportunity(record) is None
+
+
+def test_without_manual_passes_keeps_only_locks() -> None:
+    now = datetime(2026, 1, 8, tzinfo=UTC)
+
+    lock = AcknowledgedDecisionEvidence(
+        decision_id="g1",
+        player_id="p1",
+        game_id="g1",
+        action=AcknowledgedAction.LOCK,
+        decided_at=now,
+        provenance="repository_acknowledgement_v1",
+        slot_index=0,
+        slot_position="PG",
+        accepted_fantasy_score=20.0,
+    )
+    passed = AcknowledgedDecisionEvidence(
+        decision_id="g2",
+        player_id="p1",
+        game_id="g2",
+        action=AcknowledgedAction.PASS,
+        decided_at=now,
+        provenance="repository_acknowledgement_v1",
+    )
+
+    assert without_manual_passes((passed, lock)) == (lock,)

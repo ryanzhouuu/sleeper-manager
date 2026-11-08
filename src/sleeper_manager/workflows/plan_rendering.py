@@ -258,6 +258,8 @@ def serialize_weekly_plan_trace(
         "expected_terminal_score": plan.expected_terminal_score,
         "best_alternative_score": plan.best_alternative_score,
         "observed_terminal_score": plan.observed_terminal_score,
+        "terminal_score_p10": plan.terminal_score_p10,
+        "terminal_score_p90": plan.terminal_score_p90,
         "decision_margin": plan.decision_margin,
         "confidence": plan.confidence.value,
         "blocking_detail": plan.blocking_detail,

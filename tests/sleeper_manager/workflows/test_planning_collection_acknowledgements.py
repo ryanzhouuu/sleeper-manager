@@ -33,7 +33,7 @@ from tests.sleeper_manager.workflows.planning_collection_support import (
 )
 
 
-def test_acknowledgement_source_feeds_the_bundle() -> None:
+def test_manual_recommendation_pass_is_ignored_by_planning_collection() -> None:
     passed = AcknowledgedDecisionEvidence(
         decision_id="rec-pass-9",
         player_id="p1",
@@ -49,14 +49,14 @@ def test_acknowledgement_source_feeds_the_bundle() -> None:
 
     evidence = asyncio_run(run())
     assert source.requested == ("league-1", 1)
-    assert len(evidence.inputs.acknowledgements) == 1
+    assert evidence.inputs.acknowledgements == ()
     state = build_live_team_week_state(evidence.inputs, decision_time=evidence.decision_time)
-    assert ("p1", "g1") not in {
+    assert ("p1", "g1") in {
         (item.sleeper_player_id, item.game_id) for item in state.unpassed_opportunities
     }
 
 
-def test_async_sqlite_pass_survives_reopen_into_live_state(tmp_path: Path) -> None:
+def test_async_sqlite_manual_pass_does_not_constrain_live_state(tmp_path: Path) -> None:
     path = tmp_path / "state.db"
     writer = AsyncSQLiteStateRepository(path)
     asyncio_run(writer.initialize())
@@ -79,9 +79,8 @@ def test_async_sqlite_pass_survives_reopen_into_live_state(tmp_path: Path) -> No
     evidence = asyncio_run(run())
     state = build_live_team_week_state(evidence.inputs, decision_time=evidence.decision_time)
     remaining = {(item.sleeper_player_id, item.game_id) for item in state.unpassed_opportunities}
-    assert ("p1", "g1") not in remaining
-    assert ("p1", "g2") in remaining
-    assert state.passed_opportunities[0].decision_time == NOW - timedelta(hours=2)
+    assert {("p1", "g1"), ("p1", "g2")} <= remaining
+    assert state.passed_opportunities == ()
     assert not state.is_blocked
 
 

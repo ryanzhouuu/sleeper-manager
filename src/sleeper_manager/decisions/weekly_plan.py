@@ -89,7 +89,9 @@ def build_weekly_plan(
         )
 
     try:
-        decision = _decision or score_weekly_options(state, config=policy_config)
+        decision = _decision or score_weekly_options(
+            state, config=policy_config, capture_samples=True
+        )
         desired_players = {
             assignment.slot_index: assignment.player_id
             for assignment in decision.selected.assignments
@@ -150,6 +152,8 @@ def build_weekly_plan(
         expected_terminal_score=decision.selected.expected_terminal_value,
         best_alternative_score=alternative_score,
         observed_terminal_score=decision.observed_terminal_value,
+        terminal_score_p10=_percentile(decision.selected.scenario_terminal_scores, 0.1),
+        terminal_score_p90=_percentile(decision.selected.scenario_terminal_scores, 0.9),
         decision_margin=margin,
         distribution_summary=PlanDistributionSummary(
             scenario_count=decision.scenario_count,
@@ -169,6 +173,17 @@ def build_weekly_plan(
         recovery_failures=state.recovery_failures,
         forfeited_opportunities=state.recovery_forfeitures,
     )
+
+
+def _percentile(samples: tuple[float, ...], fraction: float) -> float | None:
+    """Linear-interpolated percentile of the selected option's sampled totals."""
+    if not samples:
+        return None
+    ordered = sorted(samples)
+    position = fraction * (len(ordered) - 1)
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    return round(ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower), 6)
 
 
 def _static_plan(

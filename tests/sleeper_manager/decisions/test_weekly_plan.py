@@ -244,3 +244,22 @@ def test_build_weekly_plan_without_remaining_games_needs_no_action() -> None:
     assert plan.status is PlanStatus.NO_ACTION
     assert plan.expected_terminal_score is None
     assert plan.schedule_assumptions == ()
+
+
+def test_weekly_plan_records_the_selected_total_range() -> None:
+    start = NOW + timedelta(hours=1)
+    state = _state(
+        (
+            _opportunity("p1", "g1", start, ("PG",), ((10, 1),)),
+            _opportunity("p2", "g1", start, ("PG",), ((5, 0.5), (55, 0.5))),
+        ),
+        observed=(ObservedStarter(0, "p1", ("PG",)),),
+        starter_slots=(StarterSlot(0, "G"),),
+    )
+
+    plan = build_weekly_plan(state)
+
+    assert plan.expected_terminal_score is not None
+    assert plan.terminal_score_p10 is not None and plan.terminal_score_p90 is not None
+    assert plan.terminal_score_p10 <= plan.expected_terminal_score <= plan.terminal_score_p90
+    assert plan.terminal_score_p10 < plan.terminal_score_p90

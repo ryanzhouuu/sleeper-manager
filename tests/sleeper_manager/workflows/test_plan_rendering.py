@@ -237,6 +237,17 @@ def test_schedule_details_stay_in_the_trace() -> None:
     )
 
 
+def test_weekly_plan_trace_includes_current_and_percentile_totals() -> None:
+    trace = json.loads(
+        serialize_weekly_plan_trace(_plan(terminal_score_p10=90.5, terminal_score_p90=118.0))
+    )
+
+    assert trace["observed_terminal_score"] == 100.0
+    assert trace["terminal_score_p10"] == 90.5
+    assert trace["expected_terminal_score"] == 104.8
+    assert trace["terminal_score_p90"] == 118.0
+
+
 def test_missing_scores_are_explicitly_unavailable() -> None:
     rendered = render_weekly_plan(_plan(expected_terminal_score=None, observed_terminal_score=None))
 

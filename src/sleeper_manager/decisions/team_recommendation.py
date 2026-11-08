@@ -321,6 +321,12 @@ def build_team_recommendation(
         ),
         forfeited_opportunities=forfeitures,
         expected_terminal_score=expected,
+        terminal_score_p10=plan.terminal_score_p10
+        if expected == plan.expected_terminal_score
+        else None,
+        terminal_score_p90=plan.terminal_score_p90
+        if expected == plan.expected_terminal_score
+        else None,
         observed_terminal_score=comparison.baseline.expected_score
         if comparison
         else plan.observed_terminal_score,

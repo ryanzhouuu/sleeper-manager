@@ -107,7 +107,7 @@ def test_saved_decision_remains_in_planning_after_refresh_and_expiry(
         assert stored.acknowledged_action == action
         assert stored.acknowledged_at == saved.acknowledged_at
         assert (stored.slot_index, stored.slot_position) == (0, "PG")
-        assert evidence_from_lock_in_opportunity(stored) is not None
+        assert (evidence_from_lock_in_opportunity(stored) is not None) == (action == "locked")
         assert stored in await repository.load_acknowledged_lock_in_opportunities("league-1", 1)
 
         state = await refreshed_team_state(inputs, repository, NOW)
@@ -131,9 +131,7 @@ def test_saved_decision_remains_in_planning_after_refresh_and_expiry(
             )
             assert PlanningReasonCode.ACKNOWLEDGEMENT_CONFLICT in incompatible.blocking_reasons
         else:
-            assert [(row.player_id, row.game_id) for row in state.passed_opportunities] == [
-                ("p1", "g1")
-            ]
+            assert state.passed_opportunities == ()
 
     asyncio.run(exercise())
 

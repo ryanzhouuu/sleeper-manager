@@ -48,6 +48,19 @@ def test_weak_completed_trial_proposes_pass_and_restores_later_player() -> None:
     assert plan.forfeited_opportunities == (("early", "tonight"),)
 
 
+def test_planner_recommends_pass_and_bench_without_manual_input() -> None:
+    state = _after_trial(5)
+
+    plan = build_team_recommendation(state, policy=POLICY)
+
+    assert state.passed_opportunities == ()
+    (action,) = plan.score_actions
+    assert (action.player_id, action.kind) == ("early", LockInDecisionKind.PASS)
+    assert action.confidence is not None
+    assert action.alternative_expected_score is not None
+    assert "early" not in {row.player_id for row in plan.desired_assignments}
+
+
 def test_missing_sleeper_lock_data_degrades_the_plan_without_score_actions() -> None:
     state = _after_trial(80)
     degraded = replace(state, warnings=(PlanningReasonCode.SLEEPER_LOCKS_UNAVAILABLE,))

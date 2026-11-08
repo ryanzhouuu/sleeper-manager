@@ -50,6 +50,8 @@ class WeeklyPlan:
     expected_terminal_score: float | None = None
     best_alternative_score: float | None = None
     observed_terminal_score: float | None = None
+    terminal_score_p10: float | None = None
+    terminal_score_p90: float | None = None
     decision_margin: float | None = None
     distribution_summary: PlanDistributionSummary | None = None
     fixed_slots: tuple[FixedSlot, ...] = ()

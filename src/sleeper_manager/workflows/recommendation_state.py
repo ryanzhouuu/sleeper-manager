@@ -13,6 +13,7 @@ from sleeper_manager.persistence.base import AsyncStateRepository
 from sleeper_manager.workflows.lock_in_evidence import (
     LOCK_IN_OPPORTUNITY_PROVENANCE,
     merge_lock_in_opportunity_evidence,
+    without_manual_passes,
 )
 from sleeper_manager.workflows.planning_history import player_game_evidence
 from sleeper_manager.workflows.planning_inputs import LivePlanningInputs, build_live_team_week_state
@@ -40,7 +41,9 @@ async def refreshed_team_state(
     by_key.update({(row.player_id, row.game_id): row for row in acknowledgements})
     refreshed = replace(
         inputs,
-        acknowledgements=merge_lock_in_opportunity_evidence(tuple(by_key.values()), history),
+        acknowledgements=without_manual_passes(
+            merge_lock_in_opportunity_evidence(tuple(by_key.values()), history)
+        ),
         player_game_evidence=tuple(player_game_evidence(row) for row in history)
         or inputs.player_game_evidence,
     )
