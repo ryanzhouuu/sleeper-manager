@@ -84,7 +84,7 @@ def render_weekly_plan(
             message=_join_sections(
                 "\n\n",
                 _static_message(plan),
-                _value_clause(plan),
+                _value_clause(plan, player_names),
                 _risk_clause(plan),
                 recommendation_follow_up(plan, player_names, local_timezone),
             ),
@@ -92,7 +92,7 @@ def render_weekly_plan(
     sections = (
         _deadline_clause(plan, local_timezone),
         _imperative(plan, player_names),
-        _value_clause(plan),
+        _value_clause(plan, player_names),
         _risk_clause(plan),
         recommendation_follow_up(plan, player_names, local_timezone),
     )
@@ -150,12 +150,23 @@ def _imperative(
     return "\n".join(f"• {phrase}" for phrase in phrases)
 
 
-def _value_clause(plan: WeeklyPlan) -> str:
+def _value_clause(plan: WeeklyPlan, player_names: Mapping[str, str] | None) -> str:
     """Combine the modeled team total, optional lineup delta, and confidence."""
     expected = plan.expected_terminal_score
     observed = plan.observed_terminal_score
-    if expected is None or plan.status is PlanStatus.BLOCKED:
+    if plan.status is PlanStatus.BLOCKED:
         return "Projected week: unavailable."
+    if expected is None:
+        if observed is None or not plan.undecided_scores:
+            return "Projected week: unavailable."
+        # The observed total is the all-pass baseline whenever finals are undecided.
+        names = [_player_name(row.player_id, player_names) for row in plan.undecided_scores]
+        subject = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+        verb = "is" if len(names) == 1 else "are"
+        return (
+            f"Projected week: {observed:.1f} pts if {subject} {verb} passed; "
+            "lock or pass is too close to call."
+        )
     total = f"Projected week: {expected:.1f} pts"
     if observed is not None and plan.moves:
         delta = round(expected - observed, 6)

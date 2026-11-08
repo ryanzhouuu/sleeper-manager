@@ -16,7 +16,7 @@ from sleeper_manager.domain.planning import (
     PlanStatus,
     WeeklyPlan,
 )
-from sleeper_manager.domain.planning_actions import PlannedScoreAction
+from sleeper_manager.domain.planning_actions import PlannedScoreAction, UndecidedScore
 from sleeper_manager.workflows.plan_rendering import render_weekly_plan, serialize_weekly_plan_trace
 
 NOW = datetime(2026, 1, 5, 12, tzinfo=UTC)
@@ -190,6 +190,37 @@ def test_no_action_plans_do_not_prescribe_moves() -> None:
     assert rendered.message == (
         "Your lineup is set.\n\nProjected week: 104.8 pts · High confidence."
     )
+
+
+def test_undecided_finals_project_the_all_pass_total() -> None:
+    assignments = (_assignment(0, "G", "p1"), _assignment(1, "UTIL", "p2"))
+    plan = _plan(
+        status=PlanStatus.NO_ACTION,
+        observed_assignments=assignments,
+        desired_assignments=assignments,
+        moves=(),
+        expected_terminal_score=None,
+        undecided_scores=(
+            UndecidedScore("p1", "g1", 0.66, 0.34),
+            UndecidedScore("p2", "g2", 0.6, 0.4),
+        ),
+    )
+
+    message = render_weekly_plan(plan, player_names=NAMES).message
+
+    assert message.split("\n\n")[1] == (
+        "Projected week: 100.0 pts if Bob and Alice are passed; lock or pass is too close to call."
+    )
+
+
+def test_undecided_finals_without_a_baseline_stay_unavailable() -> None:
+    plan = _plan(
+        expected_terminal_score=None,
+        observed_terminal_score=None,
+        undecided_scores=(UndecidedScore("p1", "g1", 0.66, 0.34),),
+    )
+
+    assert "Projected week: unavailable." in render_weekly_plan(plan).message
 
 
 def test_degraded_plans_surface_warnings_and_confidence() -> None:
