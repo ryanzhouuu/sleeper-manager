@@ -319,3 +319,49 @@ def test_missing_lock_data_degrades_the_plan_without_score_actions() -> None:
     state = build_live_team_week_state(inputs, decision_time=POSTGAME)
 
     assert PlanningReasonCode.SLEEPER_LOCKS_UNAVAILABLE in state.warnings
+
+
+def test_sleeper_lock_without_a_stable_score_takes_sleepers_score() -> None:
+    unscored = record(stable_score=None, status=LockInOpportunityStatus.INELIGIBLE)
+
+    (updated,) = reconcile_sleeper_locks(
+        (unscored,),
+        leg({"p2": "sleeper-9"}),
+        POSITIONS,
+        lock_dates={"p2": GAME_DATE},
+        lock_scores={"p2": 27.5},
+        now=NOW,
+    ).updates
+
+    assert updated.stable_score == 27.5
+    assert updated.stabilized_at == NOW
+
+
+def test_stable_score_is_kept_when_sleeper_also_reports_one() -> None:
+    (updated,) = reconcile_sleeper_locks(
+        (record(),),
+        leg({"p2": "sleeper-9"}),
+        POSITIONS,
+        lock_dates={"p2": GAME_DATE},
+        lock_scores={"p2": 27.5},
+        now=NOW,
+    ).updates
+
+    assert updated.stable_score == 41.5
+
+
+def test_synced_lock_on_an_unscored_row_does_not_block_planning(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    async def exercise() -> None:
+        repository, inputs, _, _ = await _prepare(tmp_path)
+
+        synced = await with_sleeper_locks(
+            inputs, reader=_locked_reader(), repository=repository, now=POSTGAME
+        )
+        state = build_live_team_week_state(synced, decision_time=POSTGAME)
+
+        (evidence,) = synced.acknowledgements
+        assert evidence.reconciled is True
+        assert evidence.accepted_fantasy_score == 20.0
+        assert PlanningReasonCode.ACKNOWLEDGEMENT_CONFLICT not in state.blocking_reasons
+
+    asyncio.run(exercise())

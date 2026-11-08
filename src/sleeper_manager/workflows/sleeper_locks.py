@@ -15,7 +15,12 @@ from zoneinfo import ZoneInfo
 
 from sleeper_manager.domain.lock_in import LockInOpportunityStatus
 from sleeper_manager.domain.nba_season import nba_season_start_year
-from sleeper_manager.integrations.sleeper.game_stats import game_date_by_id
+from sleeper_manager.domain.scoring import ScoringPolicy, calculate_fantasy_points
+from sleeper_manager.integrations.sleeper.game_stats import (
+    box_score_line,
+    game_date_by_id,
+    game_stats_by_id,
+)
 from sleeper_manager.integrations.sleeper.matchup_legs import (
     MatchupLeg,
     parse_matchup_legs,
@@ -85,18 +90,23 @@ async def sync_sleeper_locks(
         print("Sleeper lock sync unavailable: manager roster missing", file=sys.stderr)
         return False
     season = nba_season_start_year(now.astimezone(_EASTERN).date())
-    lock_dates = {
-        player_id: game_date
-        for player_id, game_id in leg.starters_games.items()
-        if (game_date := await _lock_date(reader, player_id, game_id, season)) is not None
-    }
+    lock_dates: dict[str, date] = {}
+    lock_scores: dict[str, float] = {}
+    for player_id, game_id in leg.starters_games.items():
+        game_date, score = await _locked_game(reader, player_id, game_id, season, profile.scoring)
+        if game_date is not None:
+            lock_dates[player_id] = game_date
+        if score is not None:
+            lock_scores[player_id] = score
     positions = [
         slot.position
         for slot in sorted(profile.roster_slots, key=lambda slot: slot.index)
         if slot.is_starting
     ]
     records = await repository.list_week_lock_in_opportunities(profile.league_id, week)
-    result = reconcile_sleeper_locks(records, leg, positions, lock_dates=lock_dates, now=now)
+    result = reconcile_sleeper_locks(
+        records, leg, positions, lock_dates=lock_dates, lock_scores=lock_scores, now=now
+    )
     for record in result.updates:
         await repository.update_lock_in_opportunity(record, expected_version=record.row_version)
     if result.missing_rows or result.vanished_locks:
@@ -109,15 +119,18 @@ async def sync_sleeper_locks(
     return True
 
 
-async def _lock_date(
-    reader: SleeperLockReader, player_id: str, game_id: str, season: int
-) -> date | None:
-    """A late or failed stat read leaves the lock unmatched until a later run."""
+async def _locked_game(
+    reader: SleeperLockReader, player_id: str, game_id: str, season: int, scoring: ScoringPolicy
+) -> tuple[date | None, float | None]:
+    """The locked game's Eastern date and Sleeper score; a late or failed read retries later."""
     try:
-        return game_date_by_id(await reader.player_game_stats(player_id, season), game_id)
+        payload = await reader.player_game_stats(player_id, season)
+        stats = game_stats_by_id(payload, game_id)
+        score = calculate_fantasy_points(box_score_line(stats), scoring) if stats else None
+        return game_date_by_id(payload, game_id), score
     except Exception as error:
-        print(f"Sleeper lock date unavailable: {type(error).__name__}", file=sys.stderr)
-        return None
+        print(f"Sleeper lock game unavailable: {type(error).__name__}", file=sys.stderr)
+        return None, None
 
 
 def eastern_game_date(record: LockInOpportunityRecord) -> date:
@@ -131,8 +144,13 @@ def reconcile_sleeper_locks(
     *,
     lock_dates: Mapping[str, date],
     now: datetime,
+    lock_scores: Mapping[str, float] | None = None,
 ) -> LockReconciliation:
-    """``lock_dates`` maps each locked player to the Eastern date of the locked game."""
+    """``lock_dates`` maps each locked player to the Eastern date of the locked game.
+
+    ``lock_scores`` are Sleeper's scores for those games; they fill rows whose own score has
+    not stabilized, because lock evidence without a score would block planning.
+    """
     rows = [row for row in records if row.key.roster_id == leg.roster_id]
     matched: set[int] = set()
     updates: list[LockInOpportunityRecord] = []
@@ -154,7 +172,8 @@ def reconcile_sleeper_locks(
             continue
         matched.add(index)
         if not _synced(rows[index]):
-            updates.append(_locked(rows[index], leg, roster_positions, sleeper_game_id, now))
+            score = (lock_scores or {}).get(player_id)
+            updates.append(_locked(rows[index], leg, roster_positions, sleeper_game_id, score, now))
     vanished: list[tuple[str, str]] = []
     for index, row in enumerate(rows):
         if index in matched:
@@ -196,6 +215,7 @@ def _locked(
     leg: MatchupLeg,
     roster_positions: Sequence[str],
     sleeper_game_id: str,
+    sleeper_score: float | None,
     now: datetime,
 ) -> LockInOpportunityRecord:
     slot_index, slot_position = record.slot_index, record.slot_position
@@ -207,6 +227,8 @@ def _locked(
     trace.update(lock_source=LOCK_SOURCE_SLEEPER, sleeper_game_id=sleeper_game_id)
     if "eligibility_forfeited" in trace:
         trace["eligibility_forfeited"] = False
+    if record.stable_score is None and sleeper_score is not None:
+        record = replace(record, stable_score=round(sleeper_score, 6), stabilized_at=now)
     return replace(
         record,
         status=LockInOpportunityStatus.ACKNOWLEDGED_LOCKED,
