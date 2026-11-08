@@ -265,6 +265,7 @@ def test_plan_summary_reads_before_and_after_totals() -> None:
         "confidence": "medium",
         "p10": 290.0,
         "p90": 335.0,
+        "undecided": [],
     }
     assert plan_summary(None) == {
         "status": None,
@@ -273,7 +274,27 @@ def test_plan_summary_reads_before_and_after_totals() -> None:
         "confidence": None,
         "p10": None,
         "p90": None,
+        "undecided": [],
     }
+
+
+def test_plan_summary_names_undecided_finals() -> None:
+    withheld = {
+        **trace(),
+        "expected_terminal_score": None,
+        "undecided_scores": [
+            {"player_id": "p1", "game_id": "g1", "pass_confidence": 0.66, "lock_confidence": 0.34},
+            {"player_id": "p9", "game_id": "g2", "pass_confidence": "bad"},
+        ],
+    }
+
+    summary = plan_summary(withheld, {"p1": "Ann"})
+
+    assert summary["team_after"] is None
+    assert summary["undecided"] == [
+        {"name": "Ann", "pass_confidence": 0.66, "lock_confidence": 0.34},
+        {"name": None, "pass_confidence": None, "lock_confidence": None},
+    ]
 
 
 def test_unreadable_plan_trace_yields_no_decisions() -> None:

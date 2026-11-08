@@ -61,12 +61,20 @@ async def home_lineup(
         records = ()
     trace = await load_plan_trace(repository, league_id, week, now=now)
     lineup = lineup_document(rows, games, records, trace, now=now, sleeper_locks=sleeper_locks)
-    return lineup, plan_summary(trace)
+    names = {row.player_id: row.name for row in rows if row.player_id and row.name}
+    return lineup, plan_summary(trace, names)
 
 
-def plan_summary(plan_trace: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Team total with the current lineup, after the plan, and the plan's 10th-90th range."""
+def plan_summary(
+    plan_trace: Mapping[str, Any] | None, names: Mapping[str, str] | None = None
+) -> dict[str, Any]:
+    """Team totals, the plan's 10th-90th range, and finals too close to call.
+
+    With undecided finals the planner withholds ``team_after``; ``team_before`` is then the
+    expected total if every undecided final is passed.
+    """
     trace = plan_trace or {}
+    undecided = trace.get("undecided_scores")
     return {
         "status": _text(trace.get("status")),
         "team_before": _number(trace.get("observed_terminal_score")),
@@ -74,6 +82,20 @@ def plan_summary(plan_trace: Mapping[str, Any] | None) -> dict[str, Any]:
         "confidence": _text(trace.get("confidence")),
         "p10": _number(trace.get("terminal_score_p10")),
         "p90": _number(trace.get("terminal_score_p90")),
+        "undecided": [
+            _undecided(row, names or {})
+            for row in (undecided if isinstance(undecided, list) else ())
+            if isinstance(row, Mapping)
+        ],
+    }
+
+
+def _undecided(row: Mapping[str, Any], names: Mapping[str, str]) -> dict[str, Any]:
+    player_id = row.get("player_id")
+    return {
+        "name": names.get(player_id) if isinstance(player_id, str) else None,
+        "pass_confidence": _number(row.get("pass_confidence")),
+        "lock_confidence": _number(row.get("lock_confidence")),
     }
 
 

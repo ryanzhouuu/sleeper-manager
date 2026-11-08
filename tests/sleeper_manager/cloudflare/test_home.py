@@ -676,6 +676,7 @@ def test_home_includes_lineup_rows_and_plan_summary(tmp_path) -> None:  # type: 
         "confidence": None,
         "p10": None,
         "p90": None,
+        "undecided": [],
     }
     assert document["lock_data"] == "ready"
 
