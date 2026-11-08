@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import {
   MISSING,
   formatGameMoment,
@@ -59,7 +60,10 @@ export function LineupBlock({
               {row.decision ? (
                 <DecisionLine decision={row.decision} timeZone={timeZone} />
               ) : null}
-              <ul className="lineup-games">
+              <ul
+                className="lineup-games"
+                style={{ "--games": row.games.length } as CSSProperties}
+              >
                 {row.games.map((game, gameIndex) => (
                   <GameBox
                     key={gameIndex}
@@ -87,11 +91,7 @@ function GameBox({
   timeZone: string;
 }) {
   return (
-    <li
-      className="game-box"
-      data-state={game.state}
-      data-overridable={game.overridable || undefined}
-    >
+    <li className="game-box" data-state={game.state}>
       <div className="game-box-head">
         <span className="number">{formatGameMoment(game.start, timeZone)}</span>
         <span className="game-score number">
