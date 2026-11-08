@@ -47,6 +47,7 @@ from sleeper_manager.workflows.lock_in_planning import (
 from sleeper_manager.workflows.notification_loop import NotificationLoop
 from sleeper_manager.workflows.postgame_lock_in import DirectGameSummarySource
 from sleeper_manager.workflows.pre_tipoff_check import run_pre_tipoff_check
+from sleeper_manager.workflows.sleeper_locks import SleeperLockReader, with_sleeper_locks
 
 _RETRY_DELAY = timedelta(minutes=5)
 _WORKFLOW_STATUS = {
@@ -83,6 +84,7 @@ async def dispatch_due_work(
     clock: Callable[[], datetime] | None = None,
     fetch_game_summary: DirectGameSummarySource | None = None,
     read_tipoff_lineup: TipoffLineupReader | None = None,
+    lock_reader: SleeperLockReader | None = None,
 ) -> ScheduledRunSummary:
     """Dispatch claimed daily, pre-tipoff, postgame, and delivery-retry rows for this wake."""
     if scheduled_at.tzinfo is None or scheduled_at.utcoffset() is None:
@@ -150,6 +152,7 @@ async def dispatch_due_work(
                     clock=tick,
                     fetch_game_summary=fetch_game_summary,
                     schedule_tipoff_reads=read_tipoff_lineup is not None,
+                    lock_reader=lock_reader,
                 )
             )
         if postgame:
@@ -165,6 +168,7 @@ async def dispatch_due_work(
                     correlation_id=correlation_id,
                     open_sleeper_url=open_sleeper_url,
                     clock=tick,
+                    lock_reader=lock_reader,
                 )
             )
         for work in retries:
@@ -235,6 +239,7 @@ async def _run_planning(
     clock: Callable[[], datetime],
     fetch_game_summary: DirectGameSummarySource | None = None,
     schedule_tipoff_reads: bool = False,
+    lock_reader: SleeperLockReader | None = None,
 ) -> tuple[WorkAttemptSummary, ...]:
     trigger = (
         "pre_tipoff" if any(item.kind is DueWorkKind.PRE_TIPOFF for item in claimed) else "daily"
@@ -283,6 +288,14 @@ async def _run_planning(
             repository=repository,
             observed_at=assembly.evidence.decision_time,
         )
+    if lock_reader is not None:
+        with scheduled_stage("sleeper_lock_sync", FailureCategory.PROVIDER):
+            planning_inputs = await with_sleeper_locks(
+                planning_inputs,
+                reader=lock_reader,
+                repository=repository,
+                now=assembly.evidence.decision_time,
+            )
     if trigger == "daily" and fetch_game_summary is not None:
         with scheduled_stage("terminal_score_refresh", FailureCategory.PROVIDER):
             planning_inputs = await refresh_terminal_lock_in_scores(

@@ -28,6 +28,7 @@ from sleeper_manager.workflows.postgame_lock_in import (
     observe_postgame,
     recommend_postgame_batch,
 )
+from sleeper_manager.workflows.sleeper_locks import SleeperLockReader, with_sleeper_locks
 
 _RETRY_DELAY = timedelta(minutes=5)
 
@@ -56,6 +57,7 @@ async def dispatch_postgame_work(
     correlation_id: str,
     open_sleeper_url: str,
     clock: Callable[[], datetime],
+    lock_reader: SleeperLockReader | None = None,
 ) -> tuple[WorkAttemptSummary, ...]:
     """Persist all due finals before computing a single coordinated plan."""
 
@@ -75,11 +77,19 @@ async def dispatch_postgame_work(
             policy=policy,
             scheduled_at=scheduled_at,
         )
+        inputs = assembly.evidence.inputs
         await sync_live_lock_in_opportunities(
-            assembly.evidence.inputs,
+            inputs,
             repository=repository,
             observed_at=assembly.evidence.decision_time,
         )
+        if lock_reader is not None:
+            inputs = await with_sleeper_locks(
+                inputs,
+                reader=lock_reader,
+                repository=repository,
+                now=assembly.evidence.decision_time,
+            )
     except Exception as error:
         return await _finish_all(
             repository,
@@ -98,7 +108,7 @@ async def dispatch_postgame_work(
         try:
             observed[work.work_id] = await observe_postgame(
                 work.game_id,
-                assembly.evidence.inputs,
+                inputs,
                 decision_time=assembly.evidence.decision_time,
                 repository=repository,
                 fetch_summary=fetch_summary,
@@ -112,7 +122,7 @@ async def dispatch_postgame_work(
     if stable:
         try:
             result = await recommend_postgame_batch(
-                assembly.evidence.inputs,
+                inputs,
                 stable,
                 decision_time=clock(),
                 repository=repository,

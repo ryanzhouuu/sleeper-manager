@@ -537,3 +537,67 @@ def test_postgame_delivery_failure_remains_visible_and_retryable(tmp_path) -> No
         assert g1.due_at == first_at + timedelta(minutes=5)
 
     asyncio.run(exercise())
+
+
+class LockReader:
+    def __init__(self, failure: BaseException | None = None) -> None:
+        self.failure = failure
+        self.calls: list[tuple[str, int]] = []
+
+    async def matchup_legs(self, league_id: str, week: int) -> object:
+        self.calls.append((league_id, week))
+        if self.failure is not None:
+            raise self.failure
+        return [{"roster_id": 1, "matchup_id": 1, "starters": ["p1", "p2"], "starters_games": {}}]
+
+    async def player_game_stats(self, player_id: str, season: int) -> dict[str, object]:
+        raise AssertionError("No locks need stat reads")
+
+
+async def _dispatch_with_locks(tmp_path, reader: LockReader):  # type: ignore[no-untyped-def]
+    repository, sender, notifications = _workflow(tmp_path, clock=lambda: NOW)
+    await repository.initialize()
+    await _save_policy(repository)
+    collect, _ = _collector(_assembly(decision_time=NOW))
+    summary = await dispatch_due_work(
+        repository,
+        notifications=notifications,
+        collect=collect,
+        scheduled_at=NOW,
+        correlation_id="run-1",
+        open_sleeper_url="https://sleeper.com/league",
+        plan_policy=PLAN_POLICY,
+        lock_reader=reader,
+    )
+    return repository, summary
+
+
+def test_scheduled_planning_syncs_sleeper_locks_before_planning(tmp_path, capsys) -> None:  # type: ignore[no-untyped-def]
+    reader = LockReader()
+
+    asyncio.run(_dispatch_with_locks(tmp_path, reader))
+
+    stages = [
+        json.loads(line)["stage"]
+        for line in capsys.readouterr().out.splitlines()
+        if line.startswith("{") and '"outcome": "started"' in line
+    ]
+    assert reader.calls == [("league-1", 1)]
+    assert stages.index("lock_in_sync") < stages.index("sleeper_lock_sync")
+    assert stages.index("sleeper_lock_sync") < stages.index("planning_and_persistence")
+
+
+def test_scheduled_planning_without_lock_data_publishes_degraded_plan_without_score_actions(
+    tmp_path,
+) -> None:  # type: ignore[no-untyped-def]
+    async def exercise() -> None:
+        repository, _ = await _dispatch_with_locks(tmp_path, LockReader(RuntimeError("down")))
+        (pending,) = await repository.list_pending_recommendations(
+            "league-1", 1, decision_type=WEEKLY_LINEUP_DECISION_TYPE
+        )
+        trace = json.loads(pending.trace_json)
+        assert trace["status"] == "degraded"
+        assert "sleeper_locks_unavailable" in trace["warnings"]
+        assert trace["score_actions"] == []
+
+    asyncio.run(exercise())

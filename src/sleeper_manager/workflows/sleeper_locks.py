@@ -6,15 +6,25 @@ whose game falls on the locked game's Eastern date (taken from Sleeper's stat ro
 """
 
 import json
+import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date, datetime
+from typing import Any, Protocol
 from zoneinfo import ZoneInfo
 
 from sleeper_manager.domain.lock_in import LockInOpportunityStatus
-from sleeper_manager.integrations.sleeper.matchup_legs import MatchupLeg
+from sleeper_manager.domain.nba_season import nba_season_start_year
+from sleeper_manager.integrations.sleeper.game_stats import game_date_by_id
+from sleeper_manager.integrations.sleeper.matchup_legs import (
+    MatchupLeg,
+    parse_matchup_legs,
+)
+from sleeper_manager.persistence.base import AsyncRuntimeStateRepository
 from sleeper_manager.persistence.lock_in_opportunities import LockInOpportunityRecord
+from sleeper_manager.workflows.lock_in_evidence import merge_lock_in_opportunity_evidence
 from sleeper_manager.workflows.manager_decisions import ManagerAction, reported_decision
+from sleeper_manager.workflows.planning_inputs import LivePlanningInputs
 
 LOCK_SOURCE_SLEEPER = "sleeper"
 _EASTERN = ZoneInfo("America/New_York")
@@ -28,6 +38,86 @@ class LockReconciliation:
     updates: tuple[LockInOpportunityRecord, ...]
     missing_rows: tuple[tuple[str, str], ...]
     vanished_locks: tuple[tuple[str, str], ...]
+
+
+class SleeperLockReader(Protocol):
+    async def matchup_legs(self, league_id: str, week: int) -> object: ...
+
+    async def player_game_stats(self, player_id: str, season: int) -> dict[str, Any]: ...
+
+
+async def with_sleeper_locks(
+    inputs: LivePlanningInputs,
+    *,
+    reader: SleeperLockReader,
+    repository: AsyncRuntimeStateRepository,
+    now: datetime,
+) -> LivePlanningInputs:
+    """Sync locks, then plan from them; without lock data the plan must degrade."""
+    if not await sync_sleeper_locks(inputs, reader=reader, repository=repository, now=now):
+        return replace(inputs, sleeper_locks_unavailable=True)
+    records = await repository.load_acknowledged_lock_in_opportunities(
+        inputs.league_profile.league_id, inputs.week_window.week
+    )
+    return replace(
+        inputs,
+        acknowledgements=merge_lock_in_opportunity_evidence(inputs.acknowledgements, records),
+    )
+
+
+async def sync_sleeper_locks(
+    inputs: LivePlanningInputs,
+    *,
+    reader: SleeperLockReader,
+    repository: AsyncRuntimeStateRepository,
+    now: datetime,
+) -> bool:
+    """Apply Sleeper's locks to stored rows; False when Sleeper's lock data is unavailable."""
+    profile = inputs.league_profile
+    week = inputs.week_window.week
+    try:
+        legs = parse_matchup_legs(await reader.matchup_legs(profile.league_id, week))
+    except Exception as error:
+        print(f"Sleeper lock sync unavailable: {type(error).__name__}", file=sys.stderr)
+        return False
+    leg = next((item for item in legs if item.roster_id == profile.manager_roster_id), None)
+    if leg is None:
+        print("Sleeper lock sync unavailable: manager roster missing", file=sys.stderr)
+        return False
+    season = nba_season_start_year(now.astimezone(_EASTERN).date())
+    lock_dates = {
+        player_id: game_date
+        for player_id, game_id in leg.starters_games.items()
+        if (game_date := await _lock_date(reader, player_id, game_id, season)) is not None
+    }
+    positions = [
+        slot.position
+        for slot in sorted(profile.roster_slots, key=lambda slot: slot.index)
+        if slot.is_starting
+    ]
+    records = await repository.list_week_lock_in_opportunities(profile.league_id, week)
+    result = reconcile_sleeper_locks(records, leg, positions, lock_dates=lock_dates, now=now)
+    for record in result.updates:
+        await repository.update_lock_in_opportunity(record, expected_version=record.row_version)
+    if result.missing_rows or result.vanished_locks:
+        print(
+            "Sleeper lock anomalies: "
+            f"missing_rows={[pid for pid, _ in result.missing_rows]} "
+            f"vanished_locks={list(result.vanished_locks)}",
+            file=sys.stderr,
+        )
+    return True
+
+
+async def _lock_date(
+    reader: SleeperLockReader, player_id: str, game_id: str, season: int
+) -> date | None:
+    """A late or failed stat read leaves the lock unmatched until a later run."""
+    try:
+        return game_date_by_id(await reader.player_game_stats(player_id, season), game_id)
+    except Exception as error:
+        print(f"Sleeper lock date unavailable: {type(error).__name__}", file=sys.stderr)
+        return None
 
 
 def eastern_game_date(record: LockInOpportunityRecord) -> date:

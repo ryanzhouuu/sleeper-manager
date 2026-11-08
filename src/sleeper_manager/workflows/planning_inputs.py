@@ -188,6 +188,7 @@ class LivePlanningInputs:
     catalog_retrieved_at: datetime | None = None
     projection_history_version: str | None = None
     projection_history_retrieved_at: datetime | None = None
+    sleeper_locks_unavailable: bool = False
 
     def __post_init__(self) -> None:
         if self.week_window.week != self.league_profile.fantasy_week.week:
@@ -331,6 +332,8 @@ def build_live_team_week_state(
     )
     if unknown_tipoff:
         warnings.append(PlanningReasonCode.MISSING_TIPOFF_EVIDENCE)
+    if inputs.sleeper_locks_unavailable:
+        warnings.append(PlanningReasonCode.SLEEPER_LOCKS_UNAVAILABLE)
     reasons = _unique_reasons(blocking)
     warning_reasons = tuple(reason for reason in _unique_reasons(warnings) if reason not in reasons)
     try:

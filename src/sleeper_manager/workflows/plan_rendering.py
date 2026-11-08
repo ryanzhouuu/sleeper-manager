@@ -56,6 +56,7 @@ _REASON_PHRASES = {
     PlanningReasonCode.LOW_CONFIDENCE: "the joint decision did not meet the confidence threshold",
     PlanningReasonCode.SEARCH_LIMIT: "the planner reached its bounded search limit",
     PlanningReasonCode.MISSING_TIPOFF_EVIDENCE: "past starter eligibility could not be verified",
+    PlanningReasonCode.SLEEPER_LOCKS_UNAVAILABLE: "lock data is unavailable from Sleeper",
 }
 
 

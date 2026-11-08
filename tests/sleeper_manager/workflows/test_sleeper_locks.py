@@ -1,18 +1,28 @@
 """Reconcile live opportunity rows with the locks Sleeper reports."""
 
+import asyncio
 import json
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 
 from sleeper_manager.domain.lock_in import LockInOpportunityStatus
+from sleeper_manager.domain.planning import AcknowledgedAction, PlanningReasonCode
 from sleeper_manager.integrations.sleeper.matchup_legs import MatchupLeg
 from sleeper_manager.persistence.lock_in_opportunities import (
     LockInOpportunityKey,
     LockInOpportunityRecord,
 )
+from sleeper_manager.workflows.planning_inputs import build_live_team_week_state
 from sleeper_manager.workflows.sleeper_locks import (
     LOCK_SOURCE_SLEEPER,
     reconcile_sleeper_locks,
+    sync_sleeper_locks,
+    with_sleeper_locks,
+)
+from tests.sleeper_manager.workflows.postgame_lock_in_support import (
+    POSTGAME,
+    _live_inputs,
+    _prepare,
 )
 
 NOW = datetime(2026, 11, 7, 18, tzinfo=UTC)
@@ -200,3 +210,112 @@ def test_already_synced_lock_produces_no_update() -> None:
 
     assert result.updates == ()
     assert result.missing_rows == () and result.vanished_locks == ()
+
+
+class FakeLockReader:
+    def __init__(self, legs: object, stats: dict[str, dict[str, object]] | None = None) -> None:
+        self.legs = legs
+        self.stats = stats or {}
+        self.stats_calls: list[tuple[str, int]] = []
+
+    async def matchup_legs(self, league_id: str, week: int) -> object:
+        assert (league_id, week) == ("league-1", 1)
+        if isinstance(self.legs, BaseException):
+            raise self.legs
+        return self.legs
+
+    async def player_game_stats(self, player_id: str, season: int) -> dict[str, object]:
+        self.stats_calls.append((player_id, season))
+        return self.stats.get(player_id, {})
+
+
+def _locked_reader() -> FakeLockReader:
+    return FakeLockReader(
+        [
+            {
+                "roster_id": 1,
+                "matchup_id": 1,
+                "points": None,
+                "starters": ["p1", "p2"],
+                "starters_games": {"p1": "sleeper-g1"},
+            }
+        ],
+        {"p1": {"1": [{"game_id": "sleeper-g1", "date": "2026-01-07", "stats": {"pts": 20.0}}]}},
+    )
+
+
+def test_sync_sleeper_locks_persists_locked_rows(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    async def exercise() -> None:
+        repository, inputs, _, _ = await _prepare(tmp_path)
+        reader = _locked_reader()
+
+        applied = await sync_sleeper_locks(
+            inputs, reader=reader, repository=repository, now=POSTGAME
+        )
+
+        rows = await repository.list_week_lock_in_opportunities("league-1", 1)
+        locked = next(row for row in rows if row.key.player_id == "p1" and row.key.game_id == "g1")
+        assert applied is True
+        assert reader.stats_calls == [("p1", 2025)]
+        assert locked.status is LockInOpportunityStatus.ACKNOWLEDGED_LOCKED
+        assert (locked.slot_index, locked.slot_position) == (0, "PG")
+        assert json.loads(locked.trace_json)["lock_source"] == LOCK_SOURCE_SLEEPER
+
+    asyncio.run(exercise())
+
+
+def test_sync_sleeper_locks_returns_false_and_writes_nothing_on_provider_error(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    async def exercise() -> None:
+        repository, inputs, _, _ = await _prepare(tmp_path)
+        before = await repository.list_week_lock_in_opportunities("league-1", 1)
+
+        for failure in (RuntimeError("graphql down"), [{"roster_id": "1"}], []):
+            applied = await sync_sleeper_locks(
+                inputs, reader=FakeLockReader(failure), repository=repository, now=POSTGAME
+            )
+            assert applied is False
+
+        assert await repository.list_week_lock_in_opportunities("league-1", 1) == before
+
+    asyncio.run(exercise())
+
+
+def test_with_sleeper_locks_adds_lock_evidence(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    async def exercise() -> None:
+        repository, inputs, _, _ = await _prepare(tmp_path)
+
+        synced = await with_sleeper_locks(
+            inputs, reader=_locked_reader(), repository=repository, now=POSTGAME
+        )
+
+        (evidence,) = synced.acknowledgements
+        assert (evidence.player_id, evidence.game_id) == ("p1", "g1")
+        assert evidence.action is AcknowledgedAction.LOCK
+        assert synced.sleeper_locks_unavailable is False
+
+    asyncio.run(exercise())
+
+
+def test_with_sleeper_locks_flags_unavailable_lock_data(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    async def exercise() -> None:
+        repository, inputs, _, _ = await _prepare(tmp_path)
+
+        synced = await with_sleeper_locks(
+            inputs,
+            reader=FakeLockReader(RuntimeError("down")),
+            repository=repository,
+            now=POSTGAME,
+        )
+
+        assert synced.sleeper_locks_unavailable is True
+        assert synced.acknowledgements == inputs.acknowledgements
+
+    asyncio.run(exercise())
+
+
+def test_missing_lock_data_degrades_the_plan_without_score_actions() -> None:
+    inputs = replace(_live_inputs(), sleeper_locks_unavailable=True)
+
+    state = build_live_team_week_state(inputs, decision_time=POSTGAME)
+
+    assert PlanningReasonCode.SLEEPER_LOCKS_UNAVAILABLE in state.warnings

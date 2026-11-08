@@ -26,7 +26,29 @@ def game_stats_by_id(payload: Mapping[str, Any], game_id: str) -> Mapping[str, A
     return _single_game(payload, "game_id", game_id)
 
 
+def game_date_by_id(payload: Mapping[str, Any], game_id: str) -> date | None:
+    """Return the US Eastern date Sleeper lists for a game id, or None without a row."""
+
+    row = _single_row(payload, "game_id", game_id)
+    if row is None:
+        return None
+    try:
+        return date.fromisoformat(str(row.get("date")))
+    except ValueError as error:
+        raise SleeperGameStatsError(f"Sleeper game {game_id} has no valid date") from error
+
+
 def _single_game(payload: Mapping[str, Any], key: str, value: str) -> Mapping[str, Any] | None:
+    row = _single_row(payload, key, value)
+    if row is None:
+        return None
+    stats = row.get("stats") or {}
+    if not isinstance(stats, Mapping):
+        raise SleeperGameStatsError("Sleeper stats must be an object")
+    return stats
+
+
+def _single_row(payload: Mapping[str, Any], key: str, value: str) -> Mapping[str, Any] | None:
     matches: list[Mapping[str, Any]] = []
     for rows in payload.values():
         if not isinstance(rows, list):
@@ -40,10 +62,7 @@ def _single_game(payload: Mapping[str, Any], key: str, value: str) -> Mapping[st
         return None
     if len(matches) > 1:
         raise SleeperGameStatsError(f"Sleeper has {len(matches)} stat rows for {key} {value}")
-    stats = matches[0].get("stats") or {}
-    if not isinstance(stats, Mapping):
-        raise SleeperGameStatsError("Sleeper stats must be an object")
-    return stats
+    return matches[0]
 
 
 def box_score_line(stats: Mapping[str, Any]) -> BoxScoreLine:

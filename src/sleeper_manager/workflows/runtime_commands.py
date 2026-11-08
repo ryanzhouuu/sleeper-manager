@@ -88,8 +88,16 @@ async def _run_scheduled(settings: Settings) -> int:
         )
         async with httpx.AsyncClient() as client:
 
-            async def fetch(url: str) -> _HttpxFetchResponse:
-                return _HttpxFetchResponse(await client.get(url))
+            async def fetch(
+                url: str,
+                *,
+                method: str = "GET",
+                body: str | None = None,
+                headers: dict[str, str] | None = None,
+            ) -> _HttpxFetchResponse:
+                return _HttpxFetchResponse(
+                    await client.request(method, url, content=body, headers=headers)
+                )
 
             async def collect(*, repository, policy, scheduled_at):  # type: ignore[no-untyped-def]
                 return await collect_cloudflare_planning_inputs(
@@ -124,6 +132,7 @@ async def _run_scheduled(settings: Settings) -> int:
                     CloudflareESPNProvider(fetch).game_summary,
                     CloudflareSleeperClient(fetch).player_game_stats,
                 ),
+                lock_reader=CloudflareSleeperClient(fetch),
             )
     except (OSError, RuntimeError, ValueError) as error:
         print(redact_secrets(f"Scheduled run failed: {error}"), file=sys.stderr)

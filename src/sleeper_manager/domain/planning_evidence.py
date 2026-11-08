@@ -56,6 +56,7 @@ class PlanningReasonCode(StrEnum):
     LOW_CONFIDENCE = "low_confidence"
     RECOVERY_WINDOW_CLOSED = "recovery_window_closed"
     MISSING_TIPOFF_EVIDENCE = "missing_tipoff_evidence"
+    SLEEPER_LOCKS_UNAVAILABLE = "sleeper_locks_unavailable"
 
 
 @dataclass(frozen=True, slots=True)

@@ -9,6 +9,7 @@ from sleeper_manager.domain.lock_in import LockInDecisionKind
 from sleeper_manager.domain.planning import (
     ObservedStarter,
     PlanningGameStatus,
+    PlanningReasonCode,
     PlanStatus,
     StarterSlot,
 )
@@ -45,6 +46,17 @@ def test_weak_completed_trial_proposes_pass_and_restores_later_player() -> None:
     assert plan.fixed_slots == ()
     assert plan.passed_opportunities == ()
     assert plan.forfeited_opportunities == (("early", "tonight"),)
+
+
+def test_missing_sleeper_lock_data_degrades_the_plan_without_score_actions() -> None:
+    state = _after_trial(80)
+    degraded = replace(state, warnings=(PlanningReasonCode.SLEEPER_LOCKS_UNAVAILABLE,))
+
+    plan = build_team_recommendation(degraded, policy=POLICY)
+
+    assert build_team_recommendation(state, policy=POLICY).score_actions
+    assert plan.score_actions == ()
+    assert plan.status is PlanStatus.DEGRADED
 
 
 def test_strong_completed_trial_is_a_proposal_until_confirmed() -> None:

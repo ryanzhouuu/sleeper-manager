@@ -31,6 +31,7 @@ from sleeper_manager.workflows.postgame_types import (
     PostgameLockInResult,
 )
 from sleeper_manager.workflows.recommendation_state import refreshed_team_state
+from sleeper_manager.workflows.sleeper_locks import SleeperLockReader, with_sleeper_locks
 
 _RECHECK_DELAY = timedelta(minutes=5)
 
@@ -48,10 +49,15 @@ async def run_postgame_lock_in(
     poll_id: str,
     player_names: dict[str, str] | None = None,
     policy: ScoreMaximizingLockInPolicy | None = None,
+    lock_reader: SleeperLockReader | None = None,
 ) -> PostgameLockInResult:
     """Observe and evaluate one game for callers without a scheduled batch."""
 
     await sync_live_lock_in_opportunities(inputs, repository=repository, observed_at=decision_time)
+    if lock_reader is not None:
+        inputs = await with_sleeper_locks(
+            inputs, reader=lock_reader, repository=repository, now=decision_time
+        )
     stable = await observe_postgame(
         game_id,
         inputs,

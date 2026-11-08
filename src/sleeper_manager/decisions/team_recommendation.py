@@ -60,7 +60,11 @@ def build_team_recommendation(
     state = refresh_recoveries(state, lead_time)
     if state.is_blocked:
         return _with_roster(build_weekly_plan(state, lead_time=lead_time, policy=config), state)
-    completed = usable_completed_games(state)
+    completed = (
+        ()
+        if PlanningReasonCode.SLEEPER_LOCKS_UNAVAILABLE in state.warnings
+        else usable_completed_games(state)
+    )
     try:
         comparison = (
             compare_completed_scores(

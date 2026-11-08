@@ -186,6 +186,7 @@ async def run_scheduled(
                 CloudflareSleeperClient(fetcher).player_game_stats,
             ),
             read_tipoff_lineup=lambda: read_tipoff_lineup(env, fetcher, tick),
+            lock_reader=CloudflareSleeperClient(fetcher),
             plan_policy=LIVE_PLAN_POLICY,
             clock=tick,
         )
