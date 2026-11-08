@@ -8,12 +8,18 @@ import {
   opponentLabel,
   GAME_STATE_LABELS,
 } from "@/lib/format";
-import type { Decision, LineupGame, LineupRow, PlanSummary } from "@/lib/home";
+import type {
+  Decision,
+  LineupGame,
+  LineupRow,
+  PlanSummary,
+  UndecidedFinal,
+} from "@/lib/home";
 import { Mark } from "./mark";
 import { OverrideControl } from "./override-control";
 
 export function PlanBlock({ plan }: { plan: PlanSummary }) {
-  if (plan.team_after === null) return null;
+  if (plan.team_after === null) return <WithheldPlanBlock plan={plan} />;
   const range =
     plan.p10 === null || plan.p90 === null
       ? null
@@ -31,6 +37,37 @@ export function PlanBlock({ plan }: { plan: PlanSummary }) {
       </p>
     </section>
   );
+}
+
+// The planner withholds its total while finals are undecided; team_before is then the all-pass total.
+function WithheldPlanBlock({ plan }: { plan: PlanSummary }) {
+  if (plan.team_before === null || plan.undecided.length === 0) return null;
+  const subject =
+    plan.undecided.length === 1 ? "undecided final" : "undecided finals";
+  return (
+    <section className="block">
+      <h2 className="label">plan</h2>
+      <p className="plan-total">
+        team {formatScore(plan.team_before)} if passed
+      </p>
+      <p className="plan-detail">
+        projection withheld: {subject} too close to call
+      </p>
+      {plan.undecided.map((final, index) => (
+        <p className="plan-detail" key={index}>
+          {undecidedLine(final)}
+        </p>
+      ))}
+    </section>
+  );
+}
+
+function undecidedLine(final: UndecidedFinal): string {
+  const odds =
+    final.pass_confidence === null || final.lock_confidence === null
+      ? null
+      : `pass ${formatPercent(final.pass_confidence)} / lock ${formatPercent(final.lock_confidence)}`;
+  return [final.name ?? MISSING, odds].filter(Boolean).join(" · ");
 }
 
 export function LineupBlock({

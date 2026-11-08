@@ -100,6 +100,12 @@ export interface LineupRow {
   decision: Decision | null;
 }
 
+export interface UndecidedFinal {
+  name: string | null;
+  pass_confidence: number | null;
+  lock_confidence: number | null;
+}
+
 export interface PlanSummary {
   status: PlanStatus | null;
   team_before: number | null;
@@ -107,6 +113,7 @@ export interface PlanSummary {
   confidence: string | null;
   p10: number | null;
   p90: number | null;
+  undecided: UndecidedFinal[];
 }
 
 export interface HomeDocument {
@@ -259,6 +266,20 @@ function planSummary(value: unknown): PlanSummary {
     confidence: nullableString(fields.confidence),
     p10: nullableNumber(fields.p10),
     p90: nullableNumber(fields.p90),
+    // Workers deployed before undecided finals were reported omit the field.
+    undecided:
+      fields.undecided === undefined
+        ? []
+        : array(fields.undecided).map(undecidedFinal),
+  };
+}
+
+function undecidedFinal(value: unknown): UndecidedFinal {
+  const fields = record(value);
+  return {
+    name: nullableString(fields.name),
+    pass_confidence: nullableNumber(fields.pass_confidence),
+    lock_confidence: nullableNumber(fields.lock_confidence),
   };
 }
 

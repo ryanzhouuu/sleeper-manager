@@ -82,6 +82,7 @@ describe("parseHomeDocument", () => {
       confidence: "medium",
       p10: 290,
       p90: 335,
+      undecided: [],
     });
     const [first, , bench] = document.lineup;
     expect(first.slot_index).toBe(0);
@@ -102,7 +103,22 @@ describe("parseHomeDocument", () => {
 
     expect(document.lineup).toEqual([]);
     expect(document.plan.team_after).toBeNull();
+    expect(document.plan.undecided).toEqual([]);
     expect(document.lock_data).toBe("ready");
+  });
+
+  it("reads undecided finals from the plan summary", () => {
+    const document = parseHomeDocument(
+      withFields({
+        "plan.undecided": [
+          { name: "LaMelo Ball", pass_confidence: 0.66, lock_confidence: 0.34 },
+        ],
+      }),
+    );
+
+    expect(document.plan.undecided).toEqual([
+      { name: "LaMelo Ball", pass_confidence: 0.66, lock_confidence: 0.34 },
+    ]);
   });
 
   it("defaults fields an older worker omits", () => {

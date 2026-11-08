@@ -121,4 +121,27 @@ describe("PlanBlock", () => {
 
     expect(html).toBe("");
   });
+
+  it("shows the all-pass total and why the projection is withheld", () => {
+    const html = renderToStaticMarkup(
+      <PlanBlock
+        plan={{
+          ...document.plan,
+          team_after: null,
+          team_before: 426.05,
+          undecided: [
+            {
+              name: "LaMelo Ball",
+              pass_confidence: 0.66,
+              lock_confidence: 0.34,
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(html).toContain("team 426.1 if passed");
+    expect(html).toContain("undecided final too close to call");
+    expect(html).toContain("LaMelo Ball · pass 66% / lock 34%");
+  });
 });
