@@ -45,6 +45,9 @@ def game_state(
         return GameState("locked", None, False)
     if record.scheduled_start > now:
         return GameState("upcoming", None, False)
+    if sleeper_lock_date is not None or _player_locked(record, records):
+        # A player locks at most one game per week, so his other games no longer count.
+        return GameState("passed_window_closed", None, False)
     closes = min(record.action_deadline, record.fantasy_week_end)
     window_open = now < closes and not _next_game_started(record, records, now)
     if record.tipoff_unverified:
@@ -69,5 +72,16 @@ def _next_game_started(
     return any(
         other.key.player_id == record.key.player_id
         and record.scheduled_start < other.scheduled_start <= now
+        for other in records
+    )
+
+
+def _player_locked(
+    record: LockInOpportunityRecord, records: Sequence[LockInOpportunityRecord]
+) -> bool:
+    return any(
+        other.key.player_id == record.key.player_id
+        and other.key.game_id != record.key.game_id
+        and other.status is Status.ACKNOWLEDGED_LOCKED
         for other in records
     )

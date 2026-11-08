@@ -78,6 +78,24 @@ def test_live_sleeper_lock_marks_the_game_locked_before_sync() -> None:
     assert state.state == "locked"
 
 
+def test_games_after_a_players_lock_are_no_longer_lockable() -> None:
+    locked = record(
+        game_id="g0", start=EARLY - timedelta(days=1), status=Status.ACKNOWLEDGED_LOCKED
+    )
+
+    state = game_state(record(), NOW, records=(locked, record()))
+
+    assert (state.state, state.deadline) == ("passed_window_closed", None)
+
+
+def test_a_live_sleeper_lock_closes_the_players_other_games() -> None:
+    earlier = record(game_id="g0", start=EARLY - timedelta(days=1))
+
+    state = game_state(record(), NOW, records=(earlier,), sleeper_lock_date=date(2026, 11, 4))
+
+    assert state.state == "passed_window_closed"
+
+
 def test_lockable_game_carries_its_deadline() -> None:
     assert game_state(record(), NOW, records=()).deadline == DEADLINE
 
