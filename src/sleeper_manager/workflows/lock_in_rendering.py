@@ -115,10 +115,9 @@ def _evaluation_message(evaluation: LockInEvaluation) -> str:
     assert evaluation.decision is not None
     alternative = "pass" if evaluation.kind is LockInEvaluationKind.LOCK else "lock"
     instruction = (
-        "Lock the game in Sleeper, then confirm it."
+        "Lock the game in Sleeper."
         if evaluation.kind is LockInEvaluationKind.LOCK
-        else "Record your decision not to lock this game. "
-        "You may keep the player starting or substitute them."
+        else "Leave this game unlocked in Sleeper. The player can stay starting or be substituted."
     )
     return (
         f"Observed game score: {evaluation.observed_score:.2f} pts.\n\n"

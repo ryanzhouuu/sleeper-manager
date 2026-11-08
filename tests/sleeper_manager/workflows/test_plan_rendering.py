@@ -79,7 +79,8 @@ def test_pass_advice_describes_a_decision_with_optional_substitution() -> None:
 
     message = render_weekly_plan(plan, player_names=NAMES).message
 
-    assert "Record Pass on Bob's 20.00 pts; substitution is optional." in message
+    assert "Pass on Bob's 20.00 pts." in message
+    assert "record" not in message.lower()
     assert "confirm only after doing so in Sleeper" not in message
 
 

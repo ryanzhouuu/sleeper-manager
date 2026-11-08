@@ -119,9 +119,9 @@ def test_passes_precede_moves_and_locks_follow_required_moves(pre_lock_move_coun
 
     message = render_weekly_plan(plan, player_names=NAMES).message
     actions = message.split("\n\n")[1].splitlines()
-    lock = "• Lock Alice's 25.00 pts in PG in Sleeper, then confirm."
+    lock = "• Lock Alice's 25.00 pts in PG in Sleeper."
     move = "• Start Cal at SG; bench Bob."
-    assert actions[0] == "• Record Pass on Bob's 10.00 pts; substitution is optional."
+    assert actions[0] == "• Pass on Bob's 10.00 pts."
     assert actions[1:] == ([lock, move] if pre_lock_move_count == 0 else [move, lock])
     assert "Alternative (pass): 90.0 pts." in message
     assert "Lock placement totals" not in message

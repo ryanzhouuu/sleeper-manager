@@ -10,7 +10,7 @@ from sleeper_manager.domain.planning import PlanStatus, WeeklyPlan
 def score_action_phrases(
     plan: WeeklyPlan, names: Mapping[str, str] | None, kind: LockInDecisionKind | None = None
 ) -> list[str]:
-    """Place locks after starter realignment and distinguish Pass from a Sleeper action."""
+    """Place locks after starter realignment; a Pass means leaving the game unlocked."""
     labels = slot_labels(plan)
     phrases = []
     for action in plan.score_actions:
@@ -20,13 +20,10 @@ def score_action_phrases(
         if action.kind is LockInDecisionKind.LOCK:
             assert action.slot_index is not None
             phrases.append(
-                f"Lock {player}'s {action.score:.2f} pts in {labels[action.slot_index]} "
-                "in Sleeper, then confirm."
+                f"Lock {player}'s {action.score:.2f} pts in {labels[action.slot_index]} in Sleeper."
             )
         else:
-            phrases.append(
-                f"Record Pass on {player}'s {action.score:.2f} pts; substitution is optional."
-            )
+            phrases.append(f"Pass on {player}'s {action.score:.2f} pts.")
     return phrases
 
 

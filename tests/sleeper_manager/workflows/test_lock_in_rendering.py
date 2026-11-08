@@ -59,11 +59,12 @@ def test_actionable_messages_show_selected_and_alternative_team_totals(
     assert "Observed game score: 35.00 pts." in message
     assert "Confidence: 85%." in message
     if kind is LockInEvaluationKind.LOCK:
-        assert "Lock the game in Sleeper, then confirm it." in message
+        assert "Lock the game in Sleeper." in message
     else:
-        assert "Record your decision not to lock this game." in message
-        assert "You may keep the player starting or substitute them." in message
-        assert "then confirm it" not in message
+        assert "Leave this game unlocked in Sleeper." in message
+        assert "The player can stay starting or be substituted." in message
+    assert "confirm" not in message.lower()
+    assert "record" not in message.lower()
 
 
 def test_unavailable_advice_does_not_invent_a_weekly_estimate() -> None:
