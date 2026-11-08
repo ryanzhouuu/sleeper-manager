@@ -9,7 +9,12 @@ from collections.abc import Mapping, Sequence
 from datetime import date, datetime
 from typing import Any
 
-from sleeper_manager.cloudflare.home_document import GameRow, RosterRow, player_image_url
+from sleeper_manager.cloudflare.home_document import (
+    GameRow,
+    RosterRow,
+    player_image_url,
+    team_image_url,
+)
 from sleeper_manager.cloudflare.lineup_states import game_state
 from sleeper_manager.persistence.base import AsyncRuntimeStateRepository
 from sleeper_manager.persistence.lock_in_opportunities import LockInOpportunityRecord
@@ -151,6 +156,7 @@ def _game_item(
         "game_id": None if record is None else record.key.game_id,
         "start": start.isoformat(),
         "opponent": None if game is None else game.opponent,
+        "opponent_image_url": None if game is None else team_image_url(game.opponent),
         "home": None if game is None else game.home,
         "score": None,
         "deadline": None,

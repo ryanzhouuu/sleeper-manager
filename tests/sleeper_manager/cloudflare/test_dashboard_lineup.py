@@ -179,6 +179,9 @@ def test_lineup_orders_by_sleeper_slot_then_bench() -> None:
         ("MIA", "upcoming"),
     ]
     assert ann["games"][0]["score"] == 41.5
+    assert (
+        ann["games"][0]["opponent_image_url"] == "https://a.espncdn.com/i/teamlogos/nba/500/tor.png"
+    )
     assert ann["games"][0]["game_id"] == "g1"
     assert ann["games"][0]["deadline"] == DEADLINE.isoformat()
     assert ann["decision"] is None
