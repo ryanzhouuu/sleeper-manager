@@ -58,7 +58,7 @@ def test_get_manage_reports_signed_out_session_without_private_data(environment)
     req.url = "https://worker.test/manage"
     response = asyncio.run(manage(req, environment, None, now=NOW))
     assert response.status == 200
-    assert response.data == {"signed_in": False, "csrf": None}
+    assert response.data == {"status": "session", "signed_in": False, "csrf": None}
     assert "Player name" not in response.body and "32.80" not in response.body
     assert "set-cookie" not in response.headers
     assert response.headers["referrer-policy"] == "same-origin"
@@ -67,7 +67,11 @@ def test_get_manage_reports_signed_out_session_without_private_data(environment)
 def test_get_manage_returns_a_csrf_proof_for_the_signed_in_owner(environment):  # type: ignore[no-untyped-def]
     session = issue_session(SECRET, NOW)
     response = asyncio.run(manage(owner_request(session=session), environment, None, now=NOW))
-    assert response.data == {"signed_in": True, "csrf": csrf_proof(SECRET, session)}
+    assert response.data == {
+        "status": "session",
+        "signed_in": True,
+        "csrf": csrf_proof(SECRET, session),
+    }
 
 
 @pytest.mark.parametrize("origin", [None, "null", "https://evil.test"])

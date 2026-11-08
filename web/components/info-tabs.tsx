@@ -1,3 +1,5 @@
+"use client";
+
 /** Every panel is server-rendered, so read-only history stays available before hydration. */
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 

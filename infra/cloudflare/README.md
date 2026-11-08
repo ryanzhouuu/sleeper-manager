@@ -88,7 +88,7 @@ exchanges it for an HttpOnly, Secure, SameSite=Strict cookie scoped to `/manage`
 rotating the secret invalidates existing sessions. Without this secret owner
 routes return 503. Public `/home` never includes the key or session.
 
-`GET /manage` returns `{"signed_in": bool, "csrf": str|null}`. `POST /manage/login`,
+`GET /manage` returns `{"status": "session", "signed_in": bool, "csrf": str|null}`. `POST /manage/login`,
 `/manage/logout`, `/manage/replan`, and `/manage/override` require the same origin;
 all but login also require the session and its CSRF proof (403 otherwise).
 `/manage/override` takes `player_id`, `game_id`, `version`, and `action`

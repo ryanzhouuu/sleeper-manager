@@ -1,47 +1,21 @@
 import { describe, expect, it } from "vitest";
-import fixture from "@/test/fixtures/controls.json";
 import { parseControlDocument } from "./control-document";
 
 describe("control documents", () => {
-  it("keeps suggested Pass separate from the recorded Wait and editable version", () => {
-    const data = parseControlDocument(fixture);
-    expect(data.status).toBe("ready");
-    if (data.status !== "ready") throw new Error("Missing editor");
-    expect(data.active[0]).toMatchObject({
-      action: "not_locked",
-      advisor: "Pass",
-      saved: "Wait",
-      version: 0,
-    });
+  it("reads the owner session and rejects an inconsistent proof", () => {
+    expect(
+      parseControlDocument({ status: "session", signed_in: true, csrf: "p" }),
+    ).toEqual({ status: "session", signed_in: true, csrf: "p" });
+    expect(
+      parseControlDocument({ status: "session", signed_in: false, csrf: null }),
+    ).toEqual({ status: "session", signed_in: false, csrf: null });
+    expect(() =>
+      parseControlDocument({ status: "session", signed_in: false, csrf: "p" }),
+    ).toThrow();
   });
 
-  it.each([
-    { week: 0 },
-    { timezone: "bad/timezone" },
-    { csrf: undefined },
-    { pending: "false" },
-    { active: [{ ...fixture.active[0], version: -1 }] },
-    { active: [{ ...fixture.active[0], score: Number.NaN }] },
-    { active: [{ ...fixture.active[0], deadline: "invalid" }] },
-    { active: [{ ...fixture.active[0], action: "lock" }] },
-    {
-      active: [
-        {
-          ...fixture.active[0],
-          portrait_url: "https://untrusted.test/photo.png",
-        },
-      ],
-    },
-    {
-      active: [
-        {
-          ...fixture.active[0],
-          portrait_url: "https://user:pass@a.espncdn.com/photo.png",
-        },
-      ],
-    },
-  ])("rejects invalid private editor data: %j", (changes) => {
-    expect(() => parseControlDocument({ ...fixture, ...changes })).toThrow();
+  it("rejects the retired decision editor document", () => {
+    expect(() => parseControlDocument({ status: "ready", week: 3 })).toThrow();
   });
 
   it("rejects confirmation documents now that locks come from Sleeper", () => {

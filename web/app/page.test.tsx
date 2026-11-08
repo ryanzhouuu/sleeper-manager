@@ -25,7 +25,7 @@ async function render(): Promise<string> {
 describe("HomePage", () => {
   beforeEach(() => loadHome.mockReset());
 
-  it("puts the schedule in its own column after the other blocks", async () => {
+  it("puts the lineup first and the schedule tabs in the second column", async () => {
     loadHome.mockResolvedValue({
       status: "ok",
       document: parseHomeDocument(fixture),
@@ -36,9 +36,12 @@ describe("HomePage", () => {
     expect(columns[0]).toContain('<main class="page split">');
     expect(columns).toHaveLength(3);
     expect(columns[1]).toContain("week 3");
-    expect(columns[1]).toContain("roster");
-    expect(columns[1]).not.toContain("this week");
+    expect(columns[1]).toContain("300.0 → 312.5");
+    expect(columns[1]).toContain("lineup");
+    expect(columns[1]).not.toContain('role="tablist"');
+    expect(columns[2]).toContain('role="tablist"');
     expect(columns[2]).toContain("this week");
+    expect(columns[2]).toContain("help");
   });
 
   it("keeps the unavailable page to one column", async () => {
@@ -51,7 +54,20 @@ describe("HomePage", () => {
     expect(html).toContain("league could not be loaded.");
   });
 
-  it("links to owner controls on the same app origin", async () => {
+  it("shows lock data unavailable banner", async () => {
+    const document = parseHomeDocument(fixture);
+    loadHome.mockResolvedValue({
+      status: "ok",
+      document: { ...document, lock_data: "unavailable" },
+    });
+
+    const html = await render();
+
+    expect(html).toContain('role="alert"');
+    expect(html).toContain("Lock data unavailable from Sleeper");
+  });
+
+  it("has no link to /manage", async () => {
     vi.stubEnv("HOME_URL", "https://worker.test/home");
     try {
       loadHome.mockResolvedValue({
@@ -59,8 +75,8 @@ describe("HomePage", () => {
         document: parseHomeDocument(fixture),
       });
       const html = await render();
-      expect(html).toContain('href="/manage"');
-      expect(html).toContain("update lock / pass decisions");
+      expect(html).not.toContain('href="/manage"');
+      expect(html).not.toContain("update lock / pass decisions");
     } finally {
       vi.unstubAllEnvs();
     }

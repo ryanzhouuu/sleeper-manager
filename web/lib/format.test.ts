@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import {
   formatLocalTime,
   formatPointsFor,
-  formatPositions,
   formatRecord,
   formatScore,
   groupGamesByDay,
@@ -78,12 +77,5 @@ describe("formatRecord", () => {
 describe("formatPointsFor", () => {
   it("labels season points", () => {
     expect(formatPointsFor(812.04)).toBe("812.0 pf");
-  });
-});
-
-describe("formatPositions", () => {
-  it("joins positions and marks an empty list", () => {
-    expect(formatPositions(["SF", "PF"])).toBe("SF/PF");
-    expect(formatPositions([])).toBe("—");
   });
 });

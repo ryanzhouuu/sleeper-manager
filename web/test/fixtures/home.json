@@ -112,5 +112,113 @@
     "title": "Lineup move required",
     "message": "Start Jayson Tatum in UTIL.\n\nExpected weekly total: 612.4 pts (+18.2 pts).\n\nNotes: Joel Embiid is out.\nConfidence: high.\n\nComplete before Wed Oct 21, 6:00 PM CDT.",
     "deadline": "2026-10-21T23:00:00+00:00"
-  }
+  },
+  "plan": {
+    "status": "action_required",
+    "team_before": 300.0,
+    "team_after": 312.5,
+    "confidence": "medium",
+    "p10": 290.0,
+    "p90": 335.0
+  },
+  "lock_data": "ready",
+  "lineup": [
+    {
+      "slot": "PG",
+      "slot_index": 0,
+      "player_id": "p1",
+      "name": "Jalen Brunson",
+      "nba_team": "NYK",
+      "image_url": "https://a.espncdn.com/i/headshots/nba/players/full/3934672.png",
+      "games": [
+        {
+          "game_id": "g1",
+          "start": "2026-10-21T23:30:00Z",
+          "opponent": "TOR",
+          "home": true,
+          "score": 41.5,
+          "state": "lockable",
+          "deadline": "2026-10-23T23:20:00Z",
+          "overridable": false,
+          "version": null
+        },
+        {
+          "game_id": "g2",
+          "start": "2026-10-23T23:30:00Z",
+          "opponent": "MIA",
+          "home": false,
+          "score": null,
+          "state": "upcoming",
+          "deadline": null,
+          "overridable": false,
+          "version": null
+        }
+      ],
+      "decision": {
+        "kind": "lock",
+        "text": "Lock 41.5 vs TOR",
+        "game_id": "g1",
+        "score": 41.5,
+        "alternative_expected": 30.2,
+        "confidence": 0.81,
+        "deadline": "2026-10-23T23:20:00Z",
+        "team_before": 300.0,
+        "team_after": 312.5
+      }
+    },
+    {
+      "slot": "UTIL",
+      "slot_index": 1,
+      "player_id": "p2",
+      "name": "Jayson Tatum",
+      "nba_team": "BOS",
+      "image_url": null,
+      "games": [
+        {
+          "game_id": "g3",
+          "start": "2026-10-21T23:00:00Z",
+          "opponent": "PHI",
+          "home": true,
+          "score": 19.1,
+          "state": "lockable",
+          "deadline": "2026-10-22T23:50:00Z",
+          "overridable": false,
+          "version": null
+        }
+      ],
+      "decision": {
+        "kind": "sacrifice",
+        "text": "Bench for Cal — gives up 19.1 vs PHI",
+        "game_id": "g3",
+        "score": 19.1,
+        "alternative_expected": 27.4,
+        "confidence": 0.7,
+        "deadline": "2026-10-22T23:50:00Z",
+        "team_before": 300.0,
+        "team_after": 312.5
+      }
+    },
+    {
+      "slot": "BN",
+      "slot_index": null,
+      "player_id": "p3",
+      "name": "Cal Bench",
+      "nba_team": "HOU",
+      "image_url": null,
+      "games": [
+        {
+          "game_id": "g4",
+          "start": "2026-10-21T00:00:00Z",
+          "opponent": "DAL",
+          "home": false,
+          "score": 22.0,
+          "state": "unverified",
+          "deadline": "2026-10-22T23:50:00Z",
+          "overridable": true,
+          "version": 3
+        }
+      ],
+      "decision": null
+    }
+  ]
 }

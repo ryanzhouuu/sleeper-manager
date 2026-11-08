@@ -1,23 +1,23 @@
 # Web app
 
-The dashboard (`/`) and owner decision editor (`/manage`) deploy together as one
-Next.js app. They share the
-dashboard's dark monospace UI. Saving shows progress in place; pending plans refresh
-for up to one minute, pausing while choices are edited. A stale save refreshes current
-decisions and asks for another review rather than resubmitting rejected choices.
+The dashboard (`/`) is a single page: the live lock-in score for both sides, the
+plan's projected team total before and after its advice, each lineup slot with this
+week's games and their lock states, and the planner's decision on the row it affects.
+Lock state comes from Sleeper; the only manual input is the tipoff-eligibility
+override shown on an unverified game, which asks for the owner access key once per
+session.
 
-The Next.js app uses the Python Cloudflare Worker for league data and decision
-validation. Set server-only `HOME_URL` to `https://<worker-host>/home`. Never use a
-`NEXT_PUBLIC_` variable for owner credentials or Worker secrets.
+The Next.js app reads the Python Cloudflare Worker. Set server-only `HOME_URL` to
+`https://<worker-host>/home`. Never use a `NEXT_PUBLIC_` variable for owner
+credentials or Worker secrets.
 
-Private reads use `GET /manage/api`. Owner writes use
-`POST /manage/api/{login,save,replan,logout}`. These fixed server routes validate browser POST origins, forward
-only the owner session cookie and bounded URL-encoded forms, and request JSON from
-the Worker. Private responses are never cached. Worker sessions, CSRF proofs,
-and decision versions remain authoritative.
+`GET /manage/api` reads the owner session. Owner writes use
+`POST /manage/api/{login,override,replan,logout}`. These fixed server routes validate
+browser POST origins, forward only the owner session cookie and bounded URL-encoded
+forms, and request JSON from the Worker. Private responses are never cached. Worker
+sessions, CSRF proofs, and row versions remain authoritative.
 
-Deploy the updated Worker before using the new private endpoints. Existing direct
-Worker HTML links remain compatible.
+Deploy the updated Worker before the updated web app.
 
 ## Deploy to Vercel
 
@@ -32,9 +32,9 @@ Worker HTML links remain compatible.
    environment. Set it for Production and only the Preview/Development environments
    that should access that league. Owner access still requires the Worker's existing
    `MANAGER_ACCESS_KEY`; do not copy it, league IDs, or notification secrets to Vercel.
-4. Deploy the Vercel project and sign in at `https://<app-host>/manage` with the
-   existing owner access key. The browser receives a new signed session cookie for
-   the app's origin; a previous Worker-origin session does not carry over.
+4. Deploy the Vercel project. The dashboard asks for the existing owner access key
+   the first time an unverified game is answered; the signed session cookie is
+   scoped to the app's origin.
 5. Optionally set the Worker's `DASHBOARD_URL` to `https://<app-host>/` and redeploy
    the Worker so notifications link to the dashboard. Do not run the planner on
    Vercel or configure duplicate cron jobs.
@@ -47,10 +47,8 @@ owner sessions; submitting a decision there still affects the configured league.
 ## Local development
 
 Copy `.env.example` to ignored `.env.local` and set `HOME_URL` to the updated Worker
-or a local Worker instance, then run `npm ci` and `npm run dev`. Open `/manage` to
-sign in. Passwords and notification tokens are submitted with POST and never added
-to navigation URLs by forms. Notification review URLs themselves contain scoped
-tokens, so avoid copying them into logs or committed fixtures.
+or a local Worker instance, then run `npm ci` and `npm run dev`. The access key is
+submitted with POST and never added to navigation URLs.
 
 ## Checks
 

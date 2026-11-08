@@ -2,12 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import fixture from "@/test/fixtures/home.json";
 import { parseHomeDocument } from "@/lib/home";
-import {
-  GamesBlock,
-  RecommendationBlock,
-  RosterBlock,
-  WeekBlock,
-} from "./blocks";
+import { GamesBlock, RecommendationBlock, WeekBlock } from "./blocks";
 
 vi.mock("next/image", () => ({
   default: ({ src, alt }: { src: string; alt: string }) => (
@@ -132,33 +127,6 @@ describe("RecommendationBlock", () => {
     );
 
     expect(html).toBe(`<section class="block"><p>${sentence}</p></section>`);
-  });
-});
-
-describe("RosterBlock", () => {
-  it("renders dashes for an empty slot and keeps image cells", () => {
-    const html = renderToStaticMarkup(<RosterBlock roster={document.roster} />);
-    const emptySlot = html.split(/<li[ >]/)[2];
-
-    expect(emptySlot).toContain("UTIL");
-    expect(emptySlot.match(/—/g)).toHaveLength(3);
-    expect(emptySlot).not.toContain("<img");
-    expect(emptySlot.match(/class="cell"/g)).toHaveLength(2);
-    expect(html).toContain('alt="Jalen Brunson"');
-  });
-});
-
-describe("RosterBlock positions and injuries", () => {
-  it("shows positions, injury status, and sizes the positions column", () => {
-    const html = renderToStaticMarkup(<RosterBlock roster={document.roster} />);
-    const tatum = html.split(/<li[ >]/)[3];
-
-    expect(tatum).toContain("SF/PF");
-    expect(tatum).toContain(
-      '<span class="status" data-injury-status="DTD"> · DTD</span>',
-    );
-    expect(html).toContain("--positions-width:5ch");
-    expect(html.split(/<li[ >]/)[1]).not.toContain('class="status"');
   });
 });
 

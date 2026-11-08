@@ -52,12 +52,71 @@ export type Recommendation =
     }
   | { status: "empty" | "unavailable" };
 
+export type GameStateName =
+  | "locked"
+  | "lockable"
+  | "passed_eligibility_lost"
+  | "passed_window_closed"
+  | "not_eligible"
+  | "unverified"
+  | "upcoming"
+  | "live";
+
+export type DecisionKind = "lock" | "preserve" | "sacrifice" | "move";
+
+export interface LineupGame {
+  game_id: string | null;
+  start: Date;
+  opponent: string | null;
+  home: boolean | null;
+  score: number | null;
+  state: GameStateName;
+  deadline: Date | null;
+  overridable: boolean;
+  version: number | null;
+}
+
+export interface Decision {
+  kind: DecisionKind;
+  text: string;
+  game_id: string | null;
+  score: number | null;
+  alternative_expected: number | null;
+  confidence: number | null;
+  deadline: Date | null;
+  team_before: number | null;
+  team_after: number | null;
+}
+
+export interface LineupRow {
+  slot: string;
+  slot_index: number | null;
+  player_id: string | null;
+  name: string | null;
+  nba_team: string | null;
+  image_url: string | null;
+  games: LineupGame[];
+  decision: Decision | null;
+}
+
+export interface PlanSummary {
+  status: PlanStatus | null;
+  team_before: number | null;
+  team_after: number | null;
+  confidence: string | null;
+  p10: number | null;
+  p90: number | null;
+}
+
 export interface HomeDocument {
   league: { name: string; week: number; timezone: string };
   matchup: { manager: MatchupSide; opponent: MatchupSide | null };
   roster: RosterEntry[];
   games: { status: SectionStatus; items: GameItem[] };
   recommendation: Recommendation;
+  lineup: LineupRow[];
+  plan: PlanSummary;
+  lock_data: LockData;
 }
 
 export type HomeResult =
@@ -65,6 +124,22 @@ export type HomeResult =
 
 const SECTION_STATUSES: readonly string[] = ["ready", "empty", "unavailable"];
 const LOCK_DATA: readonly string[] = ["ready", "pending", "unavailable"];
+const GAME_STATES: readonly string[] = [
+  "locked",
+  "lockable",
+  "passed_eligibility_lost",
+  "passed_window_closed",
+  "not_eligible",
+  "unverified",
+  "upcoming",
+  "live",
+];
+const DECISION_KINDS: readonly string[] = [
+  "lock",
+  "preserve",
+  "sacrifice",
+  "move",
+];
 const PLAN_STATUSES: readonly string[] = [
   "action_required",
   "no_action",
@@ -114,7 +189,89 @@ export function parseHomeDocument(value: unknown): HomeDocument {
       items: gamesStatus === "ready" ? array(games.items).map(gameItem) : [],
     },
     recommendation: recommendation(root.recommendation),
+    // Workers deployed before the single dashboard omit these sections.
+    lineup: root.lineup === undefined ? [] : array(root.lineup).map(lineupRow),
+    plan: planSummary(root.plan),
+    lock_data: lockData(root.lock_data),
   };
+}
+
+function lineupRow(value: unknown): LineupRow {
+  const fields = record(value);
+  return {
+    slot: string(fields.slot),
+    slot_index: nullableInteger(fields.slot_index),
+    player_id: nullableString(fields.player_id),
+    name: nullableString(fields.name),
+    nba_team: nullableString(fields.nba_team),
+    image_url: nullableString(fields.image_url),
+    games: array(fields.games).map(lineupGame),
+    decision: fields.decision === null ? null : decision(fields.decision),
+  };
+}
+
+function lineupGame(value: unknown): LineupGame {
+  const fields = record(value);
+  const overridable = flag(fields.overridable);
+  const version = nullableInteger(fields.version);
+  if (overridable && version === null) {
+    throw new InvalidDocument("version");
+  }
+  return {
+    game_id: nullableString(fields.game_id),
+    start: instant(fields.start),
+    opponent: nullableString(fields.opponent),
+    home: fields.home === null ? null : flag(fields.home),
+    score: nullableNumber(fields.score),
+    state: member(fields.state, GAME_STATES) as GameStateName,
+    deadline: fields.deadline === null ? null : instant(fields.deadline),
+    overridable,
+    version,
+  };
+}
+
+function decision(value: unknown): Decision {
+  const fields = record(value);
+  return {
+    kind: member(fields.kind, DECISION_KINDS) as DecisionKind,
+    text: string(fields.text),
+    game_id: nullableString(fields.game_id),
+    score: nullableNumber(fields.score),
+    alternative_expected: nullableNumber(fields.alternative_expected),
+    confidence: nullableNumber(fields.confidence),
+    deadline:
+      fields.deadline === null || fields.deadline === undefined
+        ? null
+        : instant(fields.deadline),
+    team_before: nullableNumber(fields.team_before),
+    team_after: nullableNumber(fields.team_after),
+  };
+}
+
+function planSummary(value: unknown): PlanSummary {
+  const fields = value === undefined ? {} : record(value);
+  return {
+    status: planStatus(fields.status),
+    team_before: nullableNumber(fields.team_before),
+    team_after: nullableNumber(fields.team_after),
+    confidence: nullableString(fields.confidence),
+    p10: nullableNumber(fields.p10),
+    p90: nullableNumber(fields.p90),
+  };
+}
+
+function member(value: unknown, allowed: readonly string[]): string {
+  if (typeof value !== "string" || !allowed.includes(value)) {
+    throw new InvalidDocument("member");
+  }
+  return value;
+}
+
+function flag(value: unknown): boolean {
+  if (typeof value !== "boolean") {
+    throw new InvalidDocument("flag");
+  }
+  return value;
 }
 
 function side(value: unknown): MatchupSide {

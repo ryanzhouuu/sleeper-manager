@@ -1,10 +1,8 @@
-import type { CSSProperties } from "react";
 import {
   MISSING,
   formatLocalTime,
   formatLockProgress,
   formatPointsFor,
-  formatPositions,
   formatRecord,
   formatScore,
   groupGamesByDay,
@@ -14,7 +12,6 @@ import type {
   HomeDocument,
   MatchupSide,
   Recommendation,
-  RosterEntry,
   SectionStatus,
 } from "@/lib/home";
 import { Mark } from "./mark";
@@ -123,41 +120,6 @@ function PlayerName({
         </span>
       )}
     </span>
-  );
-}
-
-export function RosterBlock({ roster }: { roster: RosterEntry[] }) {
-  const positionsWidth = Math.max(
-    1,
-    ...roster.map((entry) => formatPositions(entry.positions).length),
-  );
-  return (
-    <section className="block">
-      <h2 className="label">roster</h2>
-      <ul
-        className="rows"
-        style={{ "--positions-width": `${positionsWidth}ch` } as CSSProperties}
-      >
-        {roster.map((entry, index) => (
-          <li key={index} className="row roster-row">
-            <span className="text">{entry.slot}</span>
-            <span className="cell">
-              <Mark src={entry.image_url} alt={entry.name ?? ""} size={20} />
-            </span>
-            <PlayerName name={entry.name} injuryStatus={entry.injury_status} />
-            <span className="text">{formatPositions(entry.positions)}</span>
-            <span className="cell">
-              <Mark
-                src={entry.team_image_url}
-                alt={entry.nba_team ?? ""}
-                size={16}
-              />
-            </span>
-            <span className="text">{entry.nba_team ?? MISSING}</span>
-          </li>
-        ))}
-      </ul>
-    </section>
   );
 }
 

@@ -5,9 +5,9 @@ import type { ControlDocument } from "./control-types";
 type WorkerPath =
   | "/manage"
   | "/manage/login"
-  | "/manage/save"
   | "/manage/replan"
-  | "/manage/logout";
+  | "/manage/logout"
+  | "/manage/override";
 const RESPONSE_HEADERS = {
   "cache-control": "no-store",
   "referrer-policy": "same-origin",
@@ -63,20 +63,6 @@ async function fetchControl(
     redirect: "manual",
     signal: AbortSignal.timeout(20_000),
   });
-}
-
-/** Server-rendered GETs cannot mutate owner decisions. */
-export async function loadControl(
-  path: "/manage",
-  cookie = "",
-  query = "",
-): Promise<ControlDocument> {
-  try {
-    const response = await fetchControl(path, { cookie, query });
-    return parseControlDocument(await response.json());
-  } catch {
-    return UNAVAILABLE;
-  }
 }
 
 /** Bound the actual stream as well as Content-Length before forwarding forms. */
@@ -163,10 +149,7 @@ export async function forwardControl(
     const cookie = upstream.headers.get("set-cookie");
     if (cookie?.startsWith("manager_session="))
       headers.set("set-cookie", cookie);
-    if (
-      upstream.status === 303 &&
-      upstream.headers.get("location") === "/manage"
-    )
+    if (upstream.status === 303 && upstream.headers.get("location") === "/")
       return Response.json({ status: "saved" }, { headers });
     const data = parseControlDocument(await upstream.json());
     return Response.json(data, { status: upstream.status, headers });

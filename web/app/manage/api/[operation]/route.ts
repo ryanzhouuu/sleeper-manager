@@ -2,7 +2,7 @@
 import { forwardControl } from "@/lib/control-backend";
 import type { ControlOperation } from "@/lib/control-types";
 
-const OPERATIONS: readonly string[] = ["login", "save", "replan", "logout"];
+const OPERATIONS: readonly string[] = ["login", "replan", "logout", "override"];
 
 export async function POST(
   request: Request,

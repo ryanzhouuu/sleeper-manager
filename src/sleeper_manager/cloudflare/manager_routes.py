@@ -78,6 +78,7 @@ async def manage(request: Any, env: Any, fetcher: Any, *, now: datetime) -> Form
             "Owner session",
             "",
             data={
+                "status": "session",
                 "signed_in": session is not None,
                 "csrf": None if session is None else csrf_proof(secret, session),
             },

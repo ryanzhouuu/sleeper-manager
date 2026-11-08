@@ -71,6 +71,40 @@ describe("parseHomeDocument", () => {
     });
   });
 
+  it("reads lineup rows, decisions, and the plan summary", () => {
+    const document = parseHomeDocument(fixture);
+
+    expect(document.lock_data).toBe("ready");
+    expect(document.plan).toEqual({
+      status: "action_required",
+      team_before: 300,
+      team_after: 312.5,
+      confidence: "medium",
+      p10: 290,
+      p90: 335,
+    });
+    const [first, , bench] = document.lineup;
+    expect(first.slot_index).toBe(0);
+    expect(first.games[0]).toMatchObject({
+      game_id: "g1",
+      state: "lockable",
+      score: 41.5,
+      deadline: new Date("2026-10-23T23:20:00Z"),
+    });
+    expect(first.decision).toMatchObject({ kind: "lock", confidence: 0.81 });
+    expect(bench.games[0]).toMatchObject({ overridable: true, version: 3 });
+  });
+
+  it("defaults the dashboard sections an older worker omits", () => {
+    const document = parseHomeDocument(
+      withFields({ lineup: REMOVE, plan: REMOVE, lock_data: REMOVE }),
+    );
+
+    expect(document.lineup).toEqual([]);
+    expect(document.plan.team_after).toBeNull();
+    expect(document.lock_data).toBe("ready");
+  });
+
   it("defaults fields an older worker omits", () => {
     const document = parseHomeDocument(
       withFields({
@@ -137,6 +171,9 @@ describe("parseHomeDocument", () => {
     ["a fractional win count", { "matchup.manager.record.wins": 1.5 }],
     ["an unknown lock data state", { "matchup.manager.lock_data": "stale" }],
     ["a fractional lock count", { "matchup.manager.locked": 1.5 }],
+    ["an unknown game state", { "lineup.0.games.0.state": "maybe" }],
+    ["an unknown decision kind", { "lineup.0.decision.kind": "guess" }],
+    ["an override without a version", { "lineup.2.games.0.version": null }],
     ["a non-string position", { "roster.0.positions": ["PG", 3] }],
   ])("rejects %s", (_, changes) => {
     expect(() => parseHomeDocument(withFields(changes))).toThrow();
