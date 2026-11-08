@@ -60,7 +60,7 @@ def test_new_plan_must_include_latest_saved_decision_version(store):  # type: ig
         store.latest_current_recommendation("league", 1, decision_type="weekly_lineup")
     )
     assert current is not None
-    correct(store, ManagerAction.LOCKED, "newer")
+    correct(store, ManagerAction.NOT_LOCKED, "newer")
     assert (
         asyncio.run(store.latest_current_recommendation("league", 1, decision_type="weekly_lineup"))
         is None

@@ -122,14 +122,19 @@ def test_correction_removes_false_lock_retains_score_and_history(store):  # type
     assert len(work) == 1 and work[0].dedupe_key == "manual:manager:change-1"
 
 
-def test_same_request_replays_without_overwriting_later_decision(store):  # type: ignore[no-untyped-def]
+def test_same_request_replays_without_another_write(store):  # type: ignore[no-untyped-def]
     original = row(store)
     assert save(store, current=original)
-    assert save(store, ManagerAction.PASSED, change_id="change-2")
     assert save(store, current=original)
-    assert row(store).status is LockInOpportunityStatus.ACKNOWLEDGED_PASSED
-    assert len(asyncio.run(store.decision_history("league", 1, 1))) == 2
-    assert len(asyncio.run(store.list_scheduled_work())) == 2
+    assert len(asyncio.run(store.decision_history("league", 1, 1))) == 1
+    assert len(asyncio.run(store.list_scheduled_work())) == 1
+
+
+def test_manual_lock_and_pass_reports_are_refused(store):  # type: ignore[no-untyped-def]
+    for action in (ManagerAction.LOCKED, ManagerAction.PASSED):
+        with pytest.raises(ValueError, match="read from Sleeper"):
+            save(store, action, change_id=f"change-{action.value}")
+    assert asyncio.run(store.decision_history("league", 1, 1)) == []
 
 
 def test_stale_edit_writes_nothing(store):  # type: ignore[no-untyped-def]
@@ -138,20 +143,6 @@ def test_stale_edit_writes_nothing(store):  # type: ignore[no-untyped-def]
     assert row(store).acknowledged_action == "locked"
     assert asyncio.run(store.decision_history("league", 1, 1)) == []
     assert asyncio.run(store.list_scheduled_work()) == ()
-
-
-@pytest.mark.parametrize(
-    "other_key",
-    [
-        LockInOpportunityKey("league", 1, 1, "other", "other-game"),
-        LockInOpportunityKey("league", 1, 1, "player", "other-game"),
-    ],
-)
-def test_cannot_report_two_locks_for_same_slot_or_player(store, other_key):  # type: ignore[no-untyped-def]
-    other = replace(row(store), key=other_key, current_recommendation_id=None)
-    asyncio.run(store.upsert_lock_in_opportunity(other))
-    assert not save(store, ManagerAction.LOCKED)
-    assert asyncio.run(store.decision_history("league", 1, 1)) == []
 
 
 def test_rejected_transaction_rolls_back_audit_decision_and_replan(store):  # type: ignore[no-untyped-def]
@@ -164,26 +155,6 @@ def test_rejected_transaction_rolls_back_audit_decision_and_replan(store):  # ty
     assert row(store).acknowledged_action == "locked"
     assert asyncio.run(store.decision_history("league", 1, 1)) == []
     assert asyncio.run(store.list_scheduled_work()) == ()
-
-
-@pytest.mark.parametrize(
-    "changes,slot",
-    [
-        ({"stable_score": None}, (0, "PF")),
-        ({"scheduled_start": NOW + timedelta(hours=1)}, (0, "PF")),
-        ({"rostered_at_tipoff": False}, (0, "PF")),
-        ({"action_deadline": NOW}, (0, "PF")),
-        ({"status": LockInOpportunityStatus.INELIGIBLE}, (0, "PF")),
-        ({"status": LockInOpportunityStatus.RECONCILIATION_REQUIRED}, (0, "PF")),
-        ({}, None),
-        ({}, (0, "PG")),
-    ],
-)
-def test_reports_require_real_eligible_score_and_live_slot(store, changes, slot):  # type: ignore[no-untyped-def]
-    with pytest.raises(ValueError):
-        reported_decision(
-            replace(row(store), **changes), ManagerAction.LOCKED, NOW, actual_slot=slot
-        )
 
 
 def test_not_locked_does_not_revive_forfeited_or_expired_game(store):  # type: ignore[no-untyped-def]
@@ -274,6 +245,7 @@ def test_override_saves_eligibility_and_queues_a_score_recheck(store) -> None:  
         row(store),
         status=LockInOpportunityStatus.INELIGIBLE,
         rostered_at_tipoff=False,
+        tipoff_unverified=True,
         acknowledged_action=None,
         acknowledged_at=None,
         stable_score=None,
@@ -293,6 +265,6 @@ def test_override_saves_eligibility_and_queues_a_score_recheck(store) -> None:  
     updated = row(store)
     assert updated.status is LockInOpportunityStatus.ACTIVE
     assert updated.rostered_at_tipoff is True
-    assert updated.tipoff_unverified is True
+    assert updated.tipoff_unverified is False
     work = asyncio.run(store.list_scheduled_work(kind=DueWorkKind.POSTGAME))
     assert [item.game_id for item in work] == [KEY.game_id]

@@ -1,4 +1,4 @@
-"""Small server-rendered forms shared by owner controls and scoped confirmations."""
+"""Small server-rendered pages and form parsing for owner routes."""
 
 import json
 from dataclasses import dataclass, field, replace

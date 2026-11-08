@@ -1,11 +1,13 @@
-"""Authenticated owner forms save audited decisions and signal the existing planning queue."""
+"""Owner session routes and the one manual input: answering an unverified tipoff.
+
+Locks and passes are read from Sleeper, so there is no decision editor.
+"""
 
 from dataclasses import replace
 from datetime import datetime
-from html import escape
 from typing import Any
 from urllib.parse import urlparse
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sleeper_manager.cloudflare.form_pages import FormPage, form_values, page, same_origin
 from sleeper_manager.cloudflare.manager_auth import (
@@ -17,12 +19,16 @@ from sleeper_manager.cloudflare.manager_auth import (
     valid_csrf,
 )
 from sleeper_manager.cloudflare.manager_context import load_manager_context
-from sleeper_manager.cloudflare.manager_submission import save_manager_form
-from sleeper_manager.cloudflare.manager_views import editor_page, login_page
 from sleeper_manager.cloudflare.planning_signal import publish_planning_wake
 from sleeper_manager.persistence.lock_in_opportunities import LockInOpportunityKey
 from sleeper_manager.persistence.manager_store import D1ManagerStore
-from sleeper_manager.workflows.manager_decisions import ManagerAction
+from sleeper_manager.workflows.manager_decisions import ManagerAction, ManagerEdit
+
+_PATHS = frozenset(
+    {"/manage", "/manage/login", "/manage/logout", "/manage/replan", "/manage/override"}
+)
+_OVERRIDES = frozenset({ManagerAction.LOCKABLE, ManagerAction.NOT_LOCKABLE})
+_DASHBOARD = "/"
 
 
 def _redirect(location: str, cookie: str | None = None) -> FormPage:
@@ -33,129 +39,107 @@ def _redirect(location: str, cookie: str | None = None) -> FormPage:
     return replace(result, headers=headers)
 
 
+def _message(title: str, status: int, message: str = "") -> FormPage:
+    data: dict[str, object] = {"status": "message", "title": title}
+    if message:
+        data["message"] = message
+    return page(title, f"<p>{message}</p>" if message else "", status=status, data=data)
+
+
+def login_page(*, rejected: bool = False) -> FormPage:
+    """The password is entered locally and is never echoed into HTML or URLs."""
+    return page(
+        "Owner access",
+        ('<p class="notice">Access key not accepted.</p>' if rejected else "")
+        + '<section><form method="post" action="/manage/login">'
+        '<label>Access key <input type="password" name="password" required '
+        'autocomplete="current-password" maxlength="256"></label>'
+        '<button type="submit">Continue</button></form></section>',
+        status=403 if rejected else 200,
+        data={"status": "login", "rejected": rejected},
+    )
+
+
 async def manage(request: Any, env: Any, fetcher: Any, *, now: datetime) -> FormPage:
-    """Public access reveals only a login form; edits are owner-scoped and protected by CSRF."""
+    """GET reports the session; every POST except login needs the session and its CSRF proof."""
     path = urlparse(str(request.url)).path
-    if path not in {"/manage", "/manage/login", "/manage/save", "/manage/logout", "/manage/replan"}:
+    if path not in _PATHS:
         return page("Not found", "", status=404)
     if request.method not in {"GET", "POST"}:
         return page("Method not allowed", "", status=405)
     secret = str(getattr(env, "MANAGER_ACCESS_KEY", ""))
     if not secret:
-        return page(
-            "Owner controls unavailable", "<p>Owner access has not been configured.</p>", status=503
-        )
-    values: dict[str, str] = {}
-    if request.method == "POST":
-        if not same_origin(request):
-            return page("Request rejected", "<p>Open the owner controls again.</p>", status=403)
-        try:
-            values = await form_values(request)
-        except (ValueError, UnicodeError):
-            return page("Invalid form", "<p>Reload the page and try again.</p>", status=400)
-        if path == "/manage/login":
-            if not password_matches(values.get("password", ""), secret):
-                return login_page(rejected=True)
-            return _redirect("/manage", session_cookie(issue_session(secret, now)))
+        return _message("Owner controls unavailable", 503, "Owner access has not been configured.")
     session = read_session(str(request.headers.get("cookie") or ""), secret, now)
-    if session is None:
-        return login_page()
-    if request.method == "GET" and path != "/manage":
-        return page("Method not allowed", "", status=405)
-    if request.method == "POST":
-        if not valid_csrf(values.get("csrf", ""), secret, session):
-            return page("Session changed", "<p>Reload the page and try again.</p>", status=403)
-        if path == "/manage/logout":
-            return _redirect("/manage", session_cookie("", expired=True))
-        if path == "/manage/replan":
-            try:
-                request_id = UUID(values["request_id"]).hex
-            except (ValueError, KeyError):
-                return page("Invalid retry", "<p>Reload the owner controls.</p>", status=400)
-            await D1ManagerStore(env.sleeper_manager_state).retry_manager_plan(request_id, now)
-            await publish_planning_wake(env, now)
-            return _redirect("/manage")
-        if path != "/manage/save":
+    if request.method == "GET":
+        if path != "/manage":
             return page("Method not allowed", "", status=405)
+        return page(
+            "Owner session",
+            "",
+            data={
+                "signed_in": session is not None,
+                "csrf": None if session is None else csrf_proof(secret, session),
+            },
+        )
+    if not same_origin(request):
+        return _message("Request rejected", 403, "Open the dashboard again.")
+    try:
+        values = await form_values(request)
+    except (ValueError, UnicodeError):
+        return _message("Invalid form", 400, "Reload the page and try again.")
+    if path == "/manage/login":
+        if not password_matches(values.get("password", ""), secret):
+            return login_page(rejected=True)
+        return _redirect(_DASHBOARD, session_cookie(issue_session(secret, now)))
+    if session is None or not valid_csrf(values.get("csrf", ""), secret, session):
+        return _message("Session changed", 403, "Sign in again and retry.")
+    if path == "/manage/logout":
+        return _redirect(_DASHBOARD, session_cookie("", expired=True))
     store = D1ManagerStore(env.sleeper_manager_state)
+    if path == "/manage/replan":
+        try:
+            request_id = UUID(values["request_id"]).hex
+        except (ValueError, KeyError):
+            return _message("Invalid retry", 400, "Reload the dashboard.")
+        await store.retry_manager_plan(request_id, now)
+        await publish_planning_wake(env, now)
+        return _redirect(_DASHBOARD)
+    return await _override(values, env, fetcher, store, now=now)
+
+
+async def _override(
+    values: dict[str, str], env: Any, fetcher: Any, store: D1ManagerStore, *, now: datetime
+) -> FormPage:
+    """Record whether an unverified starter was in a starting slot at tipoff, then replan."""
+    try:
+        action = ManagerAction(values.get("action", ""))
+        version = int(values["version"])
+        if action not in _OVERRIDES or version < 0:
+            raise ValueError("Invalid override")
+        player_id, game_id = values["player_id"], values["game_id"]
+    except (KeyError, ValueError):
+        return _message("Override not saved", 400, "Reload the dashboard and try again.")
     try:
         context = await load_manager_context(env, fetcher, store, now)
     except Exception as error:
         print(f"Manager context unavailable: {type(error).__name__}")
-        return page(
-            "League unavailable",
-            "<p>Reload to try again. No decisions were changed.</p>",
-            status=503,
+        return _message("League unavailable", 503, "Reload to try again. Nothing was changed.")
+    key = LockInOpportunityKey(
+        context.league_id, context.week, context.roster_id, player_id, game_id
+    )
+    current = await store.get_lock_in_opportunity(key)
+    if current is None:
+        return _message("Game unavailable", 404, "Reload the dashboard.")
+    if current.row_version != version:
+        return _message("Game changed", 409, "Reload and review the latest status.")
+    try:
+        saved = await store.save_decisions(
+            (ManagerEdit(current, action, None),), batch_id=uuid4().hex, now=now
         )
-    if request.method == "POST":
-        if "batch_id" in values:
-            try:
-                saved, changed = await save_manager_form(values, store, context, now)
-            except (KeyError, ValueError) as error:
-                return page(
-                    "Decision not saved",
-                    f"<p>{escape(str(error))}</p>",
-                    status=400,
-                    data={
-                        "status": "message",
-                        "title": "Decision not saved",
-                        "message": str(error),
-                    },
-                )
-            if not saved:
-                return page(
-                    "Decision changed", "<p>Reload and review the latest status.</p>", status=409
-                )
-            if changed:
-                await publish_planning_wake(env, now)
-            return _redirect("/manage")
-        try:
-            action = ManagerAction(values.get("action", ""))
-            change_id = UUID(values["change_id"]).hex
-            version = int(values["version"])
-            if version < 0:
-                raise ValueError("Invalid version")
-            key = LockInOpportunityKey(
-                context.league_id,
-                context.week,
-                context.roster_id,
-                values["player_id"],
-                values["game_id"],
-            )
-            current = await store.get_lock_in_opportunity(key)
-            if current is None:
-                return page("Game unavailable", "<p>Reload the owner controls.</p>", status=404)
-            saved = await store.save_decision(
-                replace(current, row_version=version),
-                action,
-                change_id=change_id,
-                now=now,
-                actual_slot=context.actual_slot(key.player_id),
-            )
-        except (KeyError, ValueError) as error:
-            return page(
-                "Decision not saved",
-                f"<p>{escape(str(error))}</p>",
-                status=400,
-                data={"status": "message", "title": "Decision not saved", "message": str(error)},
-            )
-        if not saved:
-            return page(
-                "Decision changed",
-                "<p>Reload and review the latest status before saving.</p>",
-                status=409,
-            )
-        await publish_planning_wake(env, now)
-        return _redirect("/manage")
-    records = await store.list_week_lock_in_opportunities(context.league_id, context.week)
-    owned = tuple(row for row in records if row.key.roster_id == context.roster_id)
-    history = await store.decision_history(context.league_id, context.week, context.roster_id)
-    plan = await store.latest_current_recommendation(
-        context.league_id, context.week, decision_type="weekly_lineup"
-    )
-    if plan is not None and plan.deadline is not None and plan.deadline <= now:
-        plan = None
-    pending = plan is None and await store.has_pending_manager_plan(now)
-    return editor_page(
-        context, owned, history, csrf_proof(secret, session), now=now, pending=pending, plan=plan
-    )
+    except ValueError as error:
+        return _message("Override not saved", 400, str(error))
+    if not saved:
+        return _message("Game changed", 409, "Reload and review the latest status.")
+    await publish_planning_wake(env, now)
+    return _redirect(_DASHBOARD)

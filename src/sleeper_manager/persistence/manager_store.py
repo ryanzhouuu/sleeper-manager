@@ -64,15 +64,6 @@ class D1ManagerStore(D1StateRepository):
 
         return await save_manager_batch(self, edits, batch_id=batch_id, now=now)
 
-    async def preview_token(self, token_hash: str) -> dict[str, object] | None:
-        """Read a scoped token and its message without consuming it."""
-        return await self._first(
-            "SELECT t.action,t.expires_at,t.used_at,r.recommendation_id,r.title,r.message,r.status "
-            "FROM action_tokens t JOIN recommendations r USING (recommendation_id) "
-            "WHERE t.token_hash=?",
-            token_hash,
-        )
-
     async def has_pending_manager_plan(self, now: datetime) -> bool:
         """Hide stale advice while a saved owner decision is awaiting its replan."""
         return (

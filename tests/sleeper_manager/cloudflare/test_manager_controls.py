@@ -1,6 +1,7 @@
 """Owner identity, CSRF and immutable game scope protect dashboard edits."""
 
 import asyncio
+import json
 from dataclasses import replace
 from datetime import timedelta
 from types import SimpleNamespace
@@ -18,8 +19,13 @@ from sleeper_manager.cloudflare.manager_auth import (
 )
 from sleeper_manager.cloudflare.manager_context import ManagerContext
 from sleeper_manager.cloudflare.manager_routes import manage
+from sleeper_manager.domain.lock_in import LockInOpportunityStatus
 from tests.sleeper_manager.cloudflare.form_request_support import request
-from tests.sleeper_manager.persistence.test_manager_store import KEY, NOW, row
+from tests.sleeper_manager.persistence.test_manager_store import (
+    NOW,
+    _with_owner_actions,
+    row,
+)
 from tests.sleeper_manager.persistence.test_manager_store import store as store
 
 SECRET = "test-owner-key-with-at-least-32-characters"
@@ -47,28 +53,21 @@ def environment(store, monkeypatch):  # type: ignore[no-untyped-def]
     return SimpleNamespace(MANAGER_ACCESS_KEY=SECRET, sleeper_manager_state=store._database)
 
 
-def save_request(**overrides):  # type: ignore[no-untyped-def]
-    session = issue_session(SECRET, NOW)
-    values = {
-        "csrf": csrf_proof(SECRET, session),
-        "player_id": "player",
-        "game_id": "game",
-        "version": "0",
-        "change_id": CHANGE_ID,
-        "action": "not_locked",
-        **overrides,
-    }
-    return owner_request("/manage/save", method="POST", values=values, session=session)
-
-
-def test_public_access_gets_login_without_private_data(environment):  # type: ignore[no-untyped-def]
+def test_get_manage_reports_signed_out_session_without_private_data(environment):  # type: ignore[no-untyped-def]
     req = request()
     req.url = "https://worker.test/manage"
     response = asyncio.run(manage(req, environment, None, now=NOW))
-    assert "Owner access" in response.body
+    assert response.status == 200
+    assert response.data == {"signed_in": False, "csrf": None}
     assert "Player name" not in response.body and "32.80" not in response.body
     assert "set-cookie" not in response.headers
     assert response.headers["referrer-policy"] == "same-origin"
+
+
+def test_get_manage_returns_a_csrf_proof_for_the_signed_in_owner(environment):  # type: ignore[no-untyped-def]
+    session = issue_session(SECRET, NOW)
+    response = asyncio.run(manage(owner_request(session=session), environment, None, now=NOW))
+    assert response.data == {"signed_in": True, "csrf": csrf_proof(SECRET, session)}
 
 
 @pytest.mark.parametrize("origin", [None, "null", "https://evil.test"])
@@ -102,64 +101,6 @@ def test_login_issues_secure_cookie_and_logout_clears_it(environment, secret):  
     )
     response = asyncio.run(manage(logout, environment, None, now=NOW))
     assert "Max-Age=0" in response.headers["set-cookie"]
-
-
-def test_save_corrects_false_lock_and_shows_replan_pending(environment, store):  # type: ignore[no-untyped-def]
-    response = asyncio.run(manage(save_request(), environment, None, now=NOW))
-    assert response.status == 303
-    assert row(store).acknowledged_action is None
-    editor = asyncio.run(manage(owner_request(), environment, None, now=NOW))
-    assert 'aria-label="Recorded: Wait"' in editor.body
-    assert "Updating plan" in editor.body
-    assert "<summary>History</summary>" in editor.body
-    assert '<div class="game-score">32.80<small>PTS</small>' in editor.body
-    assert '<form method="post" action="/manage/save">' in editor.body
-
-
-@pytest.mark.parametrize(
-    "values,status",
-    [
-        ({"csrf": "bad"}, 403),
-        ({"version": "5"}, 409),
-        ({"player_id": "other"}, 404),
-        ({"action": "unknown"}, 400),
-        ({"change_id": "bad"}, 400),
-    ],
-)
-def test_invalid_or_stale_edits_write_nothing(environment, store, values, status):  # type: ignore[no-untyped-def]
-    response = asyncio.run(manage(save_request(**values), environment, None, now=NOW))
-    assert response.status == status
-    assert row(store).acknowledged_action == "locked"
-    assert asyncio.run(store.decision_history("league", 1, 1)) == []
-
-
-def test_cross_roster_cannot_be_selected_by_submitted_fields(environment, store):  # type: ignore[no-untyped-def]
-    other_key = replace(KEY, roster_id=2, player_id="other")
-    asyncio.run(store.upsert_lock_in_opportunity(replace(row(store), key=other_key)))
-    response = asyncio.run(
-        manage(save_request(player_id="other", roster_id="2"), environment, None, now=NOW)
-    )
-    assert response.status == 404
-
-
-def test_get_save_and_cross_origin_post_are_non_mutating(environment, store):  # type: ignore[no-untyped-def]
-    response = asyncio.run(manage(owner_request("/manage/save"), environment, None, now=NOW))
-    assert response.status == 405
-    req = save_request()
-    req.headers["origin"] = "https://evil.test"
-    response = asyncio.run(manage(req, environment, None, now=NOW))
-    assert response.status == 403
-    assert row(store).acknowledged_action == "locked"
-
-
-def test_queue_failure_preserves_saved_decision_and_durable_work(environment, store):  # type: ignore[no-untyped-def]
-    async def fail(*args, **kwargs):  # type: ignore[no-untyped-def]
-        raise OSError("queue unavailable")
-
-    environment.PLANNING_QUEUE = SimpleNamespace(send=fail)
-    assert asyncio.run(manage(save_request(), environment, None, now=NOW)).status == 303
-    assert row(store).acknowledged_action is None
-    assert asyncio.run(store.has_pending_manager_plan(NOW))
 
 
 @pytest.mark.parametrize("secret", ["x", "short-owner-key", SECRET])
@@ -209,8 +150,7 @@ def test_worker_routes_owner_login_without_reading_private_state(environment):  
     req.url = "https://worker.test/manage"
     response = asyncio.run(worker.fetch(req))
     assert response.status_code == 200
-    assert "Owner access" in response.body
-    assert "Player name" not in response.body
+    assert "Player name" not in str(response.body)
 
 
 def test_expired_access_key_and_bad_login_reveal_no_decisions(environment):  # type: ignore[no-untyped-def]
@@ -219,55 +159,6 @@ def test_expired_access_key_and_bad_login_reveal_no_decisions(environment):  # t
     assert response.status == 403 and "Player name" not in response.body
     environment.MANAGER_ACCESS_KEY = ""
     assert asyncio.run(manage(owner_request(), environment, None, now=NOW)).status == 503
-
-
-def batch_request(action="not_locked", **overrides):  # type: ignore[no-untyped-def]
-    session = issue_session(SECRET, NOW)
-    return owner_request(
-        "/manage/save",
-        method="POST",
-        session=session,
-        values={
-            "csrf": csrf_proof(SECRET, session),
-            "batch_id": CHANGE_ID,
-            "count": "1",
-            "player_id_0": "player",
-            "game_id_0": "game",
-            "version_0": "0",
-            "action_0": action,
-            **overrides,
-        },
-    )
-
-
-def test_shared_form_saves_changed_actions_and_queues_one_plan(environment, store):  # type: ignore[no-untyped-def]
-    response = asyncio.run(manage(batch_request(), environment, None, now=NOW))
-    assert response.status == 303
-    assert row(store).acknowledged_action is None
-    assert len(asyncio.run(store.list_scheduled_work())) == 1
-
-
-def test_unchanged_shared_form_does_not_enqueue_or_audit(environment, store):  # type: ignore[no-untyped-def]
-    response = asyncio.run(manage(batch_request("locked"), environment, None, now=NOW))
-    assert response.status == 303
-    assert asyncio.run(store.list_scheduled_work()) == ()
-    assert asyncio.run(store.decision_history("league", 1, 1)) == []
-
-
-@pytest.mark.parametrize(
-    "fields,status",
-    [
-        ({"version_0": "9"}, 409),
-        ({"count": "129"}, 400),
-        ({"player_id_0": "other"}, 400),
-        ({"action_0": "invalid"}, 400),
-        ({"csrf": "wrong"}, 403),
-    ],
-)
-def test_invalid_batch_form_changes_nothing(environment, store, fields, status):  # type: ignore[no-untyped-def]
-    assert asyncio.run(manage(batch_request(**fields), environment, None, now=NOW)).status == status
-    assert row(store).acknowledged_action == "locked"
-    assert asyncio.run(store.list_scheduled_work()) == ()
 
 
 def test_retry_plan_preserves_decisions_and_is_idempotent(environment, store):  # type: ignore[no-untyped-def]
@@ -286,3 +177,133 @@ def test_retry_plan_preserves_decisions_and_is_idempotent(environment, store):  
     assert len(asyncio.run(store.list_scheduled_work())) == 1
     assert row(store).acknowledged_action == "locked"
     assert asyncio.run(store.decision_history("league", 1, 1)) == []
+
+
+def _unverified(store, **changes):  # type: ignore[no-untyped-def]
+    _with_owner_actions(store)
+    fields = {
+        "status": LockInOpportunityStatus.INELIGIBLE,
+        "rostered_at_tipoff": False,
+        "tipoff_unverified": True,
+        "acknowledged_action": None,
+        "acknowledged_at": None,
+        **changes,
+    }
+    current = replace(row(store), **fields)
+    asyncio.run(store.update_lock_in_opportunity(current, expected_version=current.row_version))
+    return row(store)
+
+
+def override_request(store, *, session=None, **overrides):  # type: ignore[no-untyped-def]
+    session = session or issue_session(SECRET, NOW)
+    values = {
+        "csrf": csrf_proof(SECRET, session),
+        "player_id": "player",
+        "game_id": "game",
+        "version": str(row(store).row_version),
+        "action": "lockable",
+        **overrides,
+    }
+    return owner_request("/manage/override", method="POST", values=values, session=session)
+
+
+def test_override_requires_session(environment, store):  # type: ignore[no-untyped-def]
+    before = _unverified(store)
+    req = override_request(store)
+    req.headers["cookie"] = ""
+
+    response = asyncio.run(manage(req, environment, None, now=NOW))
+
+    assert response.status == 403
+    assert row(store) == before
+
+
+def test_override_rejects_stale_csrf(environment, store):  # type: ignore[no-untyped-def]
+    before = _unverified(store)
+    stale = csrf_proof(SECRET, issue_session(SECRET, NOW - timedelta(hours=1)))
+
+    response = asyncio.run(manage(override_request(store, csrf=stale), environment, None, now=NOW))
+
+    assert response.status == 403
+    assert row(store) == before
+    assert asyncio.run(store.list_scheduled_work()) == ()
+
+
+def test_override_marks_unverified_game_lockable_and_wakes_planning(environment, store):  # type: ignore[no-untyped-def]
+    _unverified(store)
+    sent: list[str] = []
+
+    class Queue:
+        async def send(self, body: str, contentType: str) -> None:  # noqa: N803
+            sent.append(body)
+
+    environment.PLANNING_QUEUE = Queue()
+
+    response = asyncio.run(manage(override_request(store), environment, None, now=NOW))
+
+    assert response.status == 303
+    assert response.headers["location"] == "/"
+    updated = row(store)
+    assert updated.rostered_at_tipoff is True
+    assert updated.tipoff_unverified is False
+    assert len(sent) == 1
+
+
+def test_override_marks_unverified_game_not_lockable(environment, store):  # type: ignore[no-untyped-def]
+    _unverified(store, status=LockInOpportunityStatus.ACTIONABLE, rostered_at_tipoff=True)
+
+    req = override_request(store, action="not_lockable")
+    response = asyncio.run(manage(req, environment, None, now=NOW))
+
+    assert response.status == 303
+    assert row(store).status is LockInOpportunityStatus.INELIGIBLE
+    assert row(store).tipoff_unverified is False
+
+
+def test_override_refuses_sleeper_locked_row(environment, store):  # type: ignore[no-untyped-def]
+    before = _unverified(
+        store,
+        status=LockInOpportunityStatus.ACKNOWLEDGED_LOCKED,
+        trace_json=json.dumps({"lock_source": "sleeper"}),
+    )
+
+    response = asyncio.run(manage(override_request(store), environment, None, now=NOW))
+
+    assert response.status == 400
+    assert row(store) == before
+
+
+@pytest.mark.parametrize(
+    ("overrides", "status"),
+    [
+        ({"action": "locked"}, 400),
+        ({"version": "x"}, 400),
+        ({"version": "99"}, 409),
+        ({"game_id": "missing"}, 404),
+    ],
+)
+def test_invalid_overrides_change_nothing(environment, store, overrides, status):  # type: ignore[no-untyped-def]
+    before = _unverified(store)
+
+    response = asyncio.run(manage(override_request(store, **overrides), environment, None, now=NOW))
+
+    assert response.status == status
+    assert row(store) == before
+
+
+def test_override_refuses_a_verified_game(environment, store):  # type: ignore[no-untyped-def]
+    before = _unverified(store, tipoff_unverified=False)
+
+    response = asyncio.run(manage(override_request(store), environment, None, now=NOW))
+
+    assert response.status == 400
+    assert row(store) == before
+
+
+@pytest.mark.parametrize("path", ["/manage/save", "/manage/edit"])
+def test_save_and_editor_paths_are_gone(environment, store, path):  # type: ignore[no-untyped-def]
+    session = issue_session(SECRET, NOW)
+    values = {"csrf": csrf_proof(SECRET, session), "batch_id": CHANGE_ID}
+    req = owner_request(path, method="POST", values=values, session=session)
+
+    assert asyncio.run(manage(req, environment, None, now=NOW)).status == 404

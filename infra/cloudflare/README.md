@@ -65,65 +65,34 @@ Python Workers require the `python_workers` compatibility flag and are currently
 in beta. Use `uvx --from workers-py pywrangler dev` for local Worker development.
 
 
-## Manager decision history
+## Sleeper lock sync
 
-Apply `0006_manager_decision_changes.sql` before deploying owner controls. Each
-manual correction preserves the previous opportunity state, supersedes outdated
-advice and confirmation links, and creates durable planning work in the same D1
-transaction. Saved corrections survive a queue wake failure; the next cron can
-claim the pending plan. Observed scores and prior acknowledgement rows remain
-available for audit.
+Lock state is read from Sleeper's unauthenticated GraphQL `matchup_legs_raw` query
+before every planning run and on every `/home` load; Sleeper wins every conflict
+with stored rows. The app never calls a Sleeper mutation or uses a Sleeper login.
+The endpoint is undocumented: when it fails or changes shape, `/home` reports
+`lock_data: "unavailable"` and plans are marked degraded with no Lock/Pass advice.
+The planner decides passes itself; there is no manual Lock or Pass input.
 
 ## Owner controls
 
-The editor lists each player's newest verified, finalized performance while it is
-still lockable. Advisor Lock/Pass/Wait and recorded Wait/Locked/Passed are separate:
-a recommendation never records a decision. Choose decisions across the cards, then
-use the shared **Save & replan** button. Plan and Saved chips distinguish advice
-from recorded state; the full recommendation and help stay in expandable details.
-Cards reuse the home page's cached ESPN player portraits and NBA team logos.
-A stale selection rejects
-the entire save; successful saves retain correction history and queue one plan.
-Confirmed locks remain visible with correction controls. Expired or forfeited
-scores move to history with an automatic outcome and reason.
+The only manual input is the tipoff-eligibility override, shown on the dashboard for
+an unverified game: "Was starting at tipoff" or "Was benched at tipoff". A Sleeper
+lock always outranks the answer. Apply `0006_manager_decision_changes.sql` and
+`0007_tipoff_evidence.sql` before deploying; each override is audited, guarded by
+the row version, and queues one plan in the same D1 transaction.
 
-The [Next.js app](../../web/README.md) serves the dashboard and `/manage` editor on
-one Vercel origin. The Worker provides their JSON data to Next.js server routes.
 Set a non-empty `MANAGER_ACCESS_KEY` as a Worker secret. Any non-empty length is
-accepted; a long, randomly generated key is recommended.
-The login form exchanges it for an HttpOnly, Secure, SameSite=Strict cookie scoped
-to `/manage`; rotating the secret invalidates existing sessions. Without this
-secret the editor returns 503. Public `/home` never includes the key or session.
+accepted; a long, randomly generated key is recommended. `POST /manage/login`
+exchanges it for an HttpOnly, Secure, SameSite=Strict cookie scoped to `/manage`;
+rotating the secret invalidates existing sessions. Without this secret owner
+routes return 503. Public `/home` never includes the key or session.
 
-The existing `/manage` routes also accept `Accept: application/json` for
-the Next.js UI. JSON uses the same owner authentication, CSRF, token validation,
-version checks, and no-store policy as HTML. Editor documents contain private row
-versions, CSRF proofs, and correction history; fetch them only on the server or
-through the authenticated same-origin UI. Opening a JSON confirmation is read-only.
-
-Wait leaves the game undecided. Locked confirms a lock already performed in Sleeper.
-Pass records the manager's decision not to lock; the player may stay starting or
-be substituted, and no Sleeper action is required to record that decision. Locks require a
-stable eligible score and the player's currently observed starter slot. A saved
-correction preserves prior evidence, expires old confirmation links, and queues a
-new plan. Both pages show that the plan is updating while this work is pending.
-Plans carry the saved-decision version used during computation; old advice stays
-unavailable after a failed or expired job. **Retry plan** queues another attempt
-without changing recorded actions. Concurrent decision edits reject obsolete
-plan publication at the database boundary.
-A plan matching the latest saved-decision version is displayed even when an older
-planning job still holds a lease.
-The history lists manual corrections; existing notification acknowledgements
-remain stored separately. A correction cannot restore a performance forfeited by
-a bench transition or an elapsed deadline.
-
-An unverified game also offers **Not lockable**, and an ineligible game for a current
-starter offers **Sleeper shows a lock** until its deadline. Apply
-`0007_tipoff_evidence.sql` before deploying these controls.
-
-`POST /manage/login`, `/manage/save`, `/manage/replan`, and `/manage/logout` require the same origin.
-Form pages use `Referrer-Policy: same-origin` to preserve browser POST origins
-while withholding referrers from external sites.
-Save/logout also require a session-bound CSRF proof. Submitted league, week and
-roster identities are never trusted; scope is resolved from the configured owner.
-The editor records decisions only in the assistant's database, not in Sleeper.
+`GET /manage` returns `{"signed_in": bool, "csrf": str|null}`. `POST /manage/login`,
+`/manage/logout`, `/manage/replan`, and `/manage/override` require the same origin;
+all but login also require the session and its CSRF proof (403 otherwise).
+`/manage/override` takes `player_id`, `game_id`, `version`, and `action`
+(`lockable` or `not_lockable`) and answers 303, 400, 404, or 409. Submitted league,
+week and roster identities are never trusted; scope is resolved from the configured
+owner. Responses use `Referrer-Policy: same-origin` and accept
+`Accept: application/json` for the Next.js UI.

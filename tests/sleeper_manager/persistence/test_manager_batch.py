@@ -1,4 +1,4 @@
-"""One submitted set of decisions commits atomically and schedules exactly one replan."""
+"""One submitted set of owner changes commits atomically and schedules exactly one replan."""
 
 import asyncio
 from dataclasses import replace
@@ -22,7 +22,7 @@ def edits(store):  # type: ignore[no-untyped-def]
     asyncio.run(store.upsert_lock_in_opportunity(second))
     return (
         ManagerEdit(first, ManagerAction.NOT_LOCKED, (0, "PF")),
-        ManagerEdit(second, ManagerAction.LOCKED, (1, "PF")),
+        ManagerEdit(second, ManagerAction.NOT_LOCKED, (1, "PF")),
     )
 
 
@@ -35,7 +35,7 @@ def test_batch_saves_every_action_and_queues_once(store):  # type: ignore[no-unt
     assert submit(store, changes)
     assert row(store).acknowledged_action is None
     other = asyncio.run(store.get_lock_in_opportunity(changes[1].current.key))
-    assert other.acknowledged_action == "locked"
+    assert other.acknowledged_action is None
     assert len(asyncio.run(store.decision_history("league", 1, 1))) == 2
     work = asyncio.run(store.list_scheduled_work())
     assert len(work) == 1 and work[0].dedupe_key == "manual:manager:batch-1"
@@ -50,29 +50,11 @@ def test_one_stale_row_rejects_entire_batch(store):  # type: ignore[no-untyped-d
     assert asyncio.run(store.list_scheduled_work()) == ()
 
 
-def test_replay_does_not_overwrite_subsequent_actions_or_enqueue_again(store):  # type: ignore[no-untyped-def]
+def test_replay_does_not_enqueue_again(store):  # type: ignore[no-untyped-def]
     changes = edits(store)
     assert submit(store, changes)
-    assert submit(store, (ManagerEdit(row(store), ManagerAction.PASSED, (0, "PF")),), "later")
     assert submit(store, changes)
-    assert row(store).acknowledged_action == "passed"
-    assert len(asyncio.run(store.list_scheduled_work())) == 2
-
-
-def test_batch_rejects_duplicate_slots_without_partial_writes(store):  # type: ignore[no-untyped-def]
-    changes = edits(store)
-    changes = (
-        replace(changes[0], action=ManagerAction.LOCKED),
-        replace(changes[1], actual_slot=(0, "PF")),
-    )
-    assert not submit(store, changes)
-    assert asyncio.run(store.decision_history("league", 1, 1)) == []
-
-
-def test_batch_can_correct_false_lock_before_recording_the_real_slot_owner(store):  # type: ignore[no-untyped-def]
-    changes = edits(store)
-    assert submit(store, (changes[0], replace(changes[1], actual_slot=(0, "PF"))))
-    assert row(store).acknowledged_action is None
+    assert len(asyncio.run(store.list_scheduled_work())) == 1
 
 
 def test_write_failure_rolls_back_all_actions_and_replan(store):  # type: ignore[no-untyped-def]
@@ -91,4 +73,4 @@ def test_write_failure_rolls_back_all_actions_and_replan(store):  # type: ignore
 def test_reusing_batch_identity_for_other_actions_is_rejected(store):  # type: ignore[no-untyped-def]
     changes = edits(store)
     assert submit(store, changes)
-    assert not submit(store, (changes[0], replace(changes[1], action=ManagerAction.PASSED)))
+    assert not submit(store, (changes[0], replace(changes[1], action=ManagerAction.LOCKABLE)))

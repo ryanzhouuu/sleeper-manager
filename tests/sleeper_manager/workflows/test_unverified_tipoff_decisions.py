@@ -59,28 +59,28 @@ def test_not_lockable_needs_an_unverified_game() -> None:
         )
 
 
-def test_locked_clears_the_flag_and_passed_keeps_it_for_corrections() -> None:
-    locked = reported_decision(_row(), ManagerAction.LOCKED, NOW, actual_slot=(2, "G"))
-    passed = reported_decision(_row(), ManagerAction.PASSED, NOW, actual_slot=(2, "G"))
-    assert locked.tipoff_unverified is False
-    assert passed.tipoff_unverified is True
+def test_manual_lock_and_pass_are_refused() -> None:
+    for action in (ManagerAction.LOCKED, ManagerAction.PASSED):
+        with pytest.raises(ValueError, match="read from Sleeper"):
+            reported_decision(_row(), action, NOW, actual_slot=(2, "G"))
 
 
 def _ineligible(**changes: object) -> LockInOpportunityRecord:
-    return _row(
-        status=Status.INELIGIBLE,
-        rostered_at_tipoff=False,
-        tipoff_unverified=False,
-        stable_score=None,
+    fields: dict[str, object] = {
+        "status": Status.INELIGIBLE,
+        "rostered_at_tipoff": False,
+        "tipoff_unverified": True,
+        "stable_score": None,
         **changes,
-    )
+    }
+    return _row(**fields)
 
 
 def test_override_reopens_an_ineligible_game_for_score_polling() -> None:
     result = reported_decision(_ineligible(), ManagerAction.LOCKABLE, NOW, actual_slot=(2, "G"))
     assert result.status is Status.ACTIVE
     assert result.rostered_at_tipoff is True
-    assert result.tipoff_unverified is True
+    assert result.tipoff_unverified is False
     assert result.next_check_at == NOW
     assert json.loads(result.trace_json)["eligibility_forfeited"] is False
 
@@ -97,9 +97,19 @@ def test_override_is_refused_outside_its_window(changes: dict[str, object], mess
         reported_decision(_ineligible(**changes), ManagerAction.LOCKABLE, NOW, actual_slot=None)
 
 
-def test_override_needs_an_ineligible_game() -> None:
-    with pytest.raises(ValueError, match="ineligible"):
-        reported_decision(_row(), ManagerAction.LOCKABLE, NOW, actual_slot=None)
+def test_lockable_answer_settles_an_unverified_completed_game_in_place() -> None:
+    result = reported_decision(_row(), ManagerAction.LOCKABLE, NOW, actual_slot=None)
+    assert result.status is Status.FINALIZING
+    assert result.rostered_at_tipoff is True
+    assert result.tipoff_unverified is False
+
+
+@pytest.mark.parametrize("action", (ManagerAction.LOCKABLE, ManagerAction.NOT_LOCKABLE))
+def test_override_needs_an_unverified_game_sleeper_has_not_locked(action: ManagerAction) -> None:
+    with pytest.raises(ValueError, match="unverified"):
+        reported_decision(_ineligible(tipoff_unverified=False), action, NOW, actual_slot=None)
+    with pytest.raises(ValueError, match="Sleeper already"):
+        reported_decision(_row(status=Status.ACKNOWLEDGED_LOCKED), action, NOW, actual_slot=None)
 
 
 def _flagged_state(**changes: object):  # type: ignore[no-untyped-def]
