@@ -128,14 +128,18 @@ def test_matching_sleeper_synced_lock_still_counts_as_unchanged() -> None:
         _row(status=LockInOpportunityStatus.FINALIZING),
         _row(stable_score=None),
         _row(current_recommendation_id=None),
-        _row(current_observed_at=NOW - timedelta(minutes=30)),
     ],
-    ids=["stabilizing", "no_stable_score", "no_advice", "full_pass_due"],
+    ids=["stabilizing", "no_stable_score", "no_advice"],
 )
 def test_unsettled_or_stale_games_take_the_full_pass(row: LockInOpportunityRecord) -> None:
     reader = Reader()
     assert not _check(Repository((row,)), reader)
     assert reader.calls == 0
+
+
+def test_long_settled_games_stay_skipped_without_a_periodic_full_pass() -> None:
+    row = _row(current_observed_at=NOW - timedelta(days=1))
+    assert _check(Repository((row,)), Reader())
 
 
 def test_new_sleeper_lock_takes_the_full_pass() -> None:

@@ -5,15 +5,13 @@ between scheduled runs; pre-tipoff, daily, and other finals replan with fresh ev
 """
 
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from sleeper_manager.domain.lock_in import LockInOpportunityStatus
 from sleeper_manager.integrations.sleeper.matchup_legs import parse_matchup_legs
 from sleeper_manager.persistence.base import AsyncRuntimeStateRepository, ScheduledWorkRecord
 from sleeper_manager.persistence.lock_in_opportunities import LockInOpportunityRecord
 from sleeper_manager.workflows.sleeper_locks import SleeperLockReader, is_sleeper_synced_lock
-
-FULL_PASS_INTERVAL = timedelta(minutes=30)
 
 
 async def settled_postgame_unchanged(
@@ -29,7 +27,7 @@ async def settled_postgame_unchanged(
         return False
     due = await repository.list_due_lock_in_opportunities(now)
     rows = tuple(row for row in due if row.key.game_id in games)
-    if {row.key.game_id for row in rows} != games or not all(_settled(row, now) for row in rows):
+    if {row.key.game_id for row in rows} != games or not all(map(_settled, rows)):
         return False
     scopes = {(row.key.league_id, row.key.fantasy_week, row.key.roster_id) for row in rows}
     if len(scopes) != 1:
@@ -52,12 +50,9 @@ async def settled_postgame_unchanged(
     return set(leg.starters_games) == synced
 
 
-def _settled(row: LockInOpportunityRecord, now: datetime) -> bool:
-    """A periodic full pass still refreshes injuries and lineup evidence for settled games."""
+def _settled(row: LockInOpportunityRecord) -> bool:
     return (
         row.status is LockInOpportunityStatus.ACTIONABLE
         and row.stable_score is not None
         and row.current_recommendation_id is not None
-        and row.current_observed_at is not None
-        and now - row.current_observed_at < FULL_PASS_INTERVAL
     )

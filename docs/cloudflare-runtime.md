@@ -84,7 +84,8 @@ empty, stabilize finals, and may send Lock, Pass, or unavailable-warning notific
 Once every due row for a watched game is actionable with a stable score and recorded advice,
 each five-minute wake reads only Sleeper's matchup legs. It skips collection and replanning
 while Sleeper's submitted locks match the stored Sleeper-synced rows, and runs a full pass
-when locks differ, Sleeper is unavailable, or 30 minutes have passed since the last full pass.
+when locks differ or Sleeper is unavailable. Scheduled daily, pre-tipoff, and other games'
+postgame runs still replan settled games with fresh injury and lineup evidence.
 Lineup notifications include
 advice without action links. Scheduled daily no-change results send one
 `daily_plan_completed` confirmation per manager-local day, including when daily and
