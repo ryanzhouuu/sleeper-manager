@@ -198,3 +198,52 @@ def test_shared_terminal_values_match_reference_assignment_rollouts() -> None:
             scenarios=scenarios,
             ignored_candidate_ids=ignored,
         )
+
+
+def _reference_apply_players(topology, players, *, active_slot_mask):  # type: ignore[no-untyped-def]
+    """The straightforward dynamic program the optimized planner loop must reproduce."""
+
+    scores = [float("-inf")] * topology._state_count
+    codes = [0] * topology._state_count
+    scores[0] = 0.0
+    for _, edges in players:
+        for mask in reversed(topology._submasks[active_slot_mask]):
+            if scores[mask] == float("-inf"):
+                continue
+            for edge in edges:
+                if mask & edge.slot_bit:
+                    continue
+                target = mask | edge.slot_bit
+                score = scores[mask] + edge.score
+                code = codes[mask] + edge.lexicographic_code
+                if score > scores[target] + 1e-9 or (
+                    code < codes[target] and abs(score - scores[target]) <= 1e-9
+                ):
+                    scores[target] = score
+                    codes[target] = code
+    return scores, codes
+
+
+def test_optimized_player_application_matches_the_reference_including_ties() -> None:
+    """Integer-valued scenarios force many exact ties, so tie-break codes must also match."""
+    import random
+
+    generator = random.Random(20261109)
+    positions = (("PG",), ("SG",), ("C",), ("PG", "SG"), ("SG", "C"), ("PG", "SG", "C"))
+    slots = tuple(
+        StarterSlot(index, position)
+        for index, position in enumerate(("PG", "SG", "G", "C", "UTIL", "UTIL"))
+    )
+    for _ in range(25):
+        inputs = tuple(
+            _input(f"c{player}-{game}", f"p{player}", generator.choice(positions))
+            for player in range(generator.randint(3, 9))
+            for game in range(generator.randint(1, 3))
+        )
+        topology = PreparedContinuationTopology(inputs, slots)
+        values = {item.candidate_id: float(generator.randint(-2, 6)) for item in inputs}
+        mask = generator.randrange(1, 1 << len(slots))
+        players = topology._scenario_players(values, mask)
+        assert topology._apply_players(players, active_slot_mask=mask) == (
+            _reference_apply_players(topology, players, active_slot_mask=mask)
+        )

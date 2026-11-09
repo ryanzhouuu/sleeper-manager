@@ -249,37 +249,47 @@ class PreparedContinuationTopology:
         initial_scores: list[float] | None = None,
         initial_codes: list[int] | None = None,
     ) -> tuple[list[float], list[int]]:
-        """Apply each player once; descending masks prevent same-player reuse."""
+        """Apply each player once; descending masks prevent same-player reuse.
 
+        This is the planner's hottest loop, so edge fields are unpacked once per player.
+        A player's edges only write strictly larger masks, so the visited mask's own score and
+        code cannot change while its edges are applied.
+        """
+
+        negative_infinity = float("-inf")
+        tolerance = _TIE_TOLERANCE
         scores = (
-            [float("-inf")] * self._state_count if initial_scores is None else initial_scores.copy()
+            [negative_infinity] * self._state_count
+            if initial_scores is None
+            else initial_scores.copy()
         )
         lexicographic_codes = (
             [0] * self._state_count if initial_codes is None else initial_codes.copy()
         )
         if initial_scores is None:
             scores[0] = 0.0
-        reachable_masks = self._submasks[active_slot_mask]
+        descending_masks = self._submasks[active_slot_mask][::-1]
         for _, active_edges in players:
-            for mask in reversed(reachable_masks):
+            edges = tuple(
+                (edge.slot_bit, edge.score, edge.lexicographic_code) for edge in active_edges
+            )
+            for mask in descending_masks:
                 base_score = scores[mask]
-                if base_score == float("-inf"):
+                if base_score == negative_infinity:
                     continue
-                for edge in active_edges:
-                    if mask & edge.slot_bit:
+                base_code = lexicographic_codes[mask]
+                for slot_bit, edge_score, edge_code in edges:
+                    if mask & slot_bit:
                         continue
-                    candidate_mask = mask | edge.slot_bit
-                    candidate_score = base_score + edge.score
-                    candidate_lexicographic_code = (
-                        lexicographic_codes[mask] + edge.lexicographic_code
-                    )
+                    candidate_mask = mask | slot_bit
+                    candidate_score = base_score + edge_score
                     incumbent_score = scores[candidate_mask]
-                    if candidate_score > incumbent_score + _TIE_TOLERANCE or (
-                        candidate_lexicographic_code < lexicographic_codes[candidate_mask]
-                        and abs(candidate_score - incumbent_score) <= _TIE_TOLERANCE
+                    if candidate_score > incumbent_score + tolerance or (
+                        base_code + edge_code < lexicographic_codes[candidate_mask]
+                        and abs(candidate_score - incumbent_score) <= tolerance
                     ):
                         scores[candidate_mask] = candidate_score
-                        lexicographic_codes[candidate_mask] = candidate_lexicographic_code
+                        lexicographic_codes[candidate_mask] = base_code + edge_code
         return scores, lexicographic_codes
 
     def _select_allowed_scores(
