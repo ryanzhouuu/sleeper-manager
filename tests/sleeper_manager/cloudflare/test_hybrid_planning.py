@@ -139,7 +139,8 @@ def test_advice_cutoff_advances_after_hybrid_computation() -> None:
     asyncio.run(exercise())
 
 
-def test_selected_hybrid_can_collect_without_baseline_observations(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+def test_selected_hybrid_never_loads_baseline_history(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """Hybrid advice discards baseline projections, so collection must not pay for them."""
     from types import SimpleNamespace
 
     from sleeper_manager.cloudflare.planning import collect_cloudflare_planning_inputs
@@ -160,6 +161,15 @@ def test_selected_hybrid_can_collect_without_baseline_observations(tmp_path, mon
     async def exercise() -> None:
         repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
         await repository.initialize()
+        loads = []
+
+        async def load_projection_observations(*args, **kwargs):  # type: ignore[no-untyped-def]
+            loads.append(args)
+            return ()
+
+        monkeypatch.setattr(
+            repository, "load_projection_observations", load_projection_observations
+        )
         await collect_cloudflare_planning_inputs(
             SimpleNamespace(SLEEPER_LEAGUE_ID="league-current", SLEEPER_USER_ID="user-manager"),
             FixtureFetch(),
@@ -173,6 +183,7 @@ def test_selected_hybrid_can_collect_without_baseline_observations(tmp_path, mon
             clock=lambda: COLLECT_NOW,
         )
         assert len(calls) == 1
+        assert loads == []
 
     asyncio.run(exercise())
 

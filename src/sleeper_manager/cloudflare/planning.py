@@ -96,13 +96,15 @@ async def collect_cloudflare_planning_inputs(
     week = eastern_fantasy_week(scheduled_at)
     week_window = FantasyWeekWindow(profile.fantasy_week.week, week.starts_at, week.ends_at)
     history_loaded_at = tick()
-    with timed_stage("baseline_history_load"):
-        history = await D1ProjectionHistory.load_version(
-            repository,
-            history_version=policy.projection_history_version,
-            loaded_at=history_loaded_at,
-            allow_empty=policy.active_projection_provider == "hybrid",
-        )
+    if policy.active_projection_provider == "hybrid":
+        history = D1ProjectionHistory(policy.projection_history_version, history_loaded_at, ())
+    else:
+        with timed_stage("baseline_history_load"):
+            history = await D1ProjectionHistory.load_version(
+                repository,
+                history_version=policy.projection_history_version,
+                loaded_at=history_loaded_at,
+            )
     nba = AsyncCachedNBAProvider(
         CloudflareESPNProvider(fetcher, clock=tick),
         repository,
