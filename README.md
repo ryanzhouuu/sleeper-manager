@@ -78,9 +78,9 @@ uv run sleeper-manager --help
 ## Forecast capture
 
 The [opening-week hybrid candidate](docs/opening-week-projections.md) uses captured
-forecasts with internal fallback for paired shadow output and full-advisor replay.
-The [scheduled runtime](docs/cloudflare-runtime.md) supports pinned D1 hybrid history
-and batched shadow evaluation independently from the selected advice provider.
+forecasts with internal fallback for local paired shadow output and full-advisor replay.
+The [scheduled runtime](docs/cloudflare-runtime.md) projects live advice from pinned D1
+hybrid history when the runtime policy selects the hybrid provider.
 Official game absences constrain active projections; uncertain or unverified status
 evidence is explained in lineup and Lock-In messages. Existing policies use direct-baseline
 advice; hybrid advice requires an explicit selection and pinned history.

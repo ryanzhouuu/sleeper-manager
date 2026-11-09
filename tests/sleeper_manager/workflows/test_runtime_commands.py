@@ -28,7 +28,7 @@ def test_local_schedule_passes_archives_and_completed_collection_clock(tmp_path,
     async def collect(env, fetch, **kwargs):  # type: ignore[no-untyped-def]
         events.append("collect")
         assert "clock" not in kwargs
-        assert kwargs["shadow_repository"] is not None
+        assert kwargs["hybrid_repository"] is not None
         assert kwargs["forecast_archive"] is not None
 
     async def dispatch(repository, **kwargs):  # type: ignore[no-untyped-def]

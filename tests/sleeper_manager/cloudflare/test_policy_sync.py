@@ -16,13 +16,13 @@ from sleeper_manager.domain.runtime_policy import RuntimePolicy
 from sleeper_manager.domain.scoring import ScoringPolicy
 from sleeper_manager.persistence.async_sqlite import AsyncSQLiteStateRepository
 from sleeper_manager.persistence.base import RuntimePolicyRecord
-from tests.sleeper_manager.cloudflare.test_live_hybrid_shadow import setup
+from tests.sleeper_manager.cloudflare.test_hybrid_planning import setup
 from tests.sleeper_manager.cloudflare.test_runtime_sync import NOW, _observation
 
 
 async def state_for(path):  # type: ignore[no-untyped-def]
     """Use real state and artifact repositories; the selected model data is independently seeded."""
-    manager, _, _, store, current = await setup()
+    manager, store, current = await setup()
     state = AsyncSQLiteStateRepository(path)
     await state.initialize()
     await state.save_runtime_policy(RuntimePolicyRecord(current.version, current.to_json(), NOW))
@@ -34,11 +34,8 @@ async def state_for(path):  # type: ignore[no-untyped-def]
 
 
 @pytest.mark.parametrize("provider", ["direct_baseline", "hybrid"])
-@pytest.mark.parametrize("shadow", [False, True])
-def test_policy_only_apply_selects_modes_without_changing_history(
-    tmp_path, provider, shadow
-) -> None:  # type: ignore[no-untyped-def]
-    """Every independent provider/evaluation combination preserves compact history exactly."""
+def test_policy_only_apply_selects_modes_without_changing_history(tmp_path, provider) -> None:  # type: ignore[no-untyped-def]
+    """Either provider selection preserves compact history exactly."""
 
     async def exercise() -> None:
         state, store, current, scoring = await state_for(tmp_path / "state.db")
@@ -46,7 +43,6 @@ def test_policy_only_apply_selects_modes_without_changing_history(
         policy = ManagerPolicy(
             projections={
                 "active_provider": provider,
-                "shadow_enabled": shadow,
                 "hybrid_history_version": current.hybrid_history_version,
             }
         )
@@ -56,7 +52,6 @@ def test_policy_only_apply_selects_modes_without_changing_history(
         record = await state.load_runtime_policy()
         loaded = RuntimePolicy.from_json(record.version, record.payload_json)
         assert loaded.active_projection_provider == provider
-        assert loaded.hybrid_shadow_enabled == shadow
         assert loaded.hybrid_history_version == current.hybrid_history_version
         assert report["policy_activated"] is True
         assert loaded.version != current.version
@@ -97,7 +92,7 @@ def test_policy_only_dry_run_verifies_without_mutating_policy(tmp_path) -> None:
 def test_absent_projection_table_preserves_current_selection_and_preferences_update(
     tmp_path,
 ) -> None:  # type: ignore[no-untyped-def]
-    """Older preference files cannot accidentally disable evaluation or switch providers."""
+    """Older preference files cannot accidentally switch providers."""
 
     async def exercise() -> None:
         state, store, current, scoring = await state_for(tmp_path / "state.db")
@@ -112,7 +107,6 @@ def test_absent_projection_table_preserves_current_selection_and_preferences_upd
         record = await state.load_runtime_policy()
         loaded = RuntimePolicy.from_json(record.version, record.payload_json)
         assert loaded.active_projection_provider == "hybrid"
-        assert loaded.hybrid_shadow_enabled
         assert loaded.manager_intent.minimum_confidence == 0.85
 
     asyncio.run(exercise())
@@ -139,7 +133,6 @@ def test_policy_verification_failure_preserves_existing_policy(tmp_path, failure
         manager = ManagerPolicy(
             projections={
                 "active_provider": "hybrid",
-                "shadow_enabled": True,
                 "hybrid_history_version": version,
             }
         )
@@ -205,7 +198,6 @@ def test_policy_only_requires_existing_runtime_state(tmp_path) -> None:  # type:
         'active_provider = "hybrid"',
         "shadow_enabled = true",
         'active_provider = "unknown"',
-        'shadow_enabled = "false"',
         'hybrid_history_version = ""',
         "unexpected = true",
     ],
@@ -218,13 +210,13 @@ def test_toml_projection_settings_reject_unpinned_or_invalid_selection(tmp_path,
         load_manager_policy(path)
 
 
-def test_toml_projection_table_is_loaded_and_can_explicitly_disable_shadow(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """An explicit false value differs from an omitted legacy projection table."""
+def test_toml_projection_table_is_loaded_explicitly(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """An explicit projection table differs from an omitted legacy table."""
     path = tmp_path / "policy.toml"
-    path.write_text('[projections]\nactive_provider = "direct_baseline"\nshadow_enabled = false\n')
+    path.write_text('[projections]\nactive_provider = "direct_baseline"\n')
     manager = load_manager_policy(path)
     assert manager.projections is not None
-    assert manager.projections.shadow_enabled is False
+    assert manager.projections.active_provider == "direct_baseline"
     assert ManagerPolicy().projections is None
 
 

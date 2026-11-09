@@ -1,4 +1,4 @@
-"""Bounded, content-addressed JSON artifacts for hybrid history and retained shadow traces."""
+"""Bounded, content-addressed JSON artifacts for prepared hybrid history."""
 
 import base64
 import gzip

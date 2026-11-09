@@ -1,4 +1,4 @@
-"""Offline export and shadow activation preserve complete evidence and activate policy last."""
+"""Offline export publishes complete evidence without touching the runtime policy."""
 
 import asyncio
 from datetime import timedelta
@@ -10,7 +10,7 @@ from sleeper_manager.cloudflare.hybrid_sync import (
     sync_hybrid_runtime_history,
 )
 from sleeper_manager.cloudflare.hybrid_sync_cli import parser
-from sleeper_manager.domain.runtime_policy import RuntimePolicy, default_runtime_policy
+from sleeper_manager.domain.runtime_policy import default_runtime_policy
 from sleeper_manager.persistence.base import RuntimePolicyRecord
 from sleeper_manager.persistence.d1 import D1StateRepository
 from sleeper_manager.persistence.hybrid_runtime import (
@@ -35,44 +35,29 @@ def test_export_is_complete_deterministic_and_dry_run_writes_nothing() -> None:
     assert export == exported()
     assert len(export.manifest.player_artifacts) == 7
     assert export.manifest.census_artifacts
-    report = asyncio.run(
-        sync_hybrid_runtime_history(
-            export, store=None, state=None, apply=False, enable_shadow=True, now=CUTOFF
-        )
-    )
+    report = asyncio.run(sync_hybrid_runtime_history(export, store=None, apply=False, now=CUTOFF))
     assert report["observation_count"] == 210
     assert report["opportunity_count"] == 210
-    assert not report["shadow_enabled"]
-    assert report["active_projection_provider"] == "direct_baseline"
+    assert "shadow_enabled" not in report
 
 
-def test_apply_verifies_history_before_enabling_shadow_and_preserves_manager_policy() -> None:
+def test_apply_publishes_verified_history_and_leaves_policy_unchanged() -> None:
     async def exercise() -> None:
         database = FakeD1()
         await database.exec(D1_SCHEMA + HYBRID_RUNTIME_SCHEMA)
         state = D1StateRepository(database)
         initial = default_runtime_policy(history_version="control-history")
-        await state.save_runtime_policy(
-            RuntimePolicyRecord(initial.version, initial.to_json(), CUTOFF)
-        )
+        stored = RuntimePolicyRecord(initial.version, initial.to_json(), CUTOFF)
+        await state.save_runtime_policy(stored)
         export = exported()
-        report = await sync_hybrid_runtime_history(
+        await sync_hybrid_runtime_history(
             export,
             store=D1HybridRuntimeRepository(database),
-            state=state,
             apply=True,
-            enable_shadow=True,
             now=CUTOFF,
             clock=lambda: CUTOFF + timedelta(seconds=1),
         )
-        record = await state.load_runtime_policy()
-        policy = RuntimePolicy.from_json(record.version, record.payload_json)
-        assert policy.hybrid_history_version == export.manifest.version
-        assert policy.hybrid_shadow_enabled
-        assert policy.manager_intent == initial.manager_intent
-        assert policy.projection_history_version == initial.projection_history_version
-        assert policy.active_projection_provider == "direct_baseline"
-        assert report["shadow_enabled"]
+        assert await state.load_runtime_policy() == stored
         assert (
             database.connection.execute("SELECT count(*) FROM hybrid_history_versions").fetchone()[
                 0
@@ -83,19 +68,15 @@ def test_apply_verifies_history_before_enabling_shadow_and_preserves_manager_pol
     asyncio.run(exercise())
 
 
-def test_shadow_activation_requires_an_existing_advisor_policy() -> None:
-    with pytest.raises(HybridProjectionError, match="existing_runtime_policy"):
-        asyncio.run(
-            sync_hybrid_runtime_history(
-                exported(), store=object(), state=None, apply=True, enable_shadow=True, now=CUTOFF
-            )
-        )
+def test_apply_requires_a_store() -> None:
+    with pytest.raises(HybridProjectionError, match="store_missing"):
+        asyncio.run(sync_hybrid_runtime_history(exported(), store=None, apply=True, now=CUTOFF))
 
 
-def test_cli_keeps_apply_and_activation_explicit() -> None:
+def test_cli_keeps_apply_explicit_and_has_no_shadow_flag() -> None:
     args = parser().parse_args(
         ["--history", "history.json", "--league-fixture", "league.json", "--season", "2026"]
     )
     assert not args.apply
-    assert not args.enable_shadow
+    assert not hasattr(args, "enable_shadow")
     assert args.local_db is None

@@ -7,12 +7,12 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from sleeper_manager.cloudflare.availability import CloudflareOfficialAvailability
+from sleeper_manager.cloudflare.hybrid_planning import finish_hybrid_planning
 from sleeper_manager.cloudflare.projection_history import D1ProjectionHistory
 from sleeper_manager.cloudflare.providers import (
     CloudflareESPNProvider,
     CloudflareSleeperClient,
 )
-from sleeper_manager.cloudflare.shadow_planning import finish_hybrid_shadow_planning
 from sleeper_manager.cloudflare.stage_logging import timed_stage
 from sleeper_manager.domain.league import LeagueProfile
 from sleeper_manager.domain.runtime_policy import RuntimePolicy
@@ -75,11 +75,11 @@ async def collect_cloudflare_planning_inputs(
     policy: RuntimePolicy,
     scheduled_at: datetime,
     clock: Callable[[], datetime] | None = None,
-    shadow_repository: HybridRuntimeRepository | None = None,
+    hybrid_repository: HybridRuntimeRepository | None = None,
     forecast_archive: AsyncForecastArchiveRepository | None = None,
     hybrid_timeout_seconds: float | None = None,
 ) -> CloudflarePlanningAssembly:
-    """Select advice explicitly while sharing live collection with optional paired evaluation."""
+    """Collect live evidence and project it with the provider the runtime policy selects."""
     if scheduled_at.tzinfo is None:
         raise CloudflarePlanningConfigurationError("Scheduled time must be timezone-aware")
     league_id = _required_env(env, "SLEEPER_LEAGUE_ID")
@@ -138,32 +138,27 @@ async def collect_cloudflare_planning_inputs(
             mapping_overrides=policy.mapping_overrides,
             official_availability_source=CloudflareOfficialAvailability(fetcher, clock=tick),
             clock=tick,
-            skip_projections=(
-                policy.hybrid_shadow_enabled or policy.active_projection_provider == "hybrid"
-            ),
+            skip_projections=policy.active_projection_provider == "hybrid",
         )
 
     with timed_stage("manager_evidence"):
         evidence = await collect(profile)
-    if policy.hybrid_shadow_enabled or policy.active_projection_provider == "hybrid":
+    if policy.active_projection_provider == "hybrid":
         binding = getattr(env, "sleeper_manager_state", None)
-        store = shadow_repository or (
+        store = hybrid_repository or (
             D1HybridRuntimeRepository(binding) if binding is not None else None
         )
         archive_binding = getattr(env, "forecast_archive", None)
         archive = forecast_archive or (
             D1ForecastArchiveRepository(archive_binding) if archive_binding is not None else None
         )
-        evidence = await finish_hybrid_shadow_planning(
+        evidence = await finish_hybrid_planning(
             evidence,
-            sleeper=sleeper,
-            collect_opponent=collect,
-            control=control,
             policy=policy,
             store=store,
             archive=archive,
             clock=tick,
-            candidate_timeout_seconds=hybrid_timeout_seconds,
+            timeout_seconds=hybrid_timeout_seconds,
         )
     catalog = catalog_source.catalog or {}
     player_names = {

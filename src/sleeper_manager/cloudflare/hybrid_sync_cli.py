@@ -15,21 +15,18 @@ from sleeper_manager.cloudflare.hybrid_sync import (
     sync_hybrid_runtime_history,
 )
 from sleeper_manager.cloudflare.runtime_sync import RemoteD1, d1_database_id
-from sleeper_manager.persistence.async_sqlite import AsyncSQLiteStateRepository
-from sleeper_manager.persistence.d1 import D1StateRepository
 from sleeper_manager.persistence.hybrid_runtime import D1HybridRuntimeRepository
 from sleeper_manager.persistence.hybrid_sqlite import SQLiteHybridRuntimeRepository
 from sleeper_manager.projections.hybrid_history_artifact import load_hybrid_history_artifact
 
 
 def parser() -> argparse.ArgumentParser:
-    """Keep remote writes and shadow activation independently explicit."""
+    """Keep remote writes explicit; policy activation stays in the policy sync command."""
     command = argparse.ArgumentParser(description=__doc__)
     command.add_argument("--history", type=Path, required=True)
     command.add_argument("--league-fixture", type=Path, required=True)
     command.add_argument("--season", type=int, required=True)
     command.add_argument("--apply", action="store_true")
-    command.add_argument("--enable-shadow", action="store_true")
     command.add_argument("--local-db", type=Path)
     command.add_argument("--wrangler-config", type=Path, default=Path("wrangler.toml"))
     return command
@@ -48,17 +45,11 @@ async def run(args: argparse.Namespace) -> dict[str, object]:
         scoring_policy=scoring_policy_from_league_fixture(args.league_fixture),
     )
     if not args.apply:
-        return await sync_hybrid_runtime_history(
-            export, store=None, state=None, apply=False, enable_shadow=args.enable_shadow, now=now
-        )
+        return await sync_hybrid_runtime_history(export, store=None, apply=False, now=now)
     if args.local_db is not None:
         store = SQLiteHybridRuntimeRepository(args.local_db)
-        state = AsyncSQLiteStateRepository(args.local_db)
-        await state.initialize()
         await store.initialize()
-        return await sync_hybrid_runtime_history(
-            export, store=store, state=state, apply=True, enable_shadow=args.enable_shadow, now=now
-        )
+        return await sync_hybrid_runtime_history(export, store=store, apply=True, now=now)
     async with httpx.AsyncClient(timeout=60) as client:
         database = RemoteD1(
             os.environ.get("CLOUDFLARE_ACCOUNT_ID", ""),
@@ -69,9 +60,7 @@ async def run(args: argparse.Namespace) -> dict[str, object]:
         return await sync_hybrid_runtime_history(
             export,
             store=D1HybridRuntimeRepository(database),
-            state=D1StateRepository(database),
             apply=True,
-            enable_shadow=args.enable_shadow,
             now=now,
         )
 

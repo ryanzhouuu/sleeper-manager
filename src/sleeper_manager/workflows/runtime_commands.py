@@ -65,8 +65,8 @@ async def _run_scheduled(settings: Settings) -> int:
     try:
         repository = AsyncSQLiteStateRepository(settings.sqlite_path)
         await repository.initialize()
-        shadow = SQLiteHybridRuntimeRepository(settings.sqlite_path)
-        await shadow.initialize()
+        hybrid = SQLiteHybridRuntimeRepository(settings.sqlite_path)
+        await hybrid.initialize()
         archive = AsyncSQLiteForecastArchiveRepository(
             settings.sqlite_path.with_name("forecasts.db")
         )
@@ -101,7 +101,7 @@ async def _run_scheduled(settings: Settings) -> int:
                     repository=repository,
                     policy=policy,
                     scheduled_at=scheduled_at,
-                    shadow_repository=shadow,
+                    hybrid_repository=hybrid,
                     forecast_archive=archive,
                 )
 

@@ -2,13 +2,10 @@
 
 from collections import defaultdict
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from hashlib import sha256
 
-from sleeper_manager.domain.runtime_policy import RuntimePolicy
 from sleeper_manager.domain.scoring import ScoringPolicy
-from sleeper_manager.persistence.base import AsyncRuntimeStateRepository, RuntimePolicyRecord
 from sleeper_manager.persistence.hybrid_artifacts import HybridArtifact, encode_hybrid_artifact
 from sleeper_manager.persistence.hybrid_runtime import HybridRuntimeRepository
 from sleeper_manager.projections.hybrid_config import HybridProjectionConfig, HybridProjectionError
@@ -94,13 +91,11 @@ async def sync_hybrid_runtime_history(
     export: HybridRuntimeExport,
     *,
     store: HybridRuntimeRepository | None,
-    state: AsyncRuntimeStateRepository | None,
     apply: bool,
-    enable_shadow: bool,
     now: datetime,
     clock: Callable[[], datetime] | None = None,
 ) -> dict[str, object]:
-    """Dry-run by default; activate shadow only after exact artifact and index verification."""
+    """Dry-run by default; publish only after exact artifact and index verification."""
     require_aware(now)
     report: dict[str, object] = {
         "apply": apply,
@@ -115,20 +110,11 @@ async def sync_hybrid_runtime_history(
         "encoded_bytes": sum(len(row.encoded_payload) for row in export.artifacts),
         "profile_count": len(export.index.profiles),
         "excluded_games": len(export.index.excluded_games),
-        "enable_shadow": enable_shadow,
-        "shadow_enabled": False,
-        "active_projection_provider": "direct_baseline",
     }
     if not apply:
         return report
     if store is None:
         raise HybridProjectionError("hybrid_sync_store_missing")
-    policy = None
-    if enable_shadow:
-        record = await state.load_runtime_policy() if state is not None else None
-        if record is None:
-            raise HybridProjectionError("hybrid_shadow_requires_existing_runtime_policy")
-        policy = RuntimePolicy.from_json(record.version, record.payload_json)
     for artifact in export.artifacts:
         await store.save_artifact(artifact)
     tick = clock or (lambda: datetime.now(UTC))
@@ -136,14 +122,4 @@ async def sync_hybrid_runtime_history(
     manifest, index = await store.load_history(export.manifest.version, cutoff=published_at)
     if manifest != export.manifest or index != export.index:
         raise HybridProjectionError("hybrid_sync_verification_failed")
-    if policy is not None:
-        assert state is not None
-        updated = replace(
-            policy, hybrid_history_version=manifest.version, hybrid_shadow_enabled=True
-        )
-        version = "runtime-policy-v2-" + sha256(updated.to_json().encode()).hexdigest()[:12]
-        updated = replace(updated, version=version)
-        await state.save_runtime_policy(RuntimePolicyRecord(version, updated.to_json(), tick()))
-        report["shadow_enabled"] = True
-        report["policy_version"] = version
     return report

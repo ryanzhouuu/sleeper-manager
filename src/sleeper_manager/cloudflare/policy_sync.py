@@ -29,7 +29,6 @@ def select_runtime_policy(current: RuntimePolicy, manager: ManagerPolicy) -> Run
         policy = replace(
             policy,
             active_projection_provider=manager.projections.active_provider,
-            hybrid_shadow_enabled=manager.projections.shadow_enabled,
             hybrid_history_version=manager.projections.hybrid_history_version,
         )
     policy = replace(
@@ -55,7 +54,7 @@ async def verify_hybrid_policy(
 ) -> dict[str, object]:
     """Reject unavailable, unscorable, wrong-season, or incompatible prepared history."""
     require_aware(now)
-    if not policy.hybrid_shadow_enabled and policy.active_projection_provider != "hybrid":
+    if policy.active_projection_provider != "hybrid":
         return {}
     if store is None or scoring_policy is None or policy.hybrid_history_version is None:
         raise RuntimePolicySyncError("Hybrid selection requires history and scoring verification")
@@ -109,7 +108,6 @@ async def sync_runtime_policy(
         "policy_activated": False,
         "policy_version": policy.version,
         "active_projection_provider": policy.active_projection_provider,
-        "hybrid_shadow_enabled": policy.hybrid_shadow_enabled,
         "projection_history_version": policy.projection_history_version,
         **evidence,
     }

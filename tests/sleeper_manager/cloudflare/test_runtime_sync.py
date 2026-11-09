@@ -135,14 +135,14 @@ mapping_overrides = { "sleeper-1" = "espn-1" }
     assert policy.manager_intent.version == manager_policy.version
 
 
-def test_baseline_history_sync_preserves_enabled_hybrid_shadow(tmp_path) -> None:  # type: ignore[no-untyped-def]
+def test_baseline_history_sync_preserves_hybrid_selection(tmp_path) -> None:  # type: ignore[no-untyped-def]
     async def exercise() -> None:
         repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
         await repository.initialize()
         history = records_from_observations((_observation(),), history_version="new-control")
         policy = runtime_policy_for_history(history)
         current = replace(
-            policy, hybrid_history_version="hybrid-version", hybrid_shadow_enabled=True
+            policy, hybrid_history_version="hybrid-version", active_projection_provider="hybrid"
         )
         await repository.save_runtime_policy(RuntimePolicyRecord("current", current.to_json(), NOW))
         await sync_cloudflare_runtime_data(
@@ -151,7 +151,7 @@ def test_baseline_history_sync_preserves_enabled_hybrid_shadow(tmp_path) -> None
         record = await repository.load_runtime_policy()
         loaded = RuntimePolicy.from_json(record.version, record.payload_json)
         assert loaded.hybrid_history_version == "hybrid-version"
-        assert loaded.hybrid_shadow_enabled
+        assert loaded.active_projection_provider == "hybrid"
         assert loaded.projection_history_version == "new-control"
 
     asyncio.run(exercise())

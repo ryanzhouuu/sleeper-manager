@@ -1,4 +1,4 @@
-"""D1 and SQLite preserve immutable history and shadow references through failures."""
+"""D1 and SQLite preserve immutable history references through failures."""
 
 import asyncio
 import sqlite3
@@ -105,30 +105,21 @@ def test_corrupt_partition_is_not_treated_as_no_history(storage) -> None:  # typ
         asyncio.run(repository.load_player_games(manifest, "target"))
 
 
-def test_shadow_run_reference_is_immutable_and_retains_failure_evidence(storage) -> None:  # type: ignore[no-untyped-def]
-    repository, connection = storage
-    value = {"candidate_failure": "unverified_player_stats", "control": None}
-    first = asyncio.run(
-        repository.save_shadow_run("run", "league", CUTOFF, value, persisted_at=CUTOFF)
-    )
-    assert (
-        asyncio.run(repository.save_shadow_run("run", "league", CUTOFF, value, persisted_at=CUTOFF))
-        == first
-    )
-    assert asyncio.run(repository.load_value(first)) == value
-    with pytest.raises(HybridProjectionError, match="shadow_run_conflict"):
-        asyncio.run(
-            repository.save_shadow_run(
-                "run", "league", CUTOFF, {"candidate_failure": None}, persisted_at=CUTOFF
-            )
-        )
-    assert connection.execute("SELECT count(*) FROM hybrid_shadow_runs").fetchone()[0] == 1
+def test_runtime_schema_matches_the_deploy_migrations() -> None:
+    migrations = Path(__file__).resolve().parents[3] / "infra/cloudflare/migrations"
 
+    def schema(script: str) -> list[tuple[str, str]]:
+        connection = sqlite3.connect(":memory:")
+        connection.executescript(script)
+        return connection.execute(
+            "SELECT name, sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY name"
+        ).fetchall()
 
-def test_runtime_schema_matches_the_deploy_migration() -> None:
-    root = Path(__file__).resolve().parents[3]
-    path = root / "infra/cloudflare/migrations/0005_hybrid_runtime.sql"
-    assert path.read_text().strip() == HYBRID_RUNTIME_SCHEMA.strip()
+    deployed = "".join(
+        (migrations / name).read_text()
+        for name in ("0005_hybrid_runtime.sql", "0008_drop_hybrid_shadow_runs.sql")
+    )
+    assert schema(deployed) == schema(HYBRID_RUNTIME_SCHEMA)
 
 
 def test_prepared_history_is_unavailable_before_its_actual_publication(storage) -> None:  # type: ignore[no-untyped-def]

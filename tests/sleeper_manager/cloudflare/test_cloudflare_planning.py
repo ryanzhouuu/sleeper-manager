@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 import pytest
 
 from sleeper_manager.cloudflare.planning import collect_cloudflare_planning_inputs
+from sleeper_manager.cloudflare.projection_history import D1ProjectionHistory
 from sleeper_manager.cloudflare.providers import CloudflareESPNProvider
 from sleeper_manager.config import ManagerPolicy
 from sleeper_manager.decisions.weekly_plan import build_weekly_plan
@@ -18,7 +19,10 @@ from sleeper_manager.domain.runtime_policy import default_runtime_policy
 from sleeper_manager.integrations.nba.cached_provider import AsyncCachedNBAProvider
 from sleeper_manager.persistence.async_sqlite import AsyncSQLiteStateRepository
 from sleeper_manager.persistence.base import ProjectionObservationRecord
-from sleeper_manager.projections.live_baseline import ProjectionHistoryError
+from sleeper_manager.projections.live_baseline import (
+    DirectBaselineProjectionProvider,
+    ProjectionHistoryError,
+)
 from sleeper_manager.workflows.planning_inputs import build_live_team_week_state
 from sleeper_manager.workflows.planning_projections import project_live_targets
 from tests.paths import FIXTURES_DIR
@@ -92,24 +96,14 @@ def test_cloudflare_assembly_fails_closed_without_projection_history(tmp_path) -
         asyncio.run(exercise())
 
 
-@pytest.mark.parametrize("shadow", [False, True])
-def test_cloudflare_assembly_refreshes_live_evidence(tmp_path, monkeypatch, shadow) -> None:  # type: ignore[no-untyped-def]
+def test_cloudflare_assembly_refreshes_live_evidence(tmp_path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
     calls = []
 
     async def finish(manager, **kwargs):  # type: ignore[no-untyped-def]
-        calls.append(kwargs["policy"].hybrid_shadow_enabled)
-        assert manager.inputs.projections == ()
-        projected = await project_live_targets(
-            manager.projection_targets,
-            projection_provider=kwargs["control"],
-            scoring_policy=manager.inputs.league_profile.scoring,
-            decision_time=manager.decision_time,
-            availability={},
-            max_availability_age=kwargs["policy"].availability_max_age,
-        )
-        return replace(manager, inputs=replace(manager.inputs, projections=projected))
+        calls.append(manager)
+        return manager
 
-    monkeypatch.setattr("sleeper_manager.cloudflare.planning.finish_hybrid_shadow_planning", finish)
+    monkeypatch.setattr("sleeper_manager.cloudflare.planning.finish_hybrid_planning", finish)
 
     async def exercise():  # type: ignore[no-untyped-def]
         repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
@@ -138,11 +132,7 @@ def test_cloudflare_assembly_refreshes_live_evidence(tmp_path, monkeypatch, shad
             ),
             fetch,
             repository=repository,
-            policy=replace(
-                default_runtime_policy(history_version="history-v1"),
-                hybrid_shadow_enabled=shadow,
-                hybrid_history_version="hybrid-v1" if shadow else None,
-            ),
+            policy=default_runtime_policy(history_version="history-v1"),
             scheduled_at=NOW,
             clock=lambda: NOW,
         )
@@ -168,18 +158,20 @@ def test_cloudflare_assembly_refreshes_live_evidence(tmp_path, monkeypatch, shad
     assert "nba:team-schedule:team-home" in freshness
     assert "nba:injuries" in freshness
     assert "/v1/league/league-current/rosters" in fetch.paths
-    assert calls == ([True] if shadow else [])
+    assert calls == []
 
 
 @pytest.mark.parametrize("injury_status", [200, 503])
 def test_planning_refreshes_near_expiry_injuries_before_delayed_advice(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, injury_status: int
 ) -> None:
+    control: list[DirectBaselineProjectionProvider] = []
+
     async def finish(manager, **kwargs):  # type: ignore[no-untyped-def]
         cutoff = NOW + timedelta(minutes=3)
         projected = await project_live_targets(
             manager.projection_targets,
-            projection_provider=kwargs["control"],
+            projection_provider=control[0],
             scoring_policy=manager.inputs.league_profile.scoring,
             decision_time=cutoff,
             availability={},
@@ -191,7 +183,7 @@ def test_planning_refreshes_near_expiry_injuries_before_delayed_advice(
             inputs=replace(manager.inputs, projections=projected),
         )
 
-    monkeypatch.setattr("sleeper_manager.cloudflare.planning.finish_hybrid_shadow_planning", finish)
+    monkeypatch.setattr("sleeper_manager.cloudflare.planning.finish_hybrid_planning", finish)
 
     async def exercise():  # type: ignore[no-untyped-def]
         repository = AsyncSQLiteStateRepository(tmp_path / "state.db")
@@ -212,6 +204,10 @@ def test_planning_refreshes_near_expiry_injuries_before_delayed_advice(
                 ),
             )
         )
+        history = await D1ProjectionHistory.load_version(
+            repository, history_version="history-v1", loaded_at=NOW
+        )
+        control.append(DirectBaselineProjectionProvider(history))
         cached_at = NOW - timedelta(minutes=14, seconds=40)
         cached = AsyncCachedNBAProvider(
             CloudflareESPNProvider(FixtureFetch(), clock=lambda: cached_at),
@@ -229,7 +225,7 @@ def test_planning_refreshes_near_expiry_injuries_before_delayed_advice(
             repository=repository,
             policy=replace(
                 default_runtime_policy(history_version="history-v1"),
-                hybrid_shadow_enabled=True,
+                active_projection_provider="hybrid",
                 hybrid_history_version="hybrid-v1",
             ),
             scheduled_at=NOW,

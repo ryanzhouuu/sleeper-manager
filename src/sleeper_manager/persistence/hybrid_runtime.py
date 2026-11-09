@@ -1,6 +1,6 @@
-"""Persist immutable hybrid history references and shadow evidence beside runtime state."""
+"""Persist immutable hybrid history references beside runtime state."""
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
@@ -35,14 +35,6 @@ CREATE TABLE IF NOT EXISTS hybrid_history_versions (
     reference_time TEXT NOT NULL,
     published_at TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS hybrid_shadow_runs (
-    run_id TEXT PRIMARY KEY,
-    league_id TEXT NOT NULL,
-    cutoff TEXT NOT NULL,
-    persisted_at TEXT NOT NULL,
-    manifest_artifact_id TEXT NOT NULL REFERENCES hybrid_artifacts(artifact_id)
-);
-CREATE INDEX IF NOT EXISTS hybrid_shadow_cutoffs ON hybrid_shadow_runs(league_id, cutoff);
 """
 
 
@@ -191,39 +183,6 @@ class HybridRuntimeRepository:
         if artifact_id is None:
             return ()
         return decode_player_partition(await self.load_value(artifact_id), player_id)
-
-    async def save_shadow_run(
-        self,
-        run_id: str,
-        league_id: str,
-        cutoff: datetime,
-        manifest: Mapping[str, object],
-        *,
-        persisted_at: datetime,
-    ) -> str:
-        """Publish complete paired evidence atomically through its final immutable reference."""
-        require_aware(cutoff)
-        require_aware(persisted_at)
-        if persisted_at < cutoff:
-            raise HybridProjectionError("shadow_persistence_before_cutoff")
-        artifact_id = await self.save_value(manifest)
-        await self._sql._run(
-            "INSERT OR IGNORE INTO hybrid_shadow_runs VALUES (?, ?, ?, ?, ?)",
-            run_id,
-            league_id,
-            cutoff.astimezone(UTC).isoformat(),
-            persisted_at.astimezone(UTC).isoformat(),
-            artifact_id,
-        )
-        row = await self._sql._first("SELECT * FROM hybrid_shadow_runs WHERE run_id = ?", run_id)
-        if (
-            row is None
-            or row["manifest_artifact_id"] != artifact_id
-            or row["league_id"] != league_id
-            or datetime.fromisoformat(row["cutoff"]) != cutoff
-        ):
-            raise HybridProjectionError("hybrid_shadow_run_conflict")
-        return artifact_id
 
 
 class D1HybridRuntimeRepository(HybridRuntimeRepository):

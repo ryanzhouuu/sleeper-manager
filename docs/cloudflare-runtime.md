@@ -20,16 +20,15 @@ preserves an existing retry time. Stage/error categories are logged without payl
 Forecast capture exceeded the Workers
 Free plan's 10 ms CPU allowance before it could write a receipt, so this schedule
 requires the Workers Paid CPU allowance. Verify the first remote receipt after deploying.
-Worker logs and traces are enabled with query strings redacted. Shadow events contain
-run identities and failure counts; private roster evidence remains in D1 artifacts.
+Worker logs and traces are enabled with query strings redacted.
 Scheduled stage events log entry and completion for forecast capture, planning collection,
 and planning with delivery. Durations are wall time; use Cloudflare invocation metrics
 for CPU time. Workers clocks may remain fixed during synchronous computation, so a
 zero-duration projection stage does not establish negligible CPU usage. A stage entry
 without completion can identify interrupted work even when
 termination prevents a final summary.
-Collection also reports league synchronization, baseline history loading, manager and
-opponent evidence, baseline projection, candidate projection, and shadow persistence.
+Collection also reports league synchronization, baseline history loading, manager
+evidence, and hybrid projection.
 Candidate stages separate index loading, population preparation, forecast reads, and
 each player's partition loading, pool preparation, and projection. Repeated stage pairs
 show batch progress without logging player identities or private provider payloads.
@@ -118,20 +117,18 @@ identical conditional weights within fixed preparation; availability and partici
 remain game-specific. Decoded hybrid outcomes use a batch-local LRU capped at 8,192
 retained rows and 64 partitions, in addition to the active player's required history.
 
-State migration `0005_hybrid_runtime.sql` adds immutable compressed artifacts,
-prepared history versions, and shadow run references. History manifests are published
-only after their index, exact player outcomes, and original census partitions verify.
-Shadow evidence uses the state database; captured external forecasts remain in the
-separate forecast archive. The local SQLite adapter uses the same artifact contracts.
+State migration `0005_hybrid_runtime.sql` adds immutable compressed artifacts and
+prepared history versions. History manifests are published only after their index, exact
+player outcomes, and original census partitions verify. Captured external forecasts
+remain in the separate forecast archive. The local SQLite adapter uses the same artifact
+contracts. Migration `0008_drop_hybrid_shadow_runs.sql` removes the retired live shadow
+table; apply it after deploying code that no longer writes shadow runs.
 
-Runtime policy stores `hybrid_shadow_enabled` and `hybrid_history_version` separately
-from `active_projection_provider`. Existing policies default to shadow disabled and
-`direct_baseline` advice. Shadow activation requires a pinned prepared history version.
 `active_projection_provider` explicitly selects `direct_baseline` or `hybrid` advice.
-Hybrid advice also requires a pinned history version; it can run with shadow evaluation
-enabled or disabled. An empty baseline history is allowed only as a diagnostic control
-when hybrid supplies advice. Selected hybrid failures remain missing projections and
-never silently substitute baseline advice. Existing policies retain baseline defaults.
+Hybrid advice requires a pinned `hybrid_history_version`. Selected hybrid failures remain
+missing projections and never silently substitute baseline advice. Existing policies
+retain baseline defaults. Live shadow evaluation was retired: stored policies may still
+carry `hybrid_shadow_enabled: false`, and a policy that sets it to `true` is rejected.
 
 Prepare or synchronize indexed hybrid history with a sanitized dry-run first:
 
@@ -141,28 +138,21 @@ uv run python -m sleeper_manager.cloudflare.hybrid_sync_cli \
 ```
 
 Add `--apply` to upload to the state D1 database after applying its migrations.
-Add `--enable-shadow` to update the existing runtime policy after the uploaded
-artifacts verify. This preserves manager preferences and direct-baseline history;
-it preserves the explicit active-provider selection. `--local-db .local/state.db --apply` writes the
-same contracts to local SQLite. Dry-run never creates a database or activates policy.
+Publishing history never changes the runtime policy; pin the new version with the policy
+sync below. `--local-db .local/state.db --apply` writes the same contracts to local
+SQLite. Dry-run never creates a database or activates policy.
 The history reference cutoff and its actual publication time are retained separately;
 runtime reads reject a version published after the requested decision cutoff.
-Shadow runs likewise retain their decision cutoff and actual persistence time.
-When shadow is enabled, the runtime resolves the opponent and batches both rosters
-at one cutoff. Durable records pair control snapshots with candidate attempts,
-including source/fallback evidence, participation, donor weights, and exclusions.
-Shared large diagnostics are referenced by content hash. Candidate computation has
-a ten-minute async timeout in queued execution (60 seconds for inline execution);
-failures remain paired blockers. Persistence and opponent
-collection failures are logged explicitly and preserve valid manager control advice.
+Hybrid computation has a ten-minute async timeout in queued execution (60 seconds for
+inline execution); a timeout leaves every affected projection as an explicit gap.
 Due forecast capture runs before planning so that wake's stored revision can be read.
 Pre-tipoff planning is due one five-minute Cron interval before the configured move
 deadline (15 minutes before tipoff with the default 10-minute lead). This preserves
 the movement margin instead of collecting statuses when the deadline has already
 arrived. Live collection and the final advice cutoff use completed collection time;
-shadow work cannot preserve an earlier advice time after consuming that margin.
+hybrid projection cannot preserve an earlier advice time after consuming that margin.
 Lineup and Lock-In messages explain confirmed absences, provisional injury estimates,
-and unavailable official reports. Source hashes remain in projection/shadow diagnostics.
+and unavailable official reports. Source hashes remain in projection diagnostics.
 Visible availability changes revise notification identity; identical refreshed warnings
 deduplicate. Recommendation traces retain `availability_notes` and a separate
 `availability_material_hash`, preserving the underlying plan's material identity.
@@ -236,19 +226,18 @@ Live Lock-In evaluation consumes the resolved minimum-confidence threshold. Oper
 such as freshness windows and the pinned projection-history version remain runtime defaults
 unless changed in code.
 
-Configure advice and evaluation separately in that TOML file:
+Configure the advice provider in that TOML file:
 
 ```toml
 [projections]
 active_provider = "hybrid" # or "direct_baseline"
-shadow_enabled = true
 hybrid_history_version = "hybrid-runtime-v1-<verified-content-hash>"
 ```
 
-Hybrid advice or shadow requires the explicit published version. The initial history
+Hybrid advice requires the explicit published version. The initial history
 sync verifies newly selected hybrid artifacts, model, season, full-scoring policy, and
 nonempty eligible profiles before activating policy. An omitted `[projections]` table
-preserves an existing selection; an explicit table replaces it, including disabling shadow.
+preserves an existing selection; an explicit table replaces it.
 
 After initialization, change only the policy without rebuilding history or redeploying:
 

@@ -48,21 +48,18 @@ class PlayerPolicy(BaseModel):
 
 
 class ProjectionPolicy(BaseModel):
-    """Keep advice selection independent of evaluation and require explicit hybrid pinning."""
+    """Require explicit hybrid pinning instead of inferring a published history version."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
 
     active_provider: Literal["direct_baseline", "hybrid"] = "direct_baseline"
-    shadow_enabled: bool = Field(default=False, strict=True)
     hybrid_history_version: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def require_hybrid_history(self) -> "ProjectionPolicy":
         """Do not infer a history version from publication order or model eligibility."""
-        if (
-            self.active_provider == "hybrid" or self.shadow_enabled
-        ) and not self.hybrid_history_version:
-            raise ValueError("Hybrid advice or shadow requires hybrid_history_version")
+        if self.active_provider == "hybrid" and not self.hybrid_history_version:
+            raise ValueError("Hybrid advice requires hybrid_history_version")
         return self
 
 

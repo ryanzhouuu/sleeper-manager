@@ -200,7 +200,6 @@ async def sync_cloudflare_runtime_data(
         policy = replace(
             policy,
             hybrid_history_version=current.hybrid_history_version,
-            hybrid_shadow_enabled=current.hybrid_shadow_enabled,
             active_projection_provider=current.active_projection_provider,
         )
         policy = version_runtime_policy(policy)

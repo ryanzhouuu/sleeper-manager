@@ -1,4 +1,4 @@
-"""Shadow activation requires pinned evidence and cannot accidentally promote hybrid advice."""
+"""Hybrid advice requires pinned evidence; removed shadow evaluation cannot be re-enabled."""
 
 import json
 from dataclasses import replace
@@ -12,25 +12,26 @@ from sleeper_manager.domain.runtime_policy import (
 )
 
 
-def test_existing_runtime_envelopes_default_to_baseline_without_shadow() -> None:
+def test_existing_runtime_envelopes_default_to_baseline() -> None:
     policy = default_runtime_policy(history_version="control-history")
     raw = json.loads(policy.to_json())
-    for key in ("hybrid_history_version", "hybrid_shadow_enabled", "active_projection_provider"):
+    for key in ("hybrid_history_version", "active_projection_provider"):
         raw.pop(key)
     loaded = RuntimePolicy.from_json(policy.version, json.dumps(raw))
     assert loaded == policy
     assert loaded.active_projection_provider == "direct_baseline"
-    assert not loaded.hybrid_shadow_enabled
 
 
-def test_shadow_policy_round_trip_keeps_active_provider_separate() -> None:
+def test_stored_envelopes_with_shadow_disabled_still_load() -> None:
     policy = replace(
         default_runtime_policy(history_version="control-history"),
         hybrid_history_version="hybrid-runtime-hash",
-        hybrid_shadow_enabled=True,
+        active_projection_provider="hybrid",
     )
-    assert RuntimePolicy.from_json(policy.version, policy.to_json()) == policy
-    assert policy.active_projection_provider == "direct_baseline"
+    raw = json.loads(policy.to_json())
+    assert "hybrid_shadow_enabled" not in raw
+    raw["hybrid_shadow_enabled"] = False
+    assert RuntimePolicy.from_json(policy.version, json.dumps(raw)) == policy
 
 
 @pytest.mark.parametrize(

@@ -112,19 +112,14 @@ class RuntimePolicy:
     mapping_overrides: Mapping[str, str]
     manager_intent: ManagerIntent
     hybrid_history_version: str | None = None
-    hybrid_shadow_enabled: bool = False
     active_projection_provider: Literal["direct_baseline", "hybrid"] = "direct_baseline"
 
     def __post_init__(self) -> None:
-        if not isinstance(self.hybrid_shadow_enabled, bool):
-            raise RuntimePolicyError("Hybrid shadow selection must be a boolean")
         if self.hybrid_history_version is not None and (
             not isinstance(self.hybrid_history_version, str)
             or not self.hybrid_history_version.strip()
         ):
             raise RuntimePolicyError("Hybrid history version must be a non-empty string")
-        if self.hybrid_shadow_enabled and self.hybrid_history_version is None:
-            raise RuntimePolicyError("Hybrid shadow requires a pinned hybrid history version")
         if self.active_projection_provider not in ("direct_baseline", "hybrid"):
             raise RuntimePolicyError("Unknown active projection provider")
         if self.active_projection_provider == "hybrid" and self.hybrid_history_version is None:
@@ -184,6 +179,8 @@ class RuntimePolicy:
         extras = set(payload) - allowed
         if extras:
             raise RuntimePolicyError("Unknown runtime policy fields: " + ", ".join(sorted(extras)))
+        if payload.get("hybrid_shadow_enabled", False) is not False:
+            raise RuntimePolicyError("Live hybrid shadow evaluation is no longer supported")
         try:
             daily_plan_time = time.fromisoformat(_required_string(payload, "daily_plan_time"))
             mapping_overrides = payload.get("mapping_overrides", {})
@@ -214,7 +211,6 @@ class RuntimePolicy:
                 mapping_overrides=mapping_overrides,
                 manager_intent=manager_intent,
                 hybrid_history_version=payload.get("hybrid_history_version"),
-                hybrid_shadow_enabled=payload.get("hybrid_shadow_enabled", False),
                 active_projection_provider=payload.get(
                     "active_projection_provider", "direct_baseline"
                 ),
@@ -236,7 +232,6 @@ class RuntimePolicy:
             "mapping_overrides": dict(self.mapping_overrides),
             "manager_intent": self.manager_intent.to_json(),
             "hybrid_history_version": self.hybrid_history_version,
-            "hybrid_shadow_enabled": self.hybrid_shadow_enabled,
             "active_projection_provider": self.active_projection_provider,
         }
         return json.dumps(payload, sort_keys=True, separators=(",", ":"))
