@@ -66,7 +66,12 @@ D1 schedule upserts retry recognized transient connection/reset failures at most
 twice with short jittered backoff. Work claims and other writes do not gain those retries.
 Postgame wakes fetch ESPN game summaries directly to detect finals, score rostered
 players from Sleeper's per-game stats, wait while a played game's row is missing or
-empty, stabilize finals, and may send Lock, Pass, or unavailable-warning notifications. Lineup notifications include
+empty, stabilize finals, and may send Lock, Pass, or unavailable-warning notifications.
+Once every due row for a watched game is actionable with a stable score and recorded advice,
+each five-minute wake reads only Sleeper's matchup legs. It skips collection and replanning
+while Sleeper's submitted locks match the stored Sleeper-synced rows, and runs a full pass
+when locks differ, Sleeper is unavailable, or 30 minutes have passed since the last full pass.
+Lineup notifications include
 advice without action links. Scheduled daily no-change results send one
 `daily_plan_completed` confirmation per manager-local day, including when daily and
 pre-tipoff work coalesce. The confirmation preserves availability warnings, uses

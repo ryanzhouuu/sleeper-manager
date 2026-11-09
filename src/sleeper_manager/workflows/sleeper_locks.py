@@ -171,14 +171,14 @@ def reconcile_sleeper_locks(
             missing.append((player_id, sleeper_game_id))
             continue
         matched.add(index)
-        if not _synced(rows[index]):
+        if not is_sleeper_synced_lock(rows[index]):
             score = (lock_scores or {}).get(player_id)
             updates.append(_locked(rows[index], leg, roster_positions, sleeper_game_id, score, now))
     vanished: list[tuple[str, str]] = []
     for index, row in enumerate(rows):
         if index in matched:
             continue
-        if _synced(row):
+        if is_sleeper_synced_lock(row):
             vanished.append((row.key.player_id, row.key.game_id))
         elif _stale_manual_decision(row, now):
             updates.append(reported_decision(row, ManagerAction.NOT_LOCKED, now, actual_slot=None))
@@ -194,7 +194,7 @@ def lock_source(record: LockInOpportunityRecord) -> str | None:
     return source if isinstance(source, str) else None
 
 
-def _synced(record: LockInOpportunityRecord) -> bool:
+def is_sleeper_synced_lock(record: LockInOpportunityRecord) -> bool:
     return (
         record.status is LockInOpportunityStatus.ACKNOWLEDGED_LOCKED
         and lock_source(record) == LOCK_SOURCE_SLEEPER

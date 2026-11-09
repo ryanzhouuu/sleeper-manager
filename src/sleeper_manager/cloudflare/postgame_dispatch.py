@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Protocol
 
 from sleeper_manager.cloudflare.planning import CloudflarePlanningAssembly
+from sleeper_manager.cloudflare.postgame_gate import settled_postgame_unchanged
 from sleeper_manager.cloudflare.scheduler_types import (
     FailureCategory,
     ScheduledRunStatus,
@@ -70,6 +71,17 @@ async def dispatch_postgame_work(
             outcome=ScheduledRunStatus.BLOCKED,
             failure=FailureCategory.CONFIGURATION,
             detail="direct_game_summary_source_missing",
+        )
+    if await settled_postgame_unchanged(
+        work_items, repository=repository, lock_reader=lock_reader, now=clock()
+    ):
+        return await _finish_all(
+            repository,
+            work_items,
+            scheduled_at=scheduled_at,
+            correlation_id=correlation_id,
+            outcome=ScheduledRunStatus.NO_ACTION,
+            detail="settled_unchanged",
         )
     try:
         assembly = await collect(
