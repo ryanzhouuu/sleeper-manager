@@ -6,6 +6,7 @@ from datetime import timedelta
 import pytest
 
 from sleeper_manager.decisions.team_recommendation import build_team_recommendation
+from sleeper_manager.decisions.weekly_plan import build_weekly_plan
 from sleeper_manager.decisions.win_probability import Finish, WinObjective
 from sleeper_manager.domain.lock_in import LockInDecisionKind
 from sleeper_manager.domain.planning import ObservedStarter, PlanningGameStatus, StarterSlot
@@ -79,3 +80,35 @@ def test_the_plan_still_reports_expected_points(opponent: float, expected: float
     )
 
     assert plan.expected_terminal_score == pytest.approx(expected, abs=6)
+
+
+def _steady_or_boom_start():
+    """One open slot: a certain 30 or a 0-or-70 game (35 expected), both tipping off soon."""
+    start = NOW + timedelta(hours=1)
+    return _state(
+        (
+            _opportunity("steady", "g1", start, ("PG",), ((30, 1),)),
+            _opportunity("boom", "g2", start, ("PG",), ((0, 1), (70, 1))),
+        ),
+        observed=(ObservedStarter(0, "steady", ("PG",)),),
+        starter_slots=(StarterSlot(0, "G"),),
+    )
+
+
+def _starter(objective: WinObjective | None) -> str | None:
+    plan = build_weekly_plan(
+        _steady_or_boom_start(), policy=replace(PLAN_POLICY, win_objective=objective)
+    )
+    return plan.desired_assignments[0].player_id
+
+
+def test_expected_points_start_the_higher_mean() -> None:
+    assert _starter(None) == "boom"
+
+
+def test_a_lead_starts_the_certain_score() -> None:
+    assert _starter(WinObjective(Finish(25.0, 0.0))) == "steady"
+
+
+def test_a_deficit_starts_the_player_who_can_still_win() -> None:
+    assert _starter(WinObjective(Finish(50.0, 0.0))) == "boom"

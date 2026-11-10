@@ -60,6 +60,9 @@ def score_weekly_options(
 ) -> WeeklyPlanDecision:
     """Rank current-batch assignments against simulated continuation value.
 
+    A win objective keeps the assignments within its tolerance of the best win chance and ranks
+    those by expected points; simulated later Lock/Pass choices still maximize points.
+
     Joint comparison can defer the diagnostic bound until its selected decision is finalized.
 
     Raises:
@@ -146,7 +149,10 @@ def score_weekly_options(
             seed=seed ^ 0x504F5354,
         )
     )
-    samples: dict[AssignmentResult, tuple[float, ...]] | None = {} if capture_samples else None
+    objective = policy_config.win_objective
+    samples: dict[AssignmentResult, tuple[float, ...]] | None = (
+        {} if capture_samples or objective is not None else None
+    )
     terminal_values = recourse_terminal_values(
         assignments_to_evaluate,
         candidates=candidates,
@@ -176,17 +182,35 @@ def score_weekly_options(
         )
         for assignment in assignments
     )
+    contenders = evaluated
+    if objective is not None:
+        assert samples is not None
+        chances = {item.result: objective.chance(samples[item.result]) for item in evaluated}
+        best_chance = max(chances.values())
+        contenders = tuple(
+            item
+            for item in evaluated
+            if chances[item.result] >= best_chance - objective.tie_tolerance
+        )
     ordered = select_top_evaluations(
-        evaluated,
+        contenders,
         tie_tolerance=policy_config.tie_tolerance,
         selection_limit=2,
     )
+    if objective is not None and len(ordered) < 2 and len(contenders) < len(evaluated):
+        ordered = (
+            *ordered,
+            max(
+                (item for item in evaluated if item not in contenders),
+                key=lambda item: chances[item.result],
+            ),
+        )
     selected_evaluation = ordered[0]
     recovery = None
     baseline_target = completions[selected_evaluation.result]
     best_count = sum(item.player_id is not None for item in selected_evaluation.result.assignments)
     recovery_rank: tuple[object, ...] | None = None
-    for candidate in evaluated:
+    for candidate in contenders:
         if candidate.expected_terminal_value + 1e-6 < selected_evaluation.expected_terminal_value:
             continue
         count = sum(item.player_id is not None for item in candidate.result.assignments)
@@ -211,7 +235,7 @@ def score_weekly_options(
         baseline,
         state,
     )
-    if samples is not None:
+    if capture_samples and samples is not None:
         selected = replace(selected, scenario_terminal_scores=samples[selected_evaluation.result])
     if recovery is not None:
         selected = replace(selected, recovery_obligations=(recovery,))
