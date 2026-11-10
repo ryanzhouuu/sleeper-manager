@@ -140,3 +140,29 @@ def test_manager_intent_rejects_nonempty_legacy_protected_ids() -> None:
 
     with pytest.raises(RuntimePolicyError, match="removed from version one"):
         RuntimePolicy.from_json("runtime-policy-v1", json.dumps(decoded))
+
+
+def test_win_chance_objective_round_trips_and_points_stays_implicit() -> None:
+    policy = default_runtime_policy(history_version="history-2026")
+    win = policy.__class__(
+        **{
+            **{name: getattr(policy, name) for name in policy.__dataclass_fields__},
+            "manager_intent": ManagerIntent(
+                **{
+                    **{
+                        name: getattr(policy.manager_intent, name)
+                        for name in ManagerIntent.__dataclass_fields__
+                    },
+                    "objective": "win_chance",
+                }
+            ),
+        }
+    )
+
+    assert RuntimePolicy.from_json(win.version, win.to_json()) == win
+    assert "objective" not in json.loads(policy.to_json())["manager_intent"]
+
+
+def test_manager_intent_rejects_an_unknown_objective() -> None:
+    with pytest.raises(RuntimePolicyError):
+        ManagerIntent.from_json({"version": "v", "objective": "vibes"})

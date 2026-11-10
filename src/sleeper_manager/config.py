@@ -31,6 +31,7 @@ class DecisionPolicy(BaseModel):
 
     preset: PolicyPreset = "balanced"
     minimum_confidence: float = Field(default=0.70, ge=0, le=1)
+    objective: Literal["points", "win_chance"] | None = None
 
 
 class NotificationPolicy(BaseModel):
@@ -84,6 +85,7 @@ class ManagerPolicy(BaseModel):
         return ManagerIntent(
             preset=self.decision.preset,
             minimum_confidence=self.decision.minimum_confidence,
+            objective=self.decision.objective or "points",
             quiet_hours_start=self.notifications.quiet_hours_start,
             quiet_hours_end=self.notifications.quiet_hours_end,
             urgent_actions_override_quiet_hours=(

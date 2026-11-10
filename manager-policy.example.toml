@@ -1,6 +1,9 @@
 [decision]
 preset = "balanced"
 minimum_confidence = 0.70
+# "win_chance" picks starters, locks, and passes by the chance of beating this week's
+# opponent instead of expected points; without an opponent projection it uses points.
+# objective = "points"
 
 [notifications]
 # Accepted and stored; quiet-hour suppression is not enforced yet.

@@ -10,6 +10,7 @@ from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 PolicyPreset = Literal["conservative", "balanced", "aggressive"]
+DecisionObjective = Literal["points", "win_chance"]
 
 
 class RuntimePolicyError(ValueError):
@@ -26,8 +27,11 @@ class ManagerIntent:
     quiet_hours_end: str
     urgent_actions_override_quiet_hours: bool
     version: str
+    objective: DecisionObjective = "points"
 
     def __post_init__(self) -> None:
+        if self.objective not in ("points", "win_chance"):
+            raise RuntimePolicyError("Manager intent objective must be points or win_chance")
         if self.preset not in ("conservative", "balanced", "aggressive"):
             raise RuntimePolicyError(
                 "Manager intent preset must be conservative, balanced, or aggressive"
@@ -59,6 +63,7 @@ class ManagerIntent:
             "urgent_actions_override_quiet_hours",
             "protected_sleeper_ids",
             "version",
+            "objective",
         }
         extras = set(payload) - allowed
         if extras:
@@ -86,6 +91,7 @@ class ManagerIntent:
             quiet_hours_end=_required_string(payload, "quiet_hours_end", default="07:00"),
             urgent_actions_override_quiet_hours=quiet_override,
             version=_required_string(payload, "version"),
+            objective=_required_string(payload, "objective", default="points"),  # type: ignore[arg-type]
         )
 
     def to_json(self) -> dict[str, object]:
@@ -96,6 +102,7 @@ class ManagerIntent:
             "quiet_hours_end": self.quiet_hours_end,
             "urgent_actions_override_quiet_hours": self.urgent_actions_override_quiet_hours,
             "version": self.version,
+            **({} if self.objective == "points" else {"objective": self.objective}),
         }
 
 
@@ -290,6 +297,7 @@ def _positive_number(payload: Mapping[str, object], key: str) -> float:
 
 __all__ = (
     "ManagerIntent",
+    "DecisionObjective",
     "PolicyPreset",
     "RuntimePolicy",
     "RuntimePolicyError",

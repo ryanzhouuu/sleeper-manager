@@ -98,3 +98,18 @@ def test_to_manager_intent_translates_surviving_fields() -> None:
     assert intent.quiet_hours_end == "05:00"
     assert intent.urgent_actions_override_quiet_hours is False
     assert intent.version == policy.version
+
+
+def test_win_chance_objective_reaches_the_manager_intent(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    path = tmp_path / "policy.toml"
+    path.write_text('[decision]\nobjective = "win_chance"\n')
+
+    policy = load_manager_policy(path)
+
+    assert policy.to_manager_intent().objective == "win_chance"
+    assert policy.version != ManagerPolicy().version
+
+
+def test_an_unset_objective_keeps_existing_policy_versions() -> None:
+    assert ManagerPolicy().to_manager_intent().objective == "points"
+    assert ManagerPolicy(decision={"objective": None}).version == ManagerPolicy().version
