@@ -1,7 +1,7 @@
 """Observe direct ESPN finals and deliver coordinated team advice from stable scores."""
 
 import json
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
 from sleeper_manager.decisions.lock_in import ScoreMaximizingLockInPolicy
@@ -34,6 +34,15 @@ from sleeper_manager.workflows.recommendation_state import refreshed_team_state
 from sleeper_manager.workflows.sleeper_locks import SleeperLockReader, with_sleeper_locks
 
 _RECHECK_DELAY = timedelta(minutes=5)
+
+
+@dataclass(frozen=True, slots=True)
+class PostgameWait:
+    """A claimed game whose current summary cannot count as a final poll."""
+
+    opportunities: tuple[LockInOpportunityRecord, ...]
+    reason: str
+    active: bool
 
 
 async def run_postgame_lock_in(
@@ -145,6 +154,43 @@ async def observe_postgame(
     return tuple(updated)
 
 
+async def read_postgame_wait(
+    game_id: str,
+    opportunities: tuple[LockInOpportunityRecord, ...],
+    *,
+    now: datetime,
+    fetch_summary: DirectGameSummarySource,
+) -> PostgameWait | None:
+    """Explain why a game must keep waiting without writing; None when a poll could advance."""
+
+    result = await fetch_summary(game_id, scored_players(opportunities))
+    if any(row.action_deadline <= max(now, result.quality.retrieved_at) for row in opportunities):
+        return None
+    reason = summary_wait_reason(result, opportunities)
+    if reason is None:
+        return None
+    return PostgameWait(opportunities, reason, result.records.game.status is GameStatus.IN_PROGRESS)
+
+
+async def defer_postgame_wait(
+    wait: PostgameWait,
+    *,
+    repository: AsyncRuntimeStateRepository,
+    decision_time: datetime,
+    recheck_from: datetime,
+) -> None:
+    """Persist Wait evidence due again by the next scheduled wake."""
+
+    await _defer_opportunities(
+        repository,
+        wait.opportunities,
+        decision_time=decision_time,
+        reason=wait.reason,
+        active=wait.active,
+        recheck_from=recheck_from,
+    )
+
+
 async def recommend_postgame_batch(
     inputs: LivePlanningInputs,
     stable: tuple[LockInOpportunityRecord, ...],
@@ -186,6 +232,7 @@ async def _defer_opportunities(
     decision_time: datetime,
     reason: str,
     active: bool,
+    recheck_from: datetime | None = None,
 ) -> None:
     """Persist Wait evidence without emitting a routine notification."""
 
@@ -195,7 +242,7 @@ async def _defer_opportunities(
             status=(
                 LockInOpportunityStatus.ACTIVE if active else LockInOpportunityStatus.FINALIZING
             ),
-            next_check_at=decision_time + _RECHECK_DELAY,
+            next_check_at=(recheck_from or decision_time) + _RECHECK_DELAY,
             trace_json=json.dumps({"reason_codes": [reason]}, sort_keys=True),
             updated_at=decision_time,
         )
@@ -210,7 +257,10 @@ __all__ = (
     "LOCK_IN_DECISION_TYPE",
     "LOCK_IN_WARNING_TYPE",
     "PostgameLockInResult",
+    "PostgameWait",
+    "defer_postgame_wait",
     "observe_postgame",
+    "read_postgame_wait",
     "recommend_postgame_batch",
     "run_postgame_lock_in",
     "summary_fingerprint",

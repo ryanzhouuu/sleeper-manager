@@ -90,7 +90,7 @@ def test_all_due_finals_are_saved_before_one_team_plan(
             open_sleeper_url="https://example.test",
             fetch_game_summary=fetch,
         )
-        assert sorted(fetched) == ["g1", "g2"]
+        assert sorted(set(fetched)) == ["g1", "g2"]
         assert planner_calls == [{"g1", "g2"}]
         postgame_attempts = [
             attempt for attempt in result.attempts if attempt.kind is DueWorkKind.POSTGAME

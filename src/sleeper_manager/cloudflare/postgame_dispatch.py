@@ -9,7 +9,7 @@ from typing import Protocol
 
 from sleeper_manager.cloudflare.decision_objective import planning_win_objective
 from sleeper_manager.cloudflare.planning import CloudflarePlanningAssembly
-from sleeper_manager.cloudflare.postgame_gate import settled_postgame_unchanged
+from sleeper_manager.cloudflare.postgame_gate import unchanged_postgame_detail
 from sleeper_manager.cloudflare.scheduler_types import (
     FailureCategory,
     ScheduledRunStatus,
@@ -73,16 +73,22 @@ async def dispatch_postgame_work(
             failure=FailureCategory.CONFIGURATION,
             detail="direct_game_summary_source_missing",
         )
-    if await settled_postgame_unchanged(
-        work_items, repository=repository, lock_reader=lock_reader, now=clock()
-    ):
+    skipped = await unchanged_postgame_detail(
+        work_items,
+        repository=repository,
+        lock_reader=lock_reader,
+        fetch_summary=fetch_summary,
+        now=clock(),
+        recheck_from=scheduled_at,
+    )
+    if skipped is not None:
         return await _finish_all(
             repository,
             work_items,
             scheduled_at=scheduled_at,
             correlation_id=correlation_id,
             outcome=ScheduledRunStatus.NO_ACTION,
-            detail="settled_unchanged",
+            detail=skipped,
         )
     try:
         assembly = await collect(

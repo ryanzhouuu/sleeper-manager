@@ -89,7 +89,10 @@ close calls only by player and game, so shifting confidences do not re-send the 
 Once every due row for a watched game is actionable with a stable score and recorded advice,
 each five-minute wake reads only Sleeper's matchup legs. It skips collection and replanning
 while Sleeper's submitted locks match the stored Sleeper-synced rows, and runs a full pass
-when locks differ or Sleeper is unavailable. Scheduled daily, pre-tipoff, and other games'
+when locks differ or Sleeper is unavailable. Before collecting, each wake also reads the ESPN
+summary of every unsettled claimed game; when each one is still in progress, incomplete, or
+missing a rostered player, it records that wait, due again at the next wake, and skips collection.
+Wakes that do collect read those summaries again after collection. Scheduled daily, pre-tipoff, and other games'
 postgame runs still replan settled games with fresh injury and lineup evidence.
 Lineup notifications include
 advice without action links. Scheduled daily no-change results send one

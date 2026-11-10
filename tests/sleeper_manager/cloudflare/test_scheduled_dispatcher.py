@@ -459,7 +459,7 @@ def test_forecast_capture_does_not_change_the_planning_summary() -> None:
 
 
 def test_due_postgame_watch_fetches_espn_summary_directly(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """Claimed postgame work must poll ESPN once and keep the five-minute watch open."""
+    """An unfinished game polls ESPN once, skips collection, and keeps the watch open."""
 
     async def exercise() -> None:
         repository, sender, notifications = _workflow(tmp_path, clock=lambda: NOW)
@@ -506,7 +506,7 @@ def test_due_postgame_watch_fetches_espn_summary_directly(tmp_path) -> None:  # 
             "league-1", 1, decision_type="live_lock_in"
         )
         assert lock_in == ()
-        assert calls == [postgame_at]
+        assert calls == []
 
     asyncio.run(exercise())
 
