@@ -6,8 +6,12 @@ from dataclasses import replace
 from datetime import datetime
 
 from sleeper_manager.cloudflare.active_hybrid import apply_active_hybrid
+from sleeper_manager.cloudflare.hybrid_projection_cache import ForecastReader, project_with_cache
 from sleeper_manager.cloudflare.stage_logging import timed_stage
+from sleeper_manager.domain.forecast_capture import ForecastRetrievalResult
 from sleeper_manager.domain.runtime_policy import RuntimePolicy
+from sleeper_manager.integrations.sleeper.forecast_fetch import season_forecast_source
+from sleeper_manager.persistence.base import AsyncRuntimeStateRepository
 from sleeper_manager.persistence.forecast_repository import (
     AsyncForecastArchiveRepository,
     ForecastArchiveIntegrityError,
@@ -16,6 +20,7 @@ from sleeper_manager.persistence.hybrid_runtime import HybridRuntimeRepository
 from sleeper_manager.projections.hybrid_config import HybridProjectionError
 from sleeper_manager.projections.hybrid_model import HybridProjectionResult
 from sleeper_manager.projections.hybrid_runtime_provider import HybridRuntimeProjectionProvider
+from sleeper_manager.workflows.forecast_reader import read_player_forecasts_async
 from sleeper_manager.workflows.planning_collection import CollectedLiveEvidence
 
 HYBRID_TIMEOUT_SECONDS = 60
@@ -29,6 +34,8 @@ async def finish_hybrid_planning(
     archive: AsyncForecastArchiveRepository | None,
     clock: Callable[[], datetime],
     timeout_seconds: float | None = None,
+    cache: AsyncRuntimeStateRepository | None = None,
+    timezone_name: str | None = None,
 ) -> CollectedLiveEvidence:
     """Failed or missing candidates stay explicit gaps; no baseline advice is substituted."""
     assert policy.hybrid_history_version is not None
@@ -55,13 +62,25 @@ async def finish_hybrid_planning(
     )
     try:
         with timed_stage("hybrid_projection"):
-            attempts = await asyncio.wait_for(
+            scoring = manager.inputs.league_profile.scoring
+            batch = (
                 candidate.project_batch(
+                    future, scoring_policy=scoring, decision_time=cutoff, availability=availability
+                )
+                if cache is None or timezone_name is None
+                else project_with_cache(
+                    candidate,
                     future,
-                    scoring_policy=manager.inputs.league_profile.scoring,
+                    cache=cache,
+                    scoring_policy=scoring,
                     decision_time=cutoff,
                     availability=availability,
-                ),
+                    read_forecasts=_forecast_reader(archive),
+                    timezone_name=timezone_name,
+                )
+            )
+            attempts = await asyncio.wait_for(
+                batch,
                 timeout=HYBRID_TIMEOUT_SECONDS if timeout_seconds is None else timeout_seconds,
             )
     except Exception as error:
@@ -81,3 +100,17 @@ async def finish_hybrid_planning(
         updated, attempts, policy=policy, cutoff=cutoff, availability=availability
     )
     return replace(updated, decision_time=clock(), warnings=tuple(warnings))
+
+
+def _forecast_reader(archive: AsyncForecastArchiveRepository | None) -> ForecastReader | None:
+    if archive is None:
+        return None
+
+    async def read(
+        season: int, players: tuple[str, ...], cutoff: datetime
+    ) -> dict[str, ForecastRetrievalResult]:
+        source = season_forecast_source(str(season), "regular")
+        rows = await read_player_forecasts_async(archive, source, players, cutoff)
+        return {row.player_id: row for row in rows}
+
+    return read

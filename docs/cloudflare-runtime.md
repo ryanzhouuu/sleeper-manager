@@ -172,6 +172,13 @@ sync below. `--local-db .local/state.db --apply` writes the same contracts to lo
 SQLite. Dry-run never creates a database or activates policy.
 The history reference cutoff and its actual publication time are retained separately;
 runtime reads reject a version published after the requested decision cutoff.
+Live hybrid snapshots are cached in the state database's `nba_cache` table, one row per
+history version, player, and game, until manager-local midnight. A later pass reuses a row only
+when its evidence hash matches: history version, model config, scoring version, target, the
+qualified forecast center or its rejection, and an official game report that is fresh at the
+cutoff. Within the day this keeps the earlier cutoff's recency decay instead of recomputing it,
+and identical snapshots let an unchanged team state skip its replan. Failed projections and
+confirmed absences are not cached, and cache read or write failures fall back to projecting.
 Hybrid computation has a ten-minute async timeout in queued execution (60 seconds for
 inline execution); a timeout leaves every affected projection as an explicit gap.
 Due forecast capture runs before planning so that wake's stored revision can be read.

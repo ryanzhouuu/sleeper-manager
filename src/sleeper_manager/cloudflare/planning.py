@@ -163,6 +163,8 @@ async def collect_cloudflare_planning_inputs(
             archive=archive,
             clock=tick,
             timeout_seconds=hybrid_timeout_seconds,
+            cache=repository,
+            timezone_name=policy.manager_timezone,
         )
 
     async def collect_opponent() -> CollectedLiveEvidence | None:
