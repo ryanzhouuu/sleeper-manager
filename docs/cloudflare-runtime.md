@@ -81,6 +81,11 @@ twice with short jittered backoff. Work claims and other writes do not gain thos
 Postgame wakes fetch ESPN game summaries directly to detect finals, score rostered
 players from Sleeper's per-game stats, wait while a played game's row is missing or
 empty, stabilize finals, and may send Lock, Pass, or unavailable-warning notifications.
+A final whose Lock and Pass confidences both fall below the minimum is sent as "Up to you":
+the message gives the lock slot, each side's projected week, the share of simulations in
+which each side finishes ahead, and each side's win chance under a win objective. Its
+`up_to_you` advice record settles the row like Lock or Pass advice. Plan identity counts
+close calls only by player and game, so shifting confidences do not re-send the message.
 Once every due row for a watched game is actionable with a stable score and recorded advice,
 each five-minute wake reads only Sleeper's matchup legs. It skips collection and replanning
 while Sleeper's submitted locks match the stored Sleeper-synced rows, and runs a full pass

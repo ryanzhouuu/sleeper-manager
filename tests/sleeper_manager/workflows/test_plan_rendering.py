@@ -208,8 +208,68 @@ def test_undecided_finals_project_the_all_pass_total() -> None:
 
     message = render_weekly_plan(plan, player_names=NAMES).message
 
-    assert message.split("\n\n")[1] == (
-        "Projected week: 100.0 pts if Bob and Alice are passed; lock or pass is too close to call."
+    assert "Projected week: 100.0 pts if Bob and Alice are passed." in message.split("\n\n")
+
+
+def test_undecided_finals_are_left_to_the_manager_with_both_sides() -> None:
+    """Close calls are notified as "Up to you" with each side's odds and projected week."""
+    assignments = (_assignment(0, "G", "p1"), _assignment(1, "UTIL", "p2"))
+    plan = _plan(
+        status=PlanStatus.NO_ACTION,
+        observed_assignments=assignments,
+        desired_assignments=assignments,
+        moves=(),
+        expected_terminal_score=None,
+        undecided_scores=(
+            UndecidedScore(
+                "p1",
+                "g1",
+                0.54,
+                0.46,
+                score=42.5,
+                deadline=DEADLINE,
+                lock_slot_index=0,
+                lock_slot_position="G",
+                pass_expected_score=429.84,
+                lock_expected_score=431.21,
+            ),
+            UndecidedScore(
+                "p2",
+                "g2",
+                0.66,
+                0.34,
+                score=62.2,
+                deadline=DEADLINE + timedelta(hours=1),
+                lock_slot_index=1,
+                lock_slot_position="UTIL",
+                pass_expected_score=430.0,
+                lock_expected_score=428.4,
+                pass_win_chance=0.613,
+                lock_win_chance=0.588,
+            ),
+        ),
+    )
+
+    rendered = render_weekly_plan(plan, player_names=NAMES, local_timezone=UTC)
+
+    assert rendered.title == "Lock-In: up to you"
+    sections = rendered.message.split("\n\n")
+    assert sections[0] == "Decide before Mon 12:50 PM UTC"
+    assert sections[2] == (
+        "• Up to you on Bob's 42.50 pts. Lock in G: 431.2 pts projected, better in 46%. "
+        "Pass: 429.8 pts projected, better in 54%.\n"
+        "• Up to you on Alice's 62.20 pts. Lock in UTIL: 428.4 pts projected, better in 34%, "
+        "59% to win. Pass: 430.0 pts projected, better in 66%, 61% to win."
+    )
+
+
+def test_an_unlockable_undecided_final_says_it_stays_unlocked() -> None:
+    plan = _plan(
+        undecided_scores=(UndecidedScore("p1", "g1", 1.0, 0.0, score=12.0, deadline=DEADLINE),),
+    )
+
+    assert "• Bob's 12.00 pts stays unlocked; no open slot can take it." in (
+        render_weekly_plan(plan, player_names=NAMES).message
     )
 
 

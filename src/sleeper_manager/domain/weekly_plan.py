@@ -174,6 +174,14 @@ class WeeklyPlan:
         return sha256(repr(payload).encode()).hexdigest()
 
     def _material_components(self) -> tuple[object, ...]:
+        """Undecided finals count by identity only, so shifting confidences never re-notify.
+
+        Plans without them keep the identity they had before undecided finals were advised.
+        """
+        undecided = tuple((row.player_id, row.game_id) for row in self.undecided_scores)
+        return (*self._decided_material_components(), *((undecided,) if undecided else ()))
+
+    def _decided_material_components(self) -> tuple[object, ...]:
         return (
             "weekly-plan-material-v3",
             self.desired_assignments,

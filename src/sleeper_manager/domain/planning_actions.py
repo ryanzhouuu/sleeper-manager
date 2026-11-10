@@ -44,12 +44,31 @@ class PlannedScoreAction:
 
 @dataclass(frozen=True, slots=True)
 class UndecidedScore:
-    """Keep both confidences for a final too close to advise, so later replans can compare."""
+    """A final too close to advise, kept with both sides so the manager can choose.
+
+    Confidences are the share of simulations in which each side beats the other. Projections
+    are the expected week totals, and win chances are set only under a win objective. The
+    lock fields are None when no lineup placement can lock the final.
+    """
 
     player_id: str
     game_id: str
     pass_confidence: float
     lock_confidence: float
+    score: float | None = None
+    deadline: datetime | None = None
+    lock_slot_index: int | None = None
+    lock_slot_position: str | None = None
+    pass_expected_score: float | None = None
+    lock_expected_score: float | None = None
+    pass_win_chance: float | None = None
+    lock_win_chance: float | None = None
+
+    def __post_init__(self) -> None:
+        if self.deadline is not None:
+            _require_aware(self.deadline, "Undecided score deadline")
+        if (self.lock_slot_index is None) != (self.lock_slot_position is None):
+            raise PlanningStateError("An undecided lock slot needs both its index and position")
 
 
 @dataclass(frozen=True, slots=True)

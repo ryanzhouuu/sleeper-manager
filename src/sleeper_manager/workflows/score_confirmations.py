@@ -2,7 +2,7 @@
 
 import json
 from collections.abc import Mapping
-from dataclasses import replace
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from typing import Any
 
@@ -33,10 +33,11 @@ async def prepare_score_confirmations(
     results = []
     parent_trace = json.loads(trace_json)
     material = parent_trace.get("availability_material_hash", plan.material_hash)
-    for action in plan.score_actions:
+    names = player_names or {}
+    for target in _confirmation_targets(plan):
         key = (
             f"{plan.league_id}:{plan.week}:{plan.roster_id}:team-score:"
-            f"{material}:{action.player_id}:{action.game_id}"
+            f"{material}:{target.player_id}:{target.game_id}"
         )
         base = key
         revision = 0
@@ -46,42 +47,36 @@ async def prepare_score_confirmations(
                 break
             revision += 1
             key = f"{base}:r{revision}"
-        fragment: dict[str, object] = {"schema_version": 1}
-        if action.kind is LockInDecisionKind.LOCK:
-            fragment.update(
-                slot_index=action.slot_index,
-                slot_position=action.slot_position,
-                accepted_fantasy_score=action.score,
-            )
-        player_name = (player_names or {}).get(action.player_id, action.player_id)
+        player_name = names.get(target.player_id, target.player_id)
         trace = {
-            "kind": action.kind.value,
-            "player_name": (player_names or {}).get(action.player_id, action.player_id),
-            "observed_score": action.score,
+            "kind": target.kind,
+            "player_name": player_name,
+            "observed_score": target.score,
             "expected_terminal_score": plan.expected_terminal_score,
-            "acknowledgement": fragment,
+            "acknowledgement": target.acknowledgement,
             "team_plan": parent_trace,
             "availability_notes": parent_trace.get("availability_notes", []),
+            **target.extra,
         }
         child = RecommendationRecord(
             recommendation_id=recommendation_id_for(key),
             idempotency_key=key,
             league_id=plan.league_id,
             fantasy_week=plan.week,
-            player_id=action.player_id,
-            game_id=action.game_id,
+            player_id=target.player_id,
+            game_id=target.game_id,
             decision_type="live_lock_in",
-            title=f"{action.kind.value.title()} {player_name}?",
+            title=target.title(player_name),
             message=message,
-            deadline=action.deadline,
+            deadline=target.deadline,
             policy_version=plan.manager_policy_version,
             created_at=now,
             trace_json=json.dumps(trace, sort_keys=True, separators=(",", ":")),
         )
         for old in pending:
             if (
-                old.player_id == action.player_id
-                and old.game_id == action.game_id
+                old.player_id == target.player_id
+                and old.game_id == target.game_id
                 and old.recommendation_id != child.recommendation_id
             ):
                 await repository.supersede_recommendation(old.recommendation_id, now)
@@ -96,6 +91,66 @@ async def prepare_score_confirmations(
         if old.recommendation_id not in current_ids:
             await repository.supersede_recommendation(old.recommendation_id, now)
     return tuple(results)
+
+
+UP_TO_YOU_KIND = "up_to_you"
+
+
+@dataclass(frozen=True, slots=True)
+class _ConfirmationTarget:
+    player_id: str
+    game_id: str
+    kind: str
+    score: float | None
+    deadline: datetime | None
+    acknowledgement: dict[str, object]
+    extra: dict[str, object]
+
+    def title(self, player_name: str) -> str:
+        if self.kind == UP_TO_YOU_KIND:
+            return f"Lock or pass {player_name}?"
+        return f"{self.kind.title()} {player_name}?"
+
+
+def _confirmation_targets(plan: WeeklyPlan) -> tuple[_ConfirmationTarget, ...]:
+    """Advised Lock/Pass actions, then close calls left to the manager."""
+    targets = []
+    for action in plan.score_actions:
+        fragment: dict[str, object] = {"schema_version": 1}
+        if action.kind is LockInDecisionKind.LOCK:
+            fragment.update(
+                slot_index=action.slot_index,
+                slot_position=action.slot_position,
+                accepted_fantasy_score=action.score,
+            )
+        targets.append(
+            _ConfirmationTarget(
+                action.player_id,
+                action.game_id,
+                action.kind.value,
+                action.score,
+                action.deadline,
+                fragment,
+                {},
+            )
+        )
+    for row in plan.undecided_scores:
+        choice = {
+            name: value.isoformat() if isinstance(value, datetime) else value
+            for name, value in asdict(row).items()
+        }
+        targets.append(
+            _ConfirmationTarget(
+                row.player_id,
+                row.game_id,
+                UP_TO_YOU_KIND,
+                row.score,
+                row.deadline,
+                {"schema_version": 1},
+                {"choice": choice},
+            )
+        )
+    return tuple(targets)
 
 
 async def restore_score_confirmations(

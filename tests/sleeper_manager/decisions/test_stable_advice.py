@@ -6,6 +6,7 @@ from datetime import timedelta
 
 from sleeper_manager.decisions.team_recommendation import build_team_recommendation
 from sleeper_manager.decisions.weekly_plan import WeeklyPlanPolicyConfig
+from sleeper_manager.decisions.win_probability import Finish, WinObjective
 from sleeper_manager.domain.planning import ObservedStarter, StarterSlot, TeamWeekState
 from sleeper_manager.workflows.plan_rendering import serialize_weekly_plan_trace
 from tests.sleeper_manager.decisions.test_joint_completed_scores import _completed
@@ -62,3 +63,29 @@ def test_plan_records_both_confidences_for_a_final_it_leaves_undecided() -> None
     assert undecided.pass_confidence + undecided.lock_confidence <= 1
     trace = json.loads(serialize_weekly_plan_trace(plan))
     assert trace["undecided_scores"][0]["player_id"] == "close"
+
+
+def test_an_undecided_final_keeps_both_sides_for_the_manager() -> None:
+    """Withheld advice still carries the score, lock slot, deadline, and both projections."""
+    state = _state_near_cutoff(pass_win_rate=0.55)
+    plan = build_team_recommendation(state, policy=LIVE)
+
+    (undecided,) = plan.undecided_scores
+    assert undecided.score == 50
+    assert (undecided.lock_slot_index, undecided.lock_slot_position) == (1, "C")
+    assert undecided.deadline == state.week_ends_at
+    assert undecided.pass_expected_score is not None
+    assert undecided.lock_expected_score is not None
+    assert undecided.lock_expected_score != undecided.pass_expected_score
+    assert undecided.pass_win_chance is None and undecided.lock_win_chance is None
+    trace = json.loads(serialize_weekly_plan_trace(plan))
+    assert trace["undecided_scores"][0]["deadline"] == state.week_ends_at.isoformat()
+
+
+def test_an_undecided_final_reports_each_sides_win_chance_under_a_win_objective() -> None:
+    policy = replace(LIVE, win_objective=WinObjective(Finish(150.0, 2500.0)))
+    plan = build_team_recommendation(_state_near_cutoff(pass_win_rate=0.55), policy=policy)
+
+    (undecided,) = plan.undecided_scores
+    assert undecided.pass_win_chance is not None and 0 < undecided.pass_win_chance < 1
+    assert undecided.lock_win_chance is not None and 0 < undecided.lock_win_chance < 1

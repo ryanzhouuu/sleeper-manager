@@ -27,6 +27,49 @@ def score_action_phrases(
     return phrases
 
 
+def undecided_phrases(plan: WeeklyPlan, names: Mapping[str, str] | None) -> list[str]:
+    """Lay out both sides of each close call so the manager can make it.
+
+    "Better in" is the share of simulations in which that side finishes ahead of the other.
+    """
+    labels = slot_labels(plan)
+    phrases = []
+    for row in plan.undecided_scores:
+        player = (names or {}).get(row.player_id, row.player_id)
+        final = f"{player}'s {row.score:.2f} pts" if row.score is not None else f"{player}'s final"
+        if row.lock_expected_score is None or row.pass_expected_score is None:
+            if row.score is not None and row.lock_slot_index is None:
+                phrases.append(f"{final} stays unlocked; no open slot can take it.")
+            else:
+                phrases.append(
+                    f"Up to you on {final}: lock is better in {row.lock_confidence:.0%} of "
+                    f"simulations, pass in {row.pass_confidence:.0%}."
+                )
+            continue
+        assert row.lock_slot_index is not None
+        slot = labels.get(row.lock_slot_index, row.lock_slot_position)
+        if row.lock_confidence == 0 and row.pass_confidence == 0:
+            phrases.append(
+                f"Up to you on {final}: locking in {slot} or passing ties in every simulation "
+                f"({row.pass_expected_score:.1f} pts projected)."
+            )
+            continue
+        lock = (
+            f"Lock in {slot}: {row.lock_expected_score:.1f} pts projected, "
+            f"better in {row.lock_confidence:.0%}{_win_suffix(row.lock_win_chance)}"
+        )
+        passed = (
+            f"Pass: {row.pass_expected_score:.1f} pts projected, "
+            f"better in {row.pass_confidence:.0%}{_win_suffix(row.pass_win_chance)}"
+        )
+        phrases.append(f"Up to you on {final}. {lock}. {passed}.")
+    return phrases
+
+
+def _win_suffix(chance: float | None) -> str:
+    return "" if chance is None else f", {chance:.0%} to win"
+
+
 def recommendation_follow_up(
     plan: WeeklyPlan, names: Mapping[str, str] | None, local_timezone: tzinfo | None
 ) -> str:

@@ -15,6 +15,7 @@ from sleeper_manager.domain.planning import (
 from sleeper_manager.workflows.recommendation_context import (
     recommendation_follow_up,
     score_action_phrases,
+    undecided_phrases,
 )
 from sleeper_manager.workflows.recommendation_context import (
     slot_labels as _slot_labels,
@@ -73,7 +74,13 @@ def render_weekly_plan(
     local_timezone: tzinfo | None = None,
 ) -> RenderedPlanNotification:
     """Keep alerts actionable while retaining complete evidence in the separate trace."""
-    title = "Lock-In team recommendation" if plan.score_actions else _TITLES[plan.status]
+    title = (
+        "Lock-In team recommendation"
+        if plan.score_actions
+        else "Lock-In: up to you"
+        if plan.undecided_scores and plan.status is not PlanStatus.BLOCKED
+        else _TITLES[plan.status]
+    )
     # Blocked plans suppress instructions even when they retain moves.
     actionable = plan.status in (PlanStatus.ACTION_REQUIRED, PlanStatus.DEGRADED) and bool(
         plan.moves or plan.score_actions
@@ -83,7 +90,9 @@ def render_weekly_plan(
             title=title,
             message=_join_sections(
                 "\n\n",
+                _deadline_clause(plan, local_timezone) if plan.undecided_scores else "",
                 _static_message(plan),
+                _up_to_you(plan, player_names),
                 _value_clause(plan, player_names),
                 _risk_clause(plan),
                 recommendation_follow_up(plan, player_names, local_timezone),
@@ -92,6 +101,7 @@ def render_weekly_plan(
     sections = (
         _deadline_clause(plan, local_timezone),
         _imperative(plan, player_names),
+        _up_to_you(plan, player_names),
         _value_clause(plan, player_names),
         _risk_clause(plan),
         recommendation_follow_up(plan, player_names, local_timezone),
@@ -150,6 +160,12 @@ def _imperative(
     return "\n".join(f"• {phrase}" for phrase in phrases)
 
 
+def _up_to_you(plan: WeeklyPlan, player_names: Mapping[str, str] | None) -> str:
+    if plan.status is PlanStatus.BLOCKED:
+        return ""
+    return "\n".join(f"• {phrase}" for phrase in undecided_phrases(plan, player_names))
+
+
 def _value_clause(plan: WeeklyPlan, player_names: Mapping[str, str] | None) -> str:
     """Combine the modeled team total, optional lineup delta, and confidence."""
     expected = plan.expected_terminal_score
@@ -163,10 +179,7 @@ def _value_clause(plan: WeeklyPlan, player_names: Mapping[str, str] | None) -> s
         names = [_player_name(row.player_id, player_names) for row in plan.undecided_scores]
         subject = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
         verb = "is" if len(names) == 1 else "are"
-        return (
-            f"Projected week: {observed:.1f} pts if {subject} {verb} passed; "
-            "lock or pass is too close to call."
-        )
+        return f"Projected week: {observed:.1f} pts if {subject} {verb} passed."
     total = f"Projected week: {expected:.1f} pts"
     if observed is not None and plan.moves:
         delta = round(expected - observed, 6)
@@ -196,9 +209,11 @@ def _notes_clause(reasons: Iterable[PlanningReasonCode]) -> str:
 
 def _deadline_clause(plan: WeeklyPlan, local_timezone: tzinfo | None) -> str:
     """Show the earliest action cutoff without implying Pass requires a Sleeper move."""
-    deadlines = [move.deadline for move in plan.moves] + [
-        action.deadline for action in plan.score_actions
-    ]
+    deadlines = (
+        [move.deadline for move in plan.moves]
+        + [action.deadline for action in plan.score_actions]
+        + [row.deadline for row in plan.undecided_scores if row.deadline is not None]
+    )
     if not deadlines:
         return ""
     moment = min(deadlines).astimezone(local_timezone or plan.decision_time.tzinfo)

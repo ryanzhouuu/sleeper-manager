@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 from sleeper_manager.decisions._coordinated_continuations import coordinate_completed_continuations
 from sleeper_manager.decisions._recovery_refresh import due_recovery_forfeitures, refresh_recoveries
+from sleeper_manager.decisions._undecided_scores import undecided_score
 from sleeper_manager.decisions._weekly_plan_inputs import (
     next_actionable_batch,
     protected_performances,
@@ -126,13 +127,20 @@ def build_team_recommendation(
         )
         if slot is None and (alternative is None or confidence < config.minimum_lock_in_confidence):
             undecided.append(
-                UndecidedScore(
+                undecided_score(
                     game.sleeper_player_id,
                     game.game_id,
-                    confidence,
-                    _win_rate(alternative, selected, config.tie_tolerance)
-                    if alternative is not None and selected is not None
-                    else 0.0,
+                    game.completed_fantasy_score or 0,
+                    deadline,
+                    selected,
+                    alternative,
+                    pass_confidence=confidence,
+                    lock_confidence=(
+                        _win_rate(alternative, selected, config.tie_tolerance)
+                        if alternative is not None and selected is not None
+                        else 0.0
+                    ),
+                    objective=config.win_objective,
                 )
             )
             continue

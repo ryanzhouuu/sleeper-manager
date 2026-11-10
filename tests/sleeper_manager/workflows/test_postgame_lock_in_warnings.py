@@ -98,7 +98,11 @@ def test_material_policy_change_supersedes_previous_actionable_advice(tmp_path) 
         assert second.recommendation is not None
         assert second.recommendation.recommendation_id != first.recommendation.recommendation_id
         assert old is not None and old.status is RecommendationStatus.SUPERSEDED
-        assert pending == (second.recommendation,)
+        assert second.recommendation in pending
+        assert {row.title for row in pending if row != second.recommendation} == {
+            "Lock or pass p2?"
+        }
+        assert all(row.created_at == third_at for row in pending)
         assert len(sender.messages) == 2
 
     asyncio.run(exercise())

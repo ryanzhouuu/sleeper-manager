@@ -331,6 +331,8 @@ async def _allocate_idempotency_key(
 
 
 def _is_quiet_plan(plan: WeeklyPlan) -> bool:
+    if plan.undecided_scores:
+        return False
     return (plan.status is PlanStatus.NO_ACTION and not plan.score_actions) or (
         plan.status is PlanStatus.DEGRADED and not (plan.moves or plan.score_actions)
     )
@@ -345,18 +347,20 @@ def _should_notify(plan: WeeklyPlan, deadline: datetime, now: datetime) -> bool:
         return False
     if plan.status is PlanStatus.BLOCKED:
         return not _is_deadline_withdrawal(plan)
+    if plan.undecided_scores:
+        return True
     return plan.status in (PlanStatus.ACTION_REQUIRED, PlanStatus.DEGRADED) and bool(
         plan.moves or plan.score_actions
     )
 
 
 def _recommendation_deadline(plan: WeeklyPlan, inputs: LivePlanningInputs) -> datetime:
-    if plan.moves or plan.score_actions:
-        return min(
-            [move.deadline for move in plan.moves]
-            + [action.deadline for action in plan.score_actions]
-        )
-    return inputs.week_window.ends_at
+    deadlines = (
+        [move.deadline for move in plan.moves]
+        + [action.deadline for action in plan.score_actions]
+        + [row.deadline for row in plan.undecided_scores if row.deadline is not None]
+    )
+    return min(deadlines) if deadlines else inputs.week_window.ends_at
 
 
 def _primary_player_id(plan: WeeklyPlan) -> str:
