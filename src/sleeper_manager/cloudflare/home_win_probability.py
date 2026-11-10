@@ -96,7 +96,34 @@ async def matchup_win_probability(
     now: datetime,
 ) -> float | None:
     samples = _samples(plan_trace)
-    if not samples or opponent is None or opponent.points is None or opponent.final:
+    if not samples:
+        return None
+    finish = await opponent_finish(
+        outlook,
+        opponent_roster_id,
+        opponent,
+        read_stats=read_stats,
+        season=season,
+        scoring=scoring,
+        cache=cache,
+        now=now,
+    )
+    return None if finish is None else win_probability(samples, finish)
+
+
+async def opponent_finish(
+    outlook: OpponentOutlook | None,
+    opponent_roster_id: int | None,
+    opponent: SideScore | None,
+    *,
+    read_stats: PlayerStatsReader,
+    season: int,
+    scoring: ScoringPolicy,
+    cache: LockedGameCache | None,
+    now: datetime,
+) -> Finish | None:
+    """The opponent's week score so far plus every unlocked starter; None when any is unknown."""
+    if opponent is None or opponent.points is None or opponent.final:
         return None
     if outlook is None or outlook.roster_id != opponent_roster_id:
         return None
@@ -116,7 +143,7 @@ async def matchup_win_probability(
             finishes.append(finish)
     except (CloudflareProviderError, SleeperGameStatsError):
         return None
-    return win_probability(samples, team_finish(opponent.points, finishes))
+    return team_finish(opponent.points, finishes)
 
 
 async def _starter(
@@ -177,4 +204,9 @@ def _samples(plan_trace: Mapping[str, Any] | None) -> tuple[float, ...]:
     return tuple(float(value) for value in raw)
 
 
-__all__ = ("FINAL_AFTER", "dashboard_win_probability", "matchup_win_probability")
+__all__ = (
+    "FINAL_AFTER",
+    "dashboard_win_probability",
+    "matchup_win_probability",
+    "opponent_finish",
+)

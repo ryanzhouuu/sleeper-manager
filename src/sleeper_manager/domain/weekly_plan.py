@@ -53,6 +53,7 @@ class WeeklyPlan:
     terminal_score_p10: float | None = None
     terminal_score_p90: float | None = None
     terminal_score_samples: tuple[float, ...] = ()
+    decision_objective: str = "points"
     decision_margin: float | None = None
     distribution_summary: PlanDistributionSummary | None = None
     fixed_slots: tuple[FixedSlot, ...] = ()

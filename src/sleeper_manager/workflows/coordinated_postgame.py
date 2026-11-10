@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 from sleeper_manager.decisions.lock_in import ScoreMaximizingLockInPolicy
 from sleeper_manager.decisions.team_recommendation import build_team_recommendation
 from sleeper_manager.decisions.weekly_plan import WeeklyPlanPolicyConfig
+from sleeper_manager.decisions.win_probability import WinObjective
 from sleeper_manager.domain.lock_in import LockInDecision, LockInEvaluation, LockInEvaluationKind
 from sleeper_manager.domain.planning import PlanStatus, TeamWeekState
 from sleeper_manager.domain.runtime_policy import RuntimePolicy
@@ -35,6 +36,7 @@ async def deliver_coordinated_postgame(
     open_sleeper_url: str,
     player_names: dict[str, str] | None,
     policy: ScoreMaximizingLockInPolicy | None,
+    win_objective: WinObjective | None = None,
 ) -> PostgameLockInResult:
     """Refresh the whole team instead of composing independent player optimizations."""
     config = WeeklyPlanPolicyConfig(
@@ -44,6 +46,7 @@ async def deliver_coordinated_postgame(
         ),
         seed=policy.config.seed if policy else 0,
         minimum_lock_in_confidence=runtime_policy.manager_intent.minimum_confidence,
+        win_objective=win_objective,
     )
     if not state.is_blocked and not state.recovery_obligations:
         published = await published_team_advice(

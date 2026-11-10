@@ -12,6 +12,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
+from sleeper_manager.cloudflare.decision_objective import planning_win_objective
 from sleeper_manager.cloudflare.opponent_outlook import refresh_opponent_outlook
 from sleeper_manager.cloudflare.planning import CloudflarePlanningAssembly
 from sleeper_manager.cloudflare.planning_schedule import (
@@ -306,6 +307,15 @@ async def _run_planning(
                 observed_at=assembly.evidence.decision_time,
                 poll_id=f"{correlation_id}:daily-refresh",
             )
+    if policy.manager_intent.objective == "win_chance":
+        await refresh_opponent_outlook(repository, assembly, now=clock())
+    win_objective = await planning_win_objective(
+        policy,
+        repository=repository,
+        reader=lock_reader,
+        profile=planning_inputs.league_profile,
+        now=assembly.evidence.decision_time,
+    )
     workflow = run_pre_tipoff_check if trigger == "pre_tipoff" else run_daily_plan
     with scheduled_stage("planning_and_persistence", FailureCategory.INTERNAL_INVARIANT):
         result = await workflow(
@@ -319,6 +329,7 @@ async def _run_planning(
             policy=replace(
                 plan_policy or WeeklyPlanPolicyConfig(),
                 minimum_lock_in_confidence=policy.manager_intent.minimum_confidence,
+                win_objective=win_objective,
             ),
             clock=clock,
             daily_confirmation=any(

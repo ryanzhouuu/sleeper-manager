@@ -66,6 +66,13 @@ opponent locks, and the plan's simulated team finishes into a win probability. I
 each opponent starter locks a finished game only when it beats waiting, reads Sleeper stats
 only for an unlocked opponent game 3.5 hours after tipoff, and caches them for the day. Any
 missing piece leaves the probability null.
+With `objective = "win_chance"` under `[decision]`, daily, pre-tipoff, and postgame runs
+also read the opponent's live locks and that cache. Starters and Lock/Pass choices then
+maximize the chance of beating the opponent; choices within half a percentage point fall
+back to expected points. Simulated later Lock/Pass choices inside a continuation still
+maximize points. Completed-score search prunes on the win chance of each placement's
+hindsight bound, which never understates its real win chance. Without opponent evidence
+the run uses expected points, and each trace records `decision_objective`.
 Pre-tipoff watches cover only the current fantasy week. Unchanged watches do not
 write or reset retry timing. Each reconciliation cancels at most 50 obsolete future
 watches, so legacy rows retire gradually without a large cleanup burst.

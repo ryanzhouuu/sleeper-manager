@@ -272,6 +272,7 @@ def serialize_weekly_plan_trace(
         "terminal_score_p10": plan.terminal_score_p10,
         "terminal_score_p90": plan.terminal_score_p90,
         "terminal_score_samples": list(plan.terminal_score_samples),
+        "decision_objective": plan.decision_objective,
         "decision_margin": plan.decision_margin,
         "confidence": plan.confidence.value,
         "blocking_detail": plan.blocking_detail,

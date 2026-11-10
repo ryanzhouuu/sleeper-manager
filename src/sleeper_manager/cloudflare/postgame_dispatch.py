@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Protocol
 
+from sleeper_manager.cloudflare.decision_objective import planning_win_objective
 from sleeper_manager.cloudflare.planning import CloudflarePlanningAssembly
 from sleeper_manager.cloudflare.postgame_gate import settled_postgame_unchanged
 from sleeper_manager.cloudflare.scheduler_types import (
@@ -142,6 +143,13 @@ async def dispatch_postgame_work(
                 runtime_policy=policy,
                 open_sleeper_url=open_sleeper_url,
                 player_names=dict(assembly.player_names),
+                win_objective=await planning_win_objective(
+                    policy,
+                    repository=repository,
+                    reader=lock_reader,
+                    profile=inputs.league_profile,
+                    now=assembly.evidence.decision_time,
+                ),
             )
         except Exception as error:
             errors.update({work_id: error for work_id, rows in observed.items() if rows})

@@ -5,6 +5,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta
 
 from sleeper_manager.decisions.lock_in import ScoreMaximizingLockInPolicy
+from sleeper_manager.decisions.win_probability import WinObjective
 from sleeper_manager.domain.lock_in import LockInOpportunityStatus
 from sleeper_manager.domain.nba import GameStatus
 from sleeper_manager.domain.runtime_policy import RuntimePolicy
@@ -155,6 +156,7 @@ async def recommend_postgame_batch(
     open_sleeper_url: str,
     player_names: dict[str, str] | None = None,
     policy: ScoreMaximizingLockInPolicy | None = None,
+    win_objective: WinObjective | None = None,
 ) -> PostgameLockInResult:
     """Evaluate all observed finals against the same refreshed team state."""
     if not stable:
@@ -173,6 +175,7 @@ async def recommend_postgame_batch(
         open_sleeper_url=open_sleeper_url,
         player_names=player_names,
         policy=policy,
+        win_objective=win_objective,
     )
 
 

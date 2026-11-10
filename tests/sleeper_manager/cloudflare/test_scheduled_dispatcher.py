@@ -615,3 +615,56 @@ def test_scheduled_planning_without_lock_data_publishes_degraded_plan_without_sc
         assert trace["score_actions"] == []
 
     asyncio.run(exercise())
+
+
+class OpponentLockReader(LockReader):
+    async def matchup_legs(self, league_id: str, week: int) -> object:
+        self.calls.append((league_id, week))
+        return [
+            {"roster_id": 1, "matchup_id": 1, "starters": ["p1", "p2"], "starters_games": {}},
+            {"roster_id": 2, "matchup_id": 1, "starters": ["o1"], "starters_games": {"o1": "g9"}},
+        ]
+
+    async def player_game_stats(self, player_id: str, season: int) -> dict[str, object]:
+        return {"2025": [{"game_id": "g9", "date": "2026-01-06", "stats": {"pts": 15}}]}
+
+
+def test_win_chance_policy_plans_against_the_opponent(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from sleeper_manager.cloudflare.home_cache import write_home_cache
+    from sleeper_manager.cloudflare.opponent_outlook import outlook_cache_key
+
+    policy = replace(POLICY, manager_intent=replace(POLICY.manager_intent, objective="win_chance"))
+
+    async def exercise() -> dict[str, object]:
+        repository, _, notifications = _workflow(tmp_path, clock=lambda: NOW)
+        await repository.initialize()
+        await repository.save_runtime_policy(
+            RuntimePolicyRecord(policy.version, policy.to_json(), NOW)
+        )
+        await write_home_cache(
+            repository,
+            outlook_cache_key("league-1", 1),
+            {"roster_id": 2, "projected_at": NOW.isoformat(), "players": {}},
+            resource="opponent-outlook",
+            timezone_name=policy.manager_timezone,
+            now=NOW,
+        )
+        collect, _ = _collector(_assembly(decision_time=NOW))
+        await dispatch_due_work(
+            repository,
+            notifications=notifications,
+            collect=collect,
+            scheduled_at=NOW,
+            correlation_id="run-1",
+            open_sleeper_url="https://sleeper.com/league",
+            plan_policy=PLAN_POLICY,
+            lock_reader=OpponentLockReader(),
+        )
+        pending = await repository.list_pending_recommendations(
+            "league-1", 1, decision_type=WEEKLY_LINEUP_DECISION_TYPE
+        )
+        return json.loads(pending[0].trace_json)
+
+    trace = asyncio.run(exercise())
+
+    assert trace["decision_objective"] == "win_chance"

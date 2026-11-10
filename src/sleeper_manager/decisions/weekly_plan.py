@@ -157,6 +157,7 @@ def build_weekly_plan(
         terminal_score_samples=tuple(
             round(score, 2) for score in decision.selected.scenario_terminal_scores
         ),
+        decision_objective="points" if policy_config.win_objective is None else "win_chance",
         decision_margin=margin,
         distribution_summary=PlanDistributionSummary(
             scenario_count=decision.scenario_count,
