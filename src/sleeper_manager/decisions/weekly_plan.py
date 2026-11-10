@@ -154,6 +154,9 @@ def build_weekly_plan(
         observed_terminal_score=decision.observed_terminal_value,
         terminal_score_p10=_percentile(decision.selected.scenario_terminal_scores, 0.1),
         terminal_score_p90=_percentile(decision.selected.scenario_terminal_scores, 0.9),
+        terminal_score_samples=tuple(
+            round(score, 2) for score in decision.selected.scenario_terminal_scores
+        ),
         decision_margin=margin,
         distribution_summary=PlanDistributionSummary(
             scenario_count=decision.scenario_count,

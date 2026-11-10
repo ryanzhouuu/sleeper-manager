@@ -263,3 +263,6 @@ def test_weekly_plan_records_the_selected_total_range() -> None:
     assert plan.terminal_score_p10 is not None and plan.terminal_score_p90 is not None
     assert plan.terminal_score_p10 <= plan.expected_terminal_score <= plan.terminal_score_p90
     assert plan.terminal_score_p10 < plan.terminal_score_p90
+    samples = plan.terminal_score_samples
+    assert len(samples) == plan.distribution_summary.scenario_count  # type: ignore[union-attr]
+    assert min(samples) <= plan.terminal_score_p10 and plan.terminal_score_p90 <= max(samples)

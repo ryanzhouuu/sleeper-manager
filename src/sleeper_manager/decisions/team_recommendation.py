@@ -327,6 +327,9 @@ def build_team_recommendation(
         terminal_score_p90=plan.terminal_score_p90
         if expected == plan.expected_terminal_score
         else None,
+        terminal_score_samples=plan.terminal_score_samples
+        if expected == plan.expected_terminal_score
+        else (),
         observed_terminal_score=comparison.baseline.expected_score
         if comparison
         else plan.observed_terminal_score,

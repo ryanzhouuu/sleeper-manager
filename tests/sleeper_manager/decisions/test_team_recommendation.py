@@ -43,6 +43,7 @@ def test_weak_completed_trial_proposes_pass_and_restores_later_player() -> None:
     assert plan.score_actions[0].kind is LockInDecisionKind.PASS
     assert plan.desired_assignments[0].player_id == "later"
     assert plan.expected_terminal_score == 60
+    assert plan.terminal_score_samples and set(plan.terminal_score_samples) == {60}
     assert plan.fixed_slots == ()
     assert plan.passed_opportunities == ()
     assert plan.forfeited_opportunities == (("early", "tonight"),)
@@ -265,3 +266,4 @@ def test_uncertain_final_stays_in_lineup_without_blocking_confident_lock() -> No
     assert plan.moves == ()
     assert plan.fixed_slots == ()
     assert plan.expected_terminal_score is None
+    assert plan.terminal_score_samples == ()
