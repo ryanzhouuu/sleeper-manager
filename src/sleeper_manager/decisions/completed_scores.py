@@ -18,6 +18,7 @@ from sleeper_manager.decisions._weekly_plan_models import WeeklyPlanDecision, We
 from sleeper_manager.decisions._weekly_plan_moves import plan_moves
 from sleeper_manager.decisions.lineup import AssignmentResult, SlotAssignment
 from sleeper_manager.decisions.simulation import generate_projection_scenarios, stable_scenario_seed
+from sleeper_manager.decisions.win_probability import WinObjective
 from sleeper_manager.domain.eligibility import eligible_for_slot
 from sleeper_manager.domain.planning import (
     GameOpportunity,
@@ -61,10 +62,20 @@ class CompletedPlacement:
     flexibility: frozenset[int] = frozenset()
     upcoming_decision: WeeklyPlanDecision | None = None
     flexibility_proof: Callable[[], frozenset[int]] | None = None
+    win_chance: float | None = None
 
     def proven_flexibility(self) -> frozenset[int]:
         """Defer costly proofs because only tied expected scores ever compare them."""
         return self.flexibility_proof() if self.flexibility_proof else self.flexibility
+
+
+def placement_value(option: CompletedPlacement, objective: WinObjective | None) -> float:
+    """Expected points, or the chance to win when an objective is set."""
+    if objective is None:
+        return option.expected_score
+    if option.win_chance is not None:
+        return option.win_chance
+    return objective.chance(option.terminal_scores)
 
 
 @dataclass(frozen=True, slots=True)
@@ -200,8 +211,12 @@ def compare_completed_scores(
     seed: int = 0,
     tie_tolerance: float = 0.01,
     minimum_confidence: float = 0.0,
+    objective: WinObjective | None = None,
 ) -> CompletedScoreComparison:
-    """Choose joint locks from visible scores and independent future draws."""
+    """Choose joint locks from visible scores and independent future draws.
+
+    Totals here are hindsight bounds, so with an objective each win chance is an upper bound.
+    """
     if state.is_blocked:
         raise WeeklyPlanError("Cannot compare completed scores from a blocked snapshot")
     placements = executable_lock_placements(state, usable_completed_games(state))
@@ -246,9 +261,12 @@ def compare_completed_scores(
     )
     proofs = {key: partial(prove_flexibility, *key) for key in scores}
     evaluated = []
+    chances: dict[tuple[object, ...], float] = {}
     for placement, key in zip(placements, keys, strict=True):
         locked_score = fixed_score + sum(item.score for item in placement.locks)
         totals = _ShiftedScores(locked_score, scores[key])
+        if objective is not None and (key, locked_score) not in chances:
+            chances[(key, locked_score)] = objective.chance(totals)
         evaluated.append(
             CompletedPlacement(
                 placement.locks,
@@ -257,20 +275,28 @@ def compare_completed_scores(
                 round(sum(totals) / len(scores[key]), 6),
                 totals,
                 flexibility_proof=proofs[key],
+                win_chance=chances.get((key, locked_score)),
             )
         )
-    return select_completed_placement(tuple(evaluated), tie_tolerance, minimum_confidence)
+    return select_completed_placement(
+        tuple(evaluated), tie_tolerance, minimum_confidence, objective
+    )
 
 
 def select_completed_placement(
     options: tuple[CompletedPlacement, ...],
     tie_tolerance: float,
     minimum_confidence: float,
+    objective: WinObjective | None = None,
 ) -> CompletedScoreComparison:
-    """Apply identical confidence, flexibility, and movement preferences to paired continuations."""
+    """Apply identical confidence, flexibility, and movement preferences to paired continuations.
+
+    An objective first keeps the placements within its tolerance of the best win chance; the
+    usual expected-point rules then choose among them. Confidence stays a per-draw point
+    comparison, which ranks draws exactly as win chance does.
+    """
     evaluated = list(options)
     baseline = next(item for item in evaluated if not item.locks)
-    selected = baseline
     opposing: dict[tuple[str | None, str | None], CompletedPlacement] = {}
     confidences: dict[tuple[int, str | None, str | None], float] = {}
 
@@ -284,25 +310,38 @@ def select_completed_placement(
                     for row in evaluated
                     if not any((item.player_id, item.game_id) == key for item in row.locks)
                 ),
-                key=lambda row: row.expected_score,
+                key=lambda row: placement_value(row, objective),
             )
         sample_key = id(choice.terminal_scores), *key
         if sample_key not in confidences:
             confidences[sample_key] = _lock_confidence(choice, opposing[key], tie_tolerance)
         return confidences[sample_key]
 
-    for item in evaluated:
-        if minimum_confidence > 0 and item.locks:
-            confidence = sum(
-                a > b + tie_tolerance
-                for a, b in zip(item.terminal_scores, baseline.terminal_scores, strict=True)
-            ) / len(item.terminal_scores)
-            if confidence < minimum_confidence:
-                continue
-        if minimum_confidence > 0 and any(
-            lock_confidence(item, lock) < minimum_confidence for lock in item.locks
-        ):
-            continue
+    def admissible(item: CompletedPlacement) -> bool:
+        if minimum_confidence <= 0 or not item.locks:
+            return True
+        confidence = sum(
+            a > b + tie_tolerance
+            for a, b in zip(item.terminal_scores, baseline.terminal_scores, strict=True)
+        ) / len(item.terminal_scores)
+        return confidence >= minimum_confidence and all(
+            lock_confidence(item, lock) >= minimum_confidence for lock in item.locks
+        )
+
+    candidates = [item for item in evaluated if admissible(item)]
+    if objective is not None:
+        best = max(placement_value(item, objective) for item in candidates)
+        candidates = [
+            item
+            for item in candidates
+            if placement_value(item, objective) >= best - objective.tie_tolerance
+        ]
+    selected = (
+        baseline
+        if any(item is baseline for item in candidates)
+        else max(candidates, key=lambda item: item.expected_score)
+    )
+    for item in candidates:
         if item.expected_score > selected.expected_score + tie_tolerance:
             selected = item
         elif (

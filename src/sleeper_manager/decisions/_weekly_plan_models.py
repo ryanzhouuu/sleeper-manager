@@ -11,6 +11,7 @@ from enum import StrEnum
 from math import isfinite
 
 from sleeper_manager.decisions.lineup import SlotAssignment
+from sleeper_manager.decisions.win_probability import WinObjective
 from sleeper_manager.domain.planning_actions import RecoveryObligation
 
 WEEKLY_PLANNER_VERSION = "weekly-planner-v6"
@@ -31,13 +32,18 @@ class TerminalValueApproximation(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class WeeklyPlanPolicyConfig:
-    """Control scenario sampling and deterministic tie handling."""
+    """Control scenario sampling and deterministic tie handling.
+
+    With ``win_objective`` set, choices maximize the chance of beating the opponent instead of
+    expected points.
+    """
 
     scenario_count: int = 2000
     seed: int = 0
     tie_tolerance: float = 0.01
     postgame_scenario_count: int = 128
     minimum_lock_in_confidence: float = 0.70
+    win_objective: WinObjective | None = None
 
     def __post_init__(self) -> None:
         """Reject invalid sampling counts and comparison tolerances."""

@@ -15,6 +15,7 @@ from sleeper_manager.decisions._weekly_plan_recovery import recovery_bench_capac
 from sleeper_manager.decisions.completed_scores import (
     CompletedPlacement,
     compare_completed_scores,
+    placement_value,
     usable_completed_games,
 )
 from sleeper_manager.decisions.weekly_plan import WeeklyPlanPolicyConfig, build_weekly_plan
@@ -73,6 +74,7 @@ def build_team_recommendation(
                 seed=config.seed,
                 tie_tolerance=config.tie_tolerance,
                 minimum_confidence=0,
+                objective=config.win_objective,
             )
             if completed
             else None
@@ -112,7 +114,11 @@ def build_team_recommendation(
             for option in comparison.alternatives
             if any((row.player_id, row.game_id) == key for row in option.locks) != bool(slot)
         )
-        alternative = max(opposing, key=lambda option: option.expected_score) if opposing else None
+        alternative = (
+            max(opposing, key=lambda option: placement_value(option, config.win_objective))
+            if opposing
+            else None
+        )
         confidence = (
             _win_rate(selected, alternative, config.tie_tolerance)
             if alternative is not None and selected is not None

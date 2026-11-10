@@ -21,6 +21,7 @@ from sleeper_manager.decisions._weekly_plan_scoring import _terminal_value, scor
 from sleeper_manager.decisions.completed_scores import (
     CompletedPlacement,
     CompletedScoreComparison,
+    placement_value,
     select_completed_placement,
     usable_completed_games,
 )
@@ -46,14 +47,19 @@ def coordinate_completed_continuations(
     """Score only placements whose hindsight bound can still change what is recommended.
 
     Every continuation is a feasible lineup within its scenario, so a placement's hindsight total
-    on the same outer draws bounds its value. Those draws must come from `comparison`.
+    on the same outer draws bounds its value. Those draws must come from `comparison`. Win chance
+    rises with the total in every draw, so the bound's win chance bounds the placement's too.
     """
+    objective = config.win_objective
     universe = tuple(
         scenario_input(game) for game in future_opportunities(state, state.decision_time)
     )
     if not universe:
         return select_completed_placement(
-            comparison.alternatives, config.tie_tolerance, config.minimum_lock_in_confidence
+            comparison.alternatives,
+            config.tie_tolerance,
+            config.minimum_lock_in_confidence,
+            objective,
         )
     positions = dict(state.roster_eligibility)
     positions.update({row.player_id: row.eligible_positions for row in state.observed_starters})
@@ -92,32 +98,38 @@ def coordinate_completed_continuations(
             option,
             expected_score=round(sum(scores) / len(scores), 6),
             terminal_scores=scores,
+            win_chance=None if objective is None else objective.chance(scores),
         )
 
-    margin = _BOUND_MARGIN_TOLERANCES * config.tie_tolerance
+    def value(option: CompletedPlacement) -> float:
+        return placement_value(option, objective)
+
+    margin = _BOUND_MARGIN_TOLERANCES * (
+        config.tie_tolerance if objective is None else objective.tie_tolerance
+    )
     options = comparison.alternatives
     evaluated: dict[int, CompletedPlacement] = {}
     bests: dict[tuple[object, ...], float] = {}
-    for index in sorted(range(len(options)), key=lambda i: -options[i].expected_score):
+    for index in sorted(range(len(options)), key=lambda i: -value(options[i])):
         option = options[index]
         groups = _value_groups(option, completed)
         if not option.locks or any(
-            option.expected_score + margin >= bests.get(group, float("-inf")) for group in groups
+            value(option) + margin >= bests.get(group, float("-inf")) for group in groups
         ):
             evaluated[index] = evaluate(option)
             for group in groups:
-                bests[group] = max(bests.get(group, float("-inf")), evaluated[index].expected_score)
+                bests[group] = max(bests.get(group, float("-inf")), value(evaluated[index]))
     while True:
         result = select_completed_placement(
             tuple(evaluated[index] for index in sorted(evaluated)),
             config.tie_tolerance,
             config.minimum_lock_in_confidence,
+            objective,
         )
         contenders = [
             index
             for index, option in enumerate(options)
-            if index not in evaluated
-            and option.expected_score + margin >= result.selected.expected_score
+            if index not in evaluated and value(option) + margin >= value(result.selected)
         ]
         if not contenders:
             break

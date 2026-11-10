@@ -28,6 +28,25 @@ class Finish:
             raise ValueError("A finish needs a finite mean and a non-negative variance")
 
 
+@dataclass(frozen=True, slots=True)
+class WinObjective:
+    """Rank choices by the chance of finishing above ``opponent``.
+
+    Chances within ``tie_tolerance`` of the best count as even, which leaves the choice to
+    expected points.
+    """
+
+    opponent: Finish
+    tie_tolerance: float = 0.005
+
+    def __post_init__(self) -> None:
+        if not isfinite(self.tie_tolerance) or not 0 <= self.tie_tolerance < 1:
+            raise ValueError("Win-chance tie tolerance must be in [0, 1)")
+
+    def chance(self, totals: Sequence[float]) -> float:
+        return win_probability(totals, self.opponent)
+
+
 def game_outcomes(
     distribution: ProjectionDistribution, count: int = GAME_OUTCOME_COUNT
 ) -> tuple[float, ...]:
@@ -111,6 +130,7 @@ def _quantile(ordered: Sequence[tuple[float, float]], total: float, fraction: fl
 __all__ = (
     "GAME_OUTCOME_COUNT",
     "Finish",
+    "WinObjective",
     "game_outcomes",
     "starter_finish",
     "team_finish",

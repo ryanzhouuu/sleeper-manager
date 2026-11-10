@@ -4,6 +4,7 @@ import pytest
 
 from sleeper_manager.decisions.win_probability import (
     Finish,
+    WinObjective,
     game_outcomes,
     starter_finish,
     team_finish,
@@ -96,3 +97,14 @@ def test_win_probability_rises_with_a_lead() -> None:
 def test_win_probability_needs_simulated_finishes() -> None:
     with pytest.raises(ValueError):
         win_probability((), Finish(100.0, 0.0))
+
+
+def test_win_objective_scores_simulated_totals_against_the_opponent() -> None:
+    objective = WinObjective(Finish(100.0, 0.0))
+
+    assert objective.chance((90.0, 110.0)) == 0.5
+
+
+def test_win_objective_rejects_a_tolerance_outside_a_probability() -> None:
+    with pytest.raises(ValueError):
+        WinObjective(Finish(100.0, 0.0), tie_tolerance=1.0)
