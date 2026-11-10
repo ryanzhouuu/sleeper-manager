@@ -142,14 +142,23 @@ class HybridParticipation:
         )
 
     def _availability_gap(self, availability: GameAvailability | None, game_id: str) -> str | None:
-        if availability is None:
-            return "missing_game_availability"
-        if availability.game_id != game_id:
-            return "availability_for_other_game"
-        if availability.observed_at > self.cutoff:
-            return "future_availability"
-        if self.cutoff - availability.observed_at > timedelta(
-            minutes=self.config.availability_max_age_minutes
-        ):
-            return "stale_availability"
-        return None
+        return availability_gap(availability, game_id, cutoff=self.cutoff, config=self.config)
+
+
+def availability_gap(
+    availability: GameAvailability | None,
+    game_id: str,
+    *,
+    cutoff: datetime,
+    config: HybridProjectionConfig,
+) -> str | None:
+    """Why a game report cannot inform participation at this cutoff; None when it can."""
+    if availability is None:
+        return "missing_game_availability"
+    if availability.game_id != game_id:
+        return "availability_for_other_game"
+    if availability.observed_at > cutoff:
+        return "future_availability"
+    if cutoff - availability.observed_at > timedelta(minutes=config.availability_max_age_minutes):
+        return "stale_availability"
+    return None
