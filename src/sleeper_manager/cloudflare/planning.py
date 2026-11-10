@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -27,6 +27,7 @@ from sleeper_manager.persistence.hybrid_runtime import (
     HybridRuntimeRepository,
 )
 from sleeper_manager.projections.live_baseline import DirectBaselineProjectionProvider
+from sleeper_manager.workflows.forecast_tipoffs import opponent_roster_id, parse_matchup_sides
 from sleeper_manager.workflows.planning_collection import (
     CollectedLiveEvidence,
     collect_live_planning_inputs,
@@ -46,6 +47,7 @@ class CloudflarePlanningAssembly:
     evidence: CollectedLiveEvidence
     player_names: Mapping[str, str]
     local_timezone: ZoneInfo
+    collect_opponent: Callable[[], Awaitable[CollectedLiveEvidence | None]] | None = None
 
 
 @dataclass(slots=True)
@@ -115,7 +117,7 @@ async def collect_cloudflare_planning_inputs(
     catalog_source = _CatalogSource(sleeper)
     control = DirectBaselineProjectionProvider(history)
 
-    async def collect(selected: LeagueProfile) -> CollectedLiveEvidence:
+    async def collect(selected: LeagueProfile, *, own: bool = True) -> CollectedLiveEvidence:
         """Share caches while keeping roster ownership and eligibility separate."""
         return await collect_live_planning_inputs(
             profile_source=_StaticProfileSource(selected),
@@ -136,16 +138,16 @@ async def collect_cloudflare_planning_inputs(
                 else history.history_version
             ),
             projection_history_retrieved_at=history.loaded_at,
-            acknowledgement_source=repository,
+            acknowledgement_source=repository if own else None,
             mapping_overrides=policy.mapping_overrides,
             official_availability_source=CloudflareOfficialAvailability(fetcher, clock=tick),
             clock=tick,
             skip_projections=policy.active_projection_provider == "hybrid",
         )
 
-    with timed_stage("manager_evidence"):
-        evidence = await collect(profile)
-    if policy.active_projection_provider == "hybrid":
+    async def project(collected: CollectedLiveEvidence) -> CollectedLiveEvidence:
+        if policy.active_projection_provider != "hybrid":
+            return collected
         binding = getattr(env, "sleeper_manager_state", None)
         store = hybrid_repository or (
             D1HybridRuntimeRepository(binding) if binding is not None else None
@@ -154,14 +156,31 @@ async def collect_cloudflare_planning_inputs(
         archive = forecast_archive or (
             D1ForecastArchiveRepository(archive_binding) if archive_binding is not None else None
         )
-        evidence = await finish_hybrid_planning(
-            evidence,
+        return await finish_hybrid_planning(
+            collected,
             policy=policy,
             store=store,
             archive=archive,
             clock=tick,
             timeout_seconds=hybrid_timeout_seconds,
         )
+
+    async def collect_opponent() -> CollectedLiveEvidence | None:
+        """This week's opponent projected like the manager; None during a bye."""
+        sides = parse_matchup_sides(
+            await sleeper.matchups(profile.league_id, profile.fantasy_week.week)
+        )
+        opponent = opponent_roster_id(sides, profile.manager_roster_id)
+        if opponent is None:
+            return None
+        with timed_stage("opponent_evidence"):
+            return await project(
+                await collect(replace(profile, manager_roster_id=opponent), own=False)
+            )
+
+    with timed_stage("manager_evidence"):
+        evidence = await collect(profile)
+    evidence = await project(evidence)
     catalog = catalog_source.catalog or {}
     player_names = {
         player_id: name
@@ -172,6 +191,7 @@ async def collect_cloudflare_planning_inputs(
         evidence=evidence,
         player_names=player_names,
         local_timezone=ZoneInfo(policy.manager_timezone),
+        collect_opponent=collect_opponent,
     )
 
 

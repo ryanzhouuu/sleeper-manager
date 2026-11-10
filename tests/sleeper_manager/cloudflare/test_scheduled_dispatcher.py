@@ -193,6 +193,25 @@ def test_daily_due_work_collects_once_and_notifies(tmp_path) -> None:  # type: i
     asyncio.run(exercise())
 
 
+def test_daily_planning_requests_the_opponent_outlook(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    requests: list[int] = []
+
+    async def bye() -> None:
+        requests.append(1)
+
+    async def exercise() -> None:
+        repository, _, notifications = _workflow(tmp_path, clock=lambda: NOW)
+        await repository.initialize()
+        await _save_policy(repository)
+        collect, _ = _collector(replace(_assembly(), collect_opponent=bye))
+        summary, _ = await _dispatch(repository, notifications, scheduled_at=NOW, collect=collect)
+        assert summary.status is ScheduledRunStatus.SUCCESS
+
+    asyncio.run(exercise())
+
+    assert requests == [1]
+
+
 def test_daily_and_pre_tipoff_coalesce_to_one_pre_tipoff_plan(tmp_path) -> None:  # type: ignore[no-untyped-def]
     async def exercise() -> None:
         scheduled_at = GAME_START - POLICY.move_lead_time - timedelta(seconds=1)

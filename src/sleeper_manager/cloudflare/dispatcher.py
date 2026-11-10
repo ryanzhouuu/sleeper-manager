@@ -12,6 +12,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
+from sleeper_manager.cloudflare.opponent_outlook import refresh_opponent_outlook
 from sleeper_manager.cloudflare.planning import CloudflarePlanningAssembly
 from sleeper_manager.cloudflare.planning_schedule import (
     _replace_future_pre_tipoff,
@@ -326,6 +327,7 @@ async def _run_planning(
         )
         if _delivery_failed(result):
             await _enqueue_delivery_retry(repository, result, clock())
+        await refresh_opponent_outlook(repository, assembly, now=clock())
         outcome = _WORKFLOW_STATUS[result.outcome]
         failure_category = (
             FailureCategory.DELIVERY if outcome is ScheduledRunStatus.DELIVERY_FAILED else None
