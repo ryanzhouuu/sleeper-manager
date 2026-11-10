@@ -9,7 +9,7 @@ from typing import Protocol
 
 from sleeper_manager.cloudflare.decision_objective import planning_win_objective
 from sleeper_manager.cloudflare.planning import CloudflarePlanningAssembly
-from sleeper_manager.cloudflare.postgame_gate import unchanged_postgame_detail
+from sleeper_manager.cloudflare.postgame_gate import unchanged_postgame_skip
 from sleeper_manager.cloudflare.scheduler_types import (
     FailureCategory,
     ScheduledRunStatus,
@@ -33,6 +33,7 @@ from sleeper_manager.workflows.postgame_lock_in import (
 from sleeper_manager.workflows.sleeper_locks import SleeperLockReader, with_sleeper_locks
 
 _RETRY_DELAY = timedelta(minutes=5)
+_IN_PROGRESS_RETRY_DELAY = timedelta(minutes=15)
 
 
 class PostgamePlanningCollector(Protocol):
@@ -73,7 +74,7 @@ async def dispatch_postgame_work(
             failure=FailureCategory.CONFIGURATION,
             detail="direct_game_summary_source_missing",
         )
-    skipped = await unchanged_postgame_detail(
+    skip = await unchanged_postgame_skip(
         work_items,
         repository=repository,
         lock_reader=lock_reader,
@@ -81,14 +82,24 @@ async def dispatch_postgame_work(
         now=clock(),
         recheck_from=scheduled_at,
     )
-    if skipped is not None:
-        return await _finish_all(
-            repository,
-            work_items,
-            scheduled_at=scheduled_at,
-            correlation_id=correlation_id,
-            outcome=ScheduledRunStatus.NO_ACTION,
-            detail=skipped,
+    if skip is not None:
+        return tuple(
+            [
+                await _finish(
+                    repository,
+                    work,
+                    scheduled_at=scheduled_at,
+                    correlation_id=correlation_id,
+                    outcome=ScheduledRunStatus.NO_ACTION,
+                    detail=skip.detail,
+                    retry_delay=(
+                        _IN_PROGRESS_RETRY_DELAY
+                        if work.game_id in skip.in_progress_games
+                        else _RETRY_DELAY
+                    ),
+                )
+                for work in work_items
+            ]
         )
     try:
         assembly = await collect(
@@ -248,9 +259,10 @@ async def _finish(
     detail: str | None = None,
     recommendation: object | None = None,
     retry: bool = True,
+    retry_delay: timedelta = _RETRY_DELAY,
     clock: Callable[[], datetime] | None = None,
 ) -> WorkAttemptSummary:
-    """Persist one postgame attempt and its next five-minute wake when still open."""
+    """Persist one postgame attempt and its next wake when still open."""
 
     recommendation_id = getattr(recommendation, "recommendation_id", None)
     revision = getattr(recommendation, "revision", None)
@@ -274,7 +286,7 @@ async def _finish(
         correlation_id=correlation_id,
         failure_category=failure.value if failure else None,
         terminal_summary_json=json.dumps(payload, sort_keys=True),
-        retry_at=scheduled_at + _RETRY_DELAY if retry else None,
+        retry_at=scheduled_at + retry_delay if retry else None,
     )
     return attempt
 

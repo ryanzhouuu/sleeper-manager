@@ -91,8 +91,9 @@ each five-minute wake reads only Sleeper's matchup legs. It skips collection and
 while Sleeper's submitted locks match the stored Sleeper-synced rows, and runs a full pass
 when locks differ or Sleeper is unavailable. Before collecting, each wake also reads the ESPN
 summary of every unsettled claimed game; when each one is still in progress, incomplete, or
-missing a rostered player, it records that wait, due again at the next wake, and skips collection.
-Wakes that do collect read those summaries again after collection. Scheduled daily, pre-tipoff, and other games'
+missing a rostered player, it records that wait and skips collection. A game ESPN still reports
+in progress is rechecked after 15 minutes; other waits and settled games keep the five-minute
+wake. Wakes that do collect read those summaries again after collection. Scheduled daily, pre-tipoff, and other games'
 postgame runs still replan settled games with fresh injury and lineup evidence.
 Lineup notifications include
 advice without action links. Scheduled daily no-change results send one
@@ -282,7 +283,8 @@ the history sync. `--local-db .local/state.db` targets an already initialized lo
 runtime. Neither mode deploys code or rebuilds history. Runtime metadata verification
 does not establish predictive calibration; run forecast/replay checks before activation.
 
-Postgame watches start two hours after tipoff and retry every five minutes until the
+Postgame watches start two hours after tipoff and retry every five minutes (15 while the game
+is still in progress) until the
 opportunity is acknowledged, expired, or otherwise closed. Lock and Pass notifications
 include Locked and Passed actions. Unavailable warnings have no notification actions.
 Acknowledgement updates recommendation and opportunity state together; a later ESPN

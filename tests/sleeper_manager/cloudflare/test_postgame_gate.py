@@ -9,7 +9,7 @@ from typing import Any
 import pytest
 
 from sleeper_manager.cloudflare.postgame_dispatch import dispatch_postgame_work
-from sleeper_manager.cloudflare.postgame_gate import unchanged_postgame_detail
+from sleeper_manager.cloudflare.postgame_gate import unchanged_postgame_skip
 from sleeper_manager.cloudflare.scheduler_types import ScheduledRunStatus
 from sleeper_manager.domain.lock_in import LockInOpportunityStatus
 from sleeper_manager.domain.runtime_policy import default_runtime_policy
@@ -98,8 +98,8 @@ def _check(
     async def fetch_summary(game_id, players):  # type: ignore[no-untyped-def]
         raise OSError("unsettled games read the final")
 
-    detail = asyncio.run(
-        unchanged_postgame_detail(
+    skip = asyncio.run(
+        unchanged_postgame_skip(
             work or (_work(),),
             repository=repository,  # type: ignore[arg-type]
             lock_reader=reader,
@@ -108,7 +108,7 @@ def _check(
             recheck_from=NOW,
         )
     )
-    return detail == "settled_unchanged"
+    return skip is not None and skip.detail == "settled_unchanged"
 
 
 def test_settled_games_with_unchanged_sleeper_locks_skip_collection() -> None:

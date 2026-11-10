@@ -459,7 +459,7 @@ def test_forecast_capture_does_not_change_the_planning_summary() -> None:
 
 
 def test_due_postgame_watch_fetches_espn_summary_directly(tmp_path) -> None:  # type: ignore[no-untyped-def]
-    """An unfinished game polls ESPN once, skips collection, and keeps the watch open."""
+    """A game in progress polls ESPN once, skips collection, and rechecks in 15 minutes."""
 
     async def exercise() -> None:
         repository, sender, notifications = _workflow(tmp_path, clock=lambda: NOW)
@@ -501,7 +501,7 @@ def test_due_postgame_watch_fetches_espn_summary_directly(tmp_path) -> None:  # 
         assert DueWorkKind.POSTGAME in {attempt.kind for attempt in summary.attempts}
         assert fetches == ["g1"]
         assert g1.status is ScheduledWorkStatus.RETRY
-        assert g1.due_at == postgame_at + timedelta(minutes=5)
+        assert g1.due_at == postgame_at + timedelta(minutes=15)
         lock_in = await repository.list_pending_recommendations(
             "league-1", 1, decision_type="live_lock_in"
         )

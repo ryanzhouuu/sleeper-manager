@@ -6,6 +6,7 @@ A game whose summary is not yet a usable final only records its wait, which need
 """
 
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 
 from sleeper_manager.domain.lock_in import LockInOpportunityStatus
@@ -21,7 +22,15 @@ from sleeper_manager.workflows.postgame_types import DirectGameSummarySource
 from sleeper_manager.workflows.sleeper_locks import SleeperLockReader, is_sleeper_synced_lock
 
 
-async def unchanged_postgame_detail(
+@dataclass(frozen=True, slots=True)
+class PostgameSkip:
+    """Why a wake skipped collection, and which claimed games were still being played."""
+
+    detail: str
+    in_progress_games: frozenset[str]
+
+
+async def unchanged_postgame_skip(
     work_items: tuple[ScheduledWorkRecord, ...],
     *,
     repository: AsyncRuntimeStateRepository,
@@ -29,7 +38,7 @@ async def unchanged_postgame_detail(
     fetch_summary: DirectGameSummarySource,
     now: datetime,
     recheck_from: datetime,
-) -> str | None:
+) -> PostgameSkip | None:
     """Defer unfinished games and name the skip; None when any game needs the full pass."""
     rows = await _due_rows_by_game(work_items, repository, now)
     if rows is None:
@@ -57,7 +66,10 @@ async def unchanged_postgame_detail(
         await defer_postgame_wait(
             wait, repository=repository, decision_time=now, recheck_from=recheck_from
         )
-    return "awaiting_final" if waits else "settled_unchanged"
+    return PostgameSkip(
+        "awaiting_final" if waits else "settled_unchanged",
+        frozenset(wait.opportunities[0].key.game_id for wait in waits if wait.active),
+    )
 
 
 async def _due_rows_by_game(

@@ -8,7 +8,7 @@ from typing import Any
 from sleeper_manager.cloudflare.postgame_dispatch import dispatch_postgame_work
 from sleeper_manager.cloudflare.scheduler_types import ScheduledRunStatus
 from sleeper_manager.domain.lock_in import LockInOpportunityStatus
-from sleeper_manager.domain.nba import GameStatus
+from sleeper_manager.domain.nba import DataQualityState, GameStatus
 from sleeper_manager.domain.runtime_policy import default_runtime_policy
 from sleeper_manager.persistence.base import ScheduledWorkStatus
 from sleeper_manager.persistence.lock_in_opportunities import LockInOpportunityRecord
@@ -49,8 +49,15 @@ async def _collect(**kwargs: Any) -> Any:
     raise CollectCalled
 
 
-def _fetch(status: GameStatus = GameStatus.IN_PROGRESS, *, fail: bool = False):  # type: ignore[no-untyped-def]
-    result = _summary_result(_box("espn-p1", points=10), status=status, retrieved_at=NOW)
+def _fetch(  # type: ignore[no-untyped-def]
+    status: GameStatus = GameStatus.IN_PROGRESS,
+    *,
+    fail: bool = False,
+    quality: DataQualityState = DataQualityState.FRESH,
+):
+    result = _summary_result(
+        _box("espn-p1", points=10), status=status, quality=quality, retrieved_at=NOW
+    )
 
     async def fetch(game_id: str, players: object) -> Any:
         if fail:
@@ -92,12 +99,21 @@ def test_game_in_progress_defers_without_collecting() -> None:
     assert [attempt.outcome for attempt in attempts] == [ScheduledRunStatus.NO_ACTION]
     (finished,) = repository.finished
     assert finished["status"] is ScheduledWorkStatus.RETRY
-    assert finished["retry_at"] == NOW + timedelta(minutes=5)
+    assert finished["retry_at"] == NOW + timedelta(minutes=15)
     assert json.loads(finished["terminal_summary_json"])["detail"] == "awaiting_final"
     (deferred,) = repository.deferred
     assert deferred.status is LockInOpportunityStatus.ACTIVE
     assert deferred.next_check_at == NOW + timedelta(minutes=5)
     assert json.loads(deferred.trace_json or "{}") == {"reason_codes": ["game_not_final"]}
+
+
+def test_incomplete_final_keeps_the_five_minute_watch() -> None:
+    repository = WaitRepository((_PLAYING,))
+    _dispatch(repository, _fetch(GameStatus.FINAL, quality=DataQualityState.PARTIAL))
+    (finished,) = repository.finished
+    assert finished["retry_at"] == NOW + timedelta(minutes=5)
+    (deferred,) = repository.deferred
+    assert deferred.status is LockInOpportunityStatus.FINALIZING
 
 
 def test_usable_final_takes_the_full_pass() -> None:
@@ -112,6 +128,11 @@ def test_settled_game_beside_a_live_one_skips_when_sleeper_locks_match() -> None
     work = (_work(), _work("g0"))
     assert not _collected(repository, _fetch(), reader=Reader(), work=work)
     assert [row.key.game_id for row in repository.deferred] == ["g1"]
+    retry_at = {item["work_id"]: item["retry_at"] for item in repository.finished}
+    assert retry_at == {
+        "work-g1": NOW + timedelta(minutes=15),
+        "work-g0": NOW + timedelta(minutes=5),
+    }
 
 
 def test_settled_game_beside_a_live_one_replans_after_a_new_sleeper_lock() -> None:
