@@ -47,6 +47,8 @@ class SideScore:
     lock_dates: Mapping[str, date] = field(
         default_factory=lambda: MappingProxyType({}), compare=False
     )
+    starter_ids: tuple[str, ...] = field(default=(), compare=False)
+    locked_ids: frozenset[str] = field(default=frozenset(), compare=False)
 
 
 @dataclass(frozen=True, slots=True)
@@ -122,8 +124,17 @@ async def side_score(
 ) -> SideScore:
     locked = len(leg.starters_games)
     starters = len(leg.starters)
+    locked_ids = frozenset(leg.starters_games)
     if leg.points is not None:
-        return SideScore(leg.points, True, locked, starters, False)
+        return SideScore(
+            leg.points,
+            True,
+            locked,
+            starters,
+            False,
+            starter_ids=leg.starters,
+            locked_ids=locked_ids,
+        )
     total = 0.0
     pending = False
     dates: dict[str, date] = {}
@@ -149,6 +160,8 @@ async def side_score(
         starters,
         pending,
         MappingProxyType(dates),
+        starter_ids=leg.starters,
+        locked_ids=locked_ids,
     )
 
 

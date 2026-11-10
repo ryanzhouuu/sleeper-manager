@@ -179,6 +179,7 @@ def assemble_home(
     lineup: Sequence[dict[str, Any]] = (),
     plan: dict[str, Any] | None = None,
     lock_data: Literal["ready", "pending", "unavailable"] = "unavailable",
+    win_probability: float | None = None,
 ) -> dict[str, Any]:
     """Build the public document. Unavailable games contribute no items."""
     if games_status == "unavailable":
@@ -202,6 +203,7 @@ def assemble_home(
         "matchup": {
             "manager": _side(manager),
             "opponent": None if opponent is None else _side(opponent),
+            "win_probability": win_probability,
         },
         "roster": [_roster_item(row) for row in roster],
         "games": {"status": games_status, "items": game_items},

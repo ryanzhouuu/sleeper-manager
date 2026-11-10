@@ -59,6 +59,13 @@ comparison has no placement-count or continuation-count cutoff. It shares random
 draws across alternatives, reuses opposing-action comparisons, and computes the
 diagnostic upper bound only for the selected continuation. Move verification and
 runtime resource limits still apply; interrupted work does not publish partial advice.
+The first daily or pre-tipoff run of each manager-local day also projects the current
+opponent's roster with the active provider and caches those game outcomes until local
+midnight; postgame wakes never do. The dashboard combines that cache, Sleeper's live
+opponent locks, and the plan's simulated team finishes into a win probability. It assumes
+each opponent starter locks a finished game only when it beats waiting, reads Sleeper stats
+only for an unlocked opponent game 3.5 hours after tipoff, and caches them for the day. Any
+missing piece leaves the probability null.
 Pre-tipoff watches cover only the current fantasy week. Unchanged watches do not
 write or reset retry timing. Each reconciliation cancels at most 50 obsolete future
 watches, so legacy rows retire gradually without a large cleanup burst.

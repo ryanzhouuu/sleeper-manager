@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 
 from sleeper_manager.cloudflare.home import build_home, roster_rows
@@ -689,3 +690,49 @@ def test_home_lineup_reports_unavailable_lock_data(tmp_path) -> None:  # type: i
 
     assert document["lock_data"] == "unavailable"
     assert [row["slot"] for row in document["lineup"]] == ["PG", "BN"]
+
+
+def test_home_reports_the_chance_of_beating_a_fully_locked_opponent(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    from sleeper_manager.cloudflare.home_cache import write_home_cache
+    from sleeper_manager.cloudflare.opponent_outlook import outlook_cache_key
+
+    sleeper = _locked_sleeper()
+    sleeper.legs_payload[1] = {**sleeper.legs_payload[1], "starters": ["other"]}
+    repository = _repository(tmp_path)
+    trace = {"schema_version": 3, "kind": "weekly_lineup", "terminal_score_samples": [10, 20]}
+    asyncio.run(
+        repository.create_recommendation(
+            RecommendationRecord(
+                recommendation_id="rec-1",
+                idempotency_key="rec-1",
+                league_id="league-1",
+                fantasy_week=3,
+                player_id="player-1",
+                game_id=None,
+                decision_type="weekly_lineup",
+                title="Lineup",
+                message="Hold.",
+                deadline=TIPOFF,
+                policy_version="policy",
+                created_at=NOW,
+                trace_json=json.dumps(trace),
+            )
+        )
+    )
+    without_outlook = _build(sleeper, FakeSchedule(), repository).payload["matchup"]
+    asyncio.run(
+        write_home_cache(
+            repository,
+            outlook_cache_key("league-1", 3),
+            {"roster_id": 2, "projected_at": NOW.isoformat(), "players": {}},
+            resource="opponent-outlook",
+            timezone_name="America/Chicago",
+            now=NOW,
+        )
+    )
+
+    matchup = _build(sleeper, FakeSchedule(), repository).payload["matchup"]
+
+    assert without_outlook["win_probability"] is None
+    assert matchup["opponent"]["score"] == 12.0
+    assert matchup["win_probability"] == 0.5

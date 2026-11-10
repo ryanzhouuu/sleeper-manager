@@ -14,7 +14,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import ValidationError
 
-from sleeper_manager.cloudflare.dashboard_lineup import home_lineup
+from sleeper_manager.cloudflare.dashboard_lineup import home_lineup, load_plan_trace
 from sleeper_manager.cloudflare.home_cache import decode_schedule, read_home_cache, write_home_cache
 from sleeper_manager.cloudflare.home_document import (
     GameRow,
@@ -37,6 +37,7 @@ from sleeper_manager.cloudflare.home_roster import (
     roster_rows,
     roster_standings,
 )
+from sleeper_manager.cloudflare.home_win_probability import dashboard_win_probability
 from sleeper_manager.cloudflare.live_score import home_matchup_scores, scored_sides
 from sleeper_manager.cloudflare.providers import CloudflareProviderError
 from sleeper_manager.cloudflare.routes import RouteResponse
@@ -184,6 +185,7 @@ async def build_home(
         now=now,
     )
     recommendation = await _recommendation(repository, league_id, week, now=now)
+    trace = await load_plan_trace(repository, league_id, week, now=now)
     lineup, plan = await home_lineup(
         repository,
         league_id,
@@ -191,8 +193,21 @@ async def build_home(
         manager_roster.roster_id,
         rows,
         games if games_status == "ready" else (),
+        trace=trace,
         now=now,
         sleeper_locks=None if manager_score is None else manager_score.lock_dates,
+    )
+    win_probability = await dashboard_win_probability(
+        repository,
+        league_id,
+        league.scoring_settings,
+        trace,
+        scores,
+        manager_roster.roster_id,
+        read_stats=sleeper.player_game_stats,
+        week=week,
+        timezone_name=timezone_name,
+        now=now,
     )
     return RouteResponse(
         200,
@@ -213,6 +228,7 @@ async def build_home(
             lineup=lineup,
             plan=plan,
             lock_data=manager_side.lock_data,
+            win_probability=win_probability,
         ),
     )
 

@@ -47,6 +47,7 @@ async def home_lineup(
     rows: Sequence[RosterRow],
     games: Sequence[GameRow],
     *,
+    trace: Mapping[str, Any] | None,
     now: datetime,
     sleeper_locks: Mapping[str, date] | None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -59,7 +60,6 @@ async def home_lineup(
         )
     except Exception:
         records = ()
-    trace = await load_plan_trace(repository, league_id, week, now=now)
     lineup = lineup_document(rows, games, records, trace, now=now, sleeper_locks=sleeper_locks)
     names = {row.player_id: row.name for row in rows if row.player_id and row.name}
     return lineup, plan_summary(trace, names)
