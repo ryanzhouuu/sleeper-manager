@@ -131,7 +131,8 @@ ul {
   justify-items: end;
 }
 
-.lock-progress {
+.lock-progress,
+.win-chance {
   color: var(--accent);
 }
 

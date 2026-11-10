@@ -149,6 +149,16 @@ describe("parseHomeDocument", () => {
     expect(document.games.items[0].injury_status).toBeNull();
   });
 
+  it("reads the chance to win and defaults it when omitted", () => {
+    const omitted = withFields({ "matchup.win_probability": REMOVE });
+
+    expect(parseHomeDocument(fixture).matchup.win_probability).toBe(0.62);
+    expect(parseHomeDocument(omitted).matchup.win_probability).toBeNull();
+    expect(() =>
+      parseHomeDocument(withFields({ "matchup.win_probability": 1.2 })),
+    ).toThrow();
+  });
+
   it("treats a missing or unknown plan status as null", () => {
     const missing = withFields({ "recommendation.plan_status": REMOVE });
     const unknown = withFields({ "recommendation.plan_status": "pending" });

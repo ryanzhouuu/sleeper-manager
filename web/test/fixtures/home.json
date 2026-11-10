@@ -34,7 +34,8 @@
       "locked": 3,
       "starters": 9,
       "lock_data": "ready"
-    }
+    },
+    "win_probability": 0.62
   },
   "roster": [
     {

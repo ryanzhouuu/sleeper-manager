@@ -2,6 +2,7 @@ import {
   MISSING,
   formatLocalTime,
   formatLockProgress,
+  formatPercent,
   formatPointsFor,
   formatRecord,
   formatScore,
@@ -51,6 +52,11 @@ export function WeekBlock({
           <SideRow key={index} side={side} />
         ))}
       </ul>
+      {matchup.opponent === null || matchup.win_probability === null ? null : (
+        <p className="win-chance">
+          {formatPercent(matchup.win_probability)} chance to win
+        </p>
+      )}
     </section>
   );
 }

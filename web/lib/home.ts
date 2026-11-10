@@ -118,7 +118,11 @@ export interface PlanSummary {
 
 export interface HomeDocument {
   league: { name: string; week: number; timezone: string };
-  matchup: { manager: MatchupSide; opponent: MatchupSide | null };
+  matchup: {
+    manager: MatchupSide;
+    opponent: MatchupSide | null;
+    win_probability: number | null;
+  };
   roster: RosterEntry[];
   games: { status: SectionStatus; items: GameItem[] };
   recommendation: Recommendation;
@@ -190,6 +194,7 @@ export function parseHomeDocument(value: unknown): HomeDocument {
     matchup: {
       manager: side(matchup.manager),
       opponent: matchup.opponent === null ? null : side(matchup.opponent),
+      win_probability: probability(matchup.win_probability),
     },
     roster: array(root.roster).map(rosterEntry),
     games: {
@@ -449,6 +454,14 @@ function nullableString(value: unknown): string | null {
 
 function nullableInteger(value: unknown): number | null {
   return value === null || value === undefined ? null : integer(value);
+}
+
+function probability(value: unknown): number | null {
+  const parsed = nullableNumber(value);
+  if (parsed !== null && (parsed < 0 || parsed > 1)) {
+    throw new InvalidDocument("probability");
+  }
+  return parsed;
 }
 
 function nullableNumber(value: unknown): number | null {

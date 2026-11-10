@@ -34,6 +34,7 @@ describe("WeekBlock", () => {
         matchup={{
           manager: { ...document.matchup.manager, score: null },
           opponent: null,
+          win_probability: 0.62,
         }}
       />,
     );
@@ -41,6 +42,22 @@ describe("WeekBlock", () => {
     expect(html).not.toContain("Away Team");
     expect(html).not.toContain("142.6");
     expect(html.match(/<li[ >]/g)).toHaveLength(1);
+    expect(html).not.toContain("chance to win");
+  });
+
+  it("shows the chance to win only when the worker reports one", () => {
+    const shown = renderToStaticMarkup(
+      <WeekBlock league={document.league} matchup={document.matchup} />,
+    );
+    const hidden = renderToStaticMarkup(
+      <WeekBlock
+        league={document.league}
+        matchup={{ ...document.matchup, win_probability: null }}
+      />,
+    );
+
+    expect(shown).toContain("62% chance to win");
+    expect(hidden).not.toContain("chance to win");
   });
 });
 
@@ -50,7 +67,7 @@ describe("WeekBlock lock progress", () => {
     renderToStaticMarkup(
       <WeekBlock
         league={document.league}
-        matchup={{ manager: side, opponent: null }}
+        matchup={{ manager: side, opponent: null, win_probability: null }}
       />,
     );
 
