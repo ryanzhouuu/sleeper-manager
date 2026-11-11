@@ -4,6 +4,7 @@ import asyncio
 import json
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -15,6 +16,7 @@ from sleeper_manager.domain.lock_in import LockInOpportunityStatus
 from sleeper_manager.domain.runtime_policy import default_runtime_policy
 from sleeper_manager.persistence.base import (
     DueWorkKind,
+    RecommendationStatus,
     ScheduledWorkRecord,
     ScheduledWorkStatus,
 )
@@ -38,6 +40,8 @@ def _row(player_id: str = "p1", game_id: str = "g1", **changes: Any) -> LockInOp
         created_at=NOW - timedelta(hours=3),
         updated_at=NOW - timedelta(minutes=5),
         stable_score=31.5,
+        current_observation_fingerprint="final-1",
+        stable_fingerprint="final-1",
         current_recommendation_id="rec-1",
         current_observed_at=NOW - timedelta(minutes=5),
     )
@@ -59,10 +63,24 @@ def _work(game_id: str | None = "g1") -> ScheduledWorkRecord:
 
 
 class Repository:
-    def __init__(self, due: tuple[LockInOpportunityRecord, ...], week: tuple[Any, ...] = ()):
+    def __init__(
+        self,
+        due: tuple[LockInOpportunityRecord, ...],
+        week: tuple[Any, ...] = (),
+        superseded: frozenset[str] = frozenset(),
+    ):
         self.due = due
         self.week = week or due
+        self.superseded = superseded
         self.finished: list[dict[str, Any]] = []
+
+    async def get_recommendation(self, recommendation_id: str) -> object:
+        status = (
+            RecommendationStatus.SUPERSEDED
+            if recommendation_id in self.superseded
+            else RecommendationStatus.PENDING
+        )
+        return SimpleNamespace(recommendation_id=recommendation_id, status=status)
 
     async def list_due_lock_in_opportunities(self, now: datetime) -> tuple[Any, ...]:
         return self.due
@@ -131,16 +149,35 @@ def test_matching_sleeper_synced_lock_still_counts_as_unchanged() -> None:
 @pytest.mark.parametrize(
     "row",
     [
-        _row(status=LockInOpportunityStatus.FINALIZING),
+        _row(current_observation_fingerprint="final-2"),
         _row(stable_score=None),
         _row(current_recommendation_id=None),
+        _row(status=LockInOpportunityStatus.ACTIVE),
     ],
-    ids=["stabilizing", "no_stable_score", "no_advice"],
+    ids=["score_changed", "no_stable_score", "no_advice", "still_playing"],
 )
 def test_unsettled_or_stale_games_take_the_full_pass(row: LockInOpportunityRecord) -> None:
     reader = Reader()
     assert not _check(Repository((row,)), reader)
     assert reader.calls == 0
+
+
+def test_superseded_advice_takes_the_full_pass() -> None:
+    reader = Reader()
+    assert not _check(Repository((_row(),), superseded=frozenset({"rec-1"})), reader)
+    assert reader.calls == 0
+
+
+def test_repolled_final_with_pending_advice_counts_as_settled() -> None:
+    """Each poll returns rows to Finalizing; up-to-you and unavailable advice stay pending."""
+    up_to_you = _row(status=LockInOpportunityStatus.FINALIZING)
+    unavailable = _row(
+        "p2",
+        status=LockInOpportunityStatus.FINALIZING,
+        current_recommendation_id="rec-unavailable",
+        current_recommendation_kind="live_lock_in_unavailable",
+    )
+    assert _check(Repository((up_to_you, unavailable)), Reader())
 
 
 def test_long_settled_games_stay_skipped_without_a_periodic_full_pass() -> None:

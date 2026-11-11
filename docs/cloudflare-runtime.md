@@ -86,8 +86,9 @@ the message gives the lock slot, each side's projected week, the share of simula
 which each side finishes ahead, and each side's win chance under a win objective. Its
 `up_to_you` advice record settles the row like Lock or Pass advice. Plan identity counts
 close calls only by player and game, so shifting confidences do not re-send the message.
-Once every due row for a watched game is actionable with a stable score and recorded advice,
-each five-minute wake reads only Sleeper's matchup legs. It skips collection and replanning
+Once every due row for a watched game has a stable score whose latest poll matches it and
+pending advice (Lock, Pass, up-to-you, or an unavailable warning), whether the row is Actionable
+or back in Finalizing after a repoll, each five-minute wake reads only Sleeper's matchup legs. It skips collection and replanning
 while Sleeper's submitted locks match the stored Sleeper-synced rows, and runs a full pass
 when locks differ or Sleeper is unavailable. Before collecting, each wake also reads the ESPN
 summary of every unsettled claimed game; when each one is still in progress, incomplete, or

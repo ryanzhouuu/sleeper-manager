@@ -1,7 +1,9 @@
 """Skip full postgame collection while claimed watches have nothing new to evaluate.
 
-Once a game's scores are stable and advice is recorded, only Sleeper's submitted locks change
-between scheduled runs; pre-tipoff, daily, and other finals replan with fresh evidence anyway.
+Once a game's scores are stable and its advice is still pending, only Sleeper's submitted locks
+change between scheduled runs; pre-tipoff, daily, and other finals replan with fresh evidence
+anyway. Row status is not the test: every poll returns finals to Finalizing, and up-to-you or
+unavailable advice is never re-marked Actionable.
 A game whose summary is not yet a usable final only records its wait, which needs no team state.
 """
 
@@ -11,7 +13,11 @@ from datetime import datetime
 
 from sleeper_manager.domain.lock_in import LockInOpportunityStatus
 from sleeper_manager.integrations.sleeper.matchup_legs import parse_matchup_legs
-from sleeper_manager.persistence.base import AsyncRuntimeStateRepository, ScheduledWorkRecord
+from sleeper_manager.persistence.base import (
+    AsyncRuntimeStateRepository,
+    RecommendationStatus,
+    ScheduledWorkRecord,
+)
 from sleeper_manager.persistence.lock_in_opportunities import LockInOpportunityRecord
 from sleeper_manager.workflows.postgame_lock_in import (
     PostgameWait,
@@ -43,12 +49,13 @@ async def unchanged_postgame_skip(
     rows = await _due_rows_by_game(work_items, repository, now)
     if rows is None:
         return None
-    settled = tuple(
-        row for game_rows in rows.values() if _all_settled(game_rows) for row in game_rows
-    )
+    settled_games = {
+        game_id for game_id, game_rows in rows.items() if await _all_settled(game_rows, repository)
+    }
+    settled = tuple(row for game_id in settled_games for row in rows[game_id])
     waits: list[PostgameWait] = []
     for game_id, game_rows in rows.items():
-        if _all_settled(game_rows):
+        if game_id in settled_games:
             continue
         try:
             wait = await read_postgame_wait(
@@ -115,13 +122,25 @@ async def _sleeper_locks_match(
     return set(leg.starters_games) == synced
 
 
-def _all_settled(rows: tuple[LockInOpportunityRecord, ...]) -> bool:
-    return all(map(_settled, rows))
+async def _all_settled(
+    rows: tuple[LockInOpportunityRecord, ...], repository: AsyncRuntimeStateRepository
+) -> bool:
+    for row in rows:
+        advice_id = row.current_recommendation_id
+        if not _stable(row) or advice_id is None:
+            return False
+        advice = await repository.get_recommendation(advice_id)
+        if advice is None or advice.status is not RecommendationStatus.PENDING:
+            return False
+    return True
 
 
-def _settled(row: LockInOpportunityRecord) -> bool:
+def _stable(row: LockInOpportunityRecord) -> bool:
     return (
-        row.status is LockInOpportunityStatus.ACTIONABLE
+        row.status in _SETTLEABLE
         and row.stable_score is not None
-        and row.current_recommendation_id is not None
+        and row.current_observation_fingerprint == row.stable_fingerprint
     )
+
+
+_SETTLEABLE = frozenset({LockInOpportunityStatus.ACTIONABLE, LockInOpportunityStatus.FINALIZING})
