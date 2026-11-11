@@ -1,9 +1,6 @@
-"""Split complete advice for provider limits without dropping text or confirmation actions."""
+"""Split complete advice for provider limits without dropping text."""
 
-from dataclasses import replace
 from typing import Literal
-
-from sleeper_manager.notifications.base import Notification
 
 
 def split_text(
@@ -29,23 +26,3 @@ def split_text(
         parts.append(text[offset:end])
         offset = end
     return tuple(parts) or ("",)
-
-
-def ntfy_parts(notification: Notification) -> tuple[Notification, ...]:
-    """Keep each Locked/Passed pair together below ntfy's three-action limit."""
-    text = split_text(notification.message, 2000, encoding="utf-8")
-    groups = tuple(
-        notification.actions[i : i + 2] for i in range(0, len(notification.actions), 2)
-    ) or ((),)
-    count = max(len(text), len(groups))
-    return tuple(
-        replace(
-            notification,
-            title=f"{notification.title} ({i + 1}/{count})" if count > 1 else notification.title,
-            message=text[i]
-            if i < len(text)
-            else "Additional confirmation actions for this recommendation.",
-            actions=groups[i] if i < len(groups) else (),
-        )
-        for i in range(count)
-    )

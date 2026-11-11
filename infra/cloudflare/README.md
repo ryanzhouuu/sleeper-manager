@@ -30,9 +30,7 @@ Cloudflare. Create a Discord channel webhook and save its URL as an encrypted
 `DISCORD_WEBHOOK_URL` secret. Dashboard reminders to synchronize Wrangler configuration
 do not require copying secret values into `[vars]`.
 
-Keep `NTFY_TOPIC` unset for Discord-only delivery. If it is configured, ntfy takes
-priority and Discord becomes the fallback. `NTFY_ACCESS_TOKEN` is optional for ntfy.
-Local commands still accept either destination independently of the Worker configuration.
+Discord is the only notification destination, for the Worker and for local commands.
 
 Apply both schemas and deploy capture only:
 

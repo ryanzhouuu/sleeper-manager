@@ -2,7 +2,7 @@
 
 Personal, read-only fantasy basketball assistant for Sleeper Lock-In leagues. It
 combines Sleeper league data with NBA schedules, availability, and projections to
-recommend weekly lineup and Lock-In decisions. Optional ntfy or Discord
+recommend weekly lineup and Lock-In decisions. Optional Discord
 notifications; it never submits roster changes to Sleeper.
 
 See [LOCK_IN_MODE.md](LOCK_IN_MODE.md) for the league rules the decision engine
@@ -49,13 +49,10 @@ Settings load from environment variables or `.env`.
 | `TIMEZONE` | Display and scheduling timezone | `America/Chicago` |
 | `MANAGER_POLICY_PATH` | Manager policy TOML | `.local/policy.toml` |
 | `SQLITE_PATH` | Local state database | `.local/state.db` |
-| `NTFY_TOPIC` | Enables ntfy delivery | Empty |
-| `NTFY_BASE_URL` | ntfy service root | `https://ntfy.sh` |
-| `NTFY_ACCESS_TOKEN` | Optional ntfy auth | Empty |
 | `DISCORD_WEBHOOK_URL` | Enables Discord delivery | Empty |
 | `DASHBOARD_URL` | Dashboard link attached to notifications | Empty |
 
-Notification commands need `NTFY_TOPIC` or `DISCORD_WEBHOOK_URL`. Notifications are
+Notification commands need `DISCORD_WEBHOOK_URL`. Notifications are
 informational: lock state is read from Sleeper, so they carry no Locked/Pass actions.
 The checked-in Worker configuration requires Discord; store its webhook URL as a
 Cloudflare secret as described in [Cloudflare deployment](infra/cloudflare/README.md).
@@ -113,7 +110,7 @@ Locked confirms a lock already made in Sleeper; Pass records
 the manager's decision not to lock that game. Passing allows the planner to substitute
 the player without requiring a substitution. Delivering advice never records a
 decision or proves that a lineup move or lock occurred. Discord links
-and ntfy confirmation buttons open a review screen; only submitting its form records
+open a review screen; only submitting its form records
 a decision. The dashboard
 links to owner-only controls for recording or correcting each player/game's
 Lock/Pass status. The editor shows each player's latest finalized, still-lockable game,
@@ -149,8 +146,7 @@ still make advice or totals unavailable. These changes do not claim a weekly
 scoring improvement or automatic lock detection.
 
 Large deliveries use ordered message parts to preserve the whole
-recommendation and its confirmations within [Discord's content limit](https://docs.discord.com/developers/resources/webhook#execute-webhook)
-and [ntfy's message/action limits](https://docs.ntfy.sh/publish/#limitations).
+recommendation and its confirmations within [Discord's content limit](https://docs.discord.com/developers/resources/webhook#execute-webhook).
 Scheduled daily runs send one confirmation per manager-local day when no changes
 are needed, including availability warnings. Unchanged pre-tipoff results stay quiet.
 A failed multipart delivery retries as a whole, so already received parts can repeat

@@ -26,7 +26,6 @@ redact_query_string = true
 enabled = true
 
 [vars]
-NTFY_BASE_URL = "https://ntfy.sh"
 OPEN_SLEEPER_URL = "https://sleeper.com"
 # DASHBOARD_URL: optional dashboard link attached to notifications.
 

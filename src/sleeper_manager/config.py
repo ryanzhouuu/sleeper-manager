@@ -166,10 +166,6 @@ class Settings(BaseSettings):
     timezone: str = "America/Chicago"
     manager_policy_path: Path = Path(".local/policy.toml")
 
-    ntfy_base_url: str = "https://ntfy.sh"
-    ntfy_topic: str = ""
-    ntfy_access_token: SecretStr | None = None
-
     discord_webhook_url: SecretStr | None = None
 
     state_backend: Literal["sqlite"] = "sqlite"
@@ -184,7 +180,7 @@ class Settings(BaseSettings):
 
     @property
     def notifications_configured(self) -> bool:
-        return bool(self.ntfy_topic or self.discord_webhook_url)
+        return self.discord_webhook_url is not None
 
     def load_manager_policy(self) -> ManagerPolicy:
         return load_manager_policy(self.manager_policy_path)

@@ -60,15 +60,7 @@ class NotificationLoop:
         self._repository = repository
         self._dispatcher = dispatcher
         self._actions = (
-            (
-                NotificationAction(
-                    label="Open dashboard",
-                    url=dashboard_url,
-                    method="GET",
-                    kind="view",
-                    clear=False,
-                ),
-            )
+            (NotificationAction(label="Open dashboard", url=dashboard_url),)
             if dashboard_url
             else ()
         )
@@ -161,8 +153,6 @@ class NotificationLoop:
         notification = Notification(
             title=request.title,
             message=request.message,
-            priority=4,
-            tags=("basketball", "warning"),
             actions=self._actions,
         )
         delivery = await self._dispatcher.send_with_result(notification)

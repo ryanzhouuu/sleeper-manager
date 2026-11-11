@@ -9,7 +9,6 @@ import respx
 
 from sleeper_manager.notifications.base import Notification, NotificationAction
 from sleeper_manager.notifications.discord import DiscordSender
-from sleeper_manager.notifications.ntfy import NtfySender
 from sleeper_manager.notifications.parts import split_text
 
 
@@ -43,31 +42,6 @@ def test_discord_delivers_all_advice_and_confirmation_links_in_order() -> None:
     assert all(
         any(f"[{action.label}]({action.url})" in part for part in contents) for action in actions
     )
-
-
-@respx.mock
-def test_ntfy_preserves_paired_actions_across_message_parts() -> None:
-    route = respx.post("https://ntfy.example").mock(return_value=httpx.Response(200))
-    actions = tuple(
-        NotificationAction(f"Player {i}: {kind}", f"https://example.test/{i}/{kind}")
-        for i in range(3)
-        for kind in ("Locked", "Passed")
-    )
-    message = "Complete lineup 🏀\n" * 300
-
-    async def run() -> None:
-        async with NtfySender("synthetic", base_url="https://ntfy.example") as sender:
-            await sender.send(Notification("Team recommendation", message, actions=actions))
-
-    asyncio.run(run())
-    payloads = [json.loads(call.request.content) for call in route.calls]
-    assert all(
-        len(part["message"].encode()) <= 2000 and len(part.get("actions", [])) <= 2
-        for part in payloads
-    )
-    assert "".join(part["message"] for part in payloads) == message
-    sent = [action["url"] for part in payloads for action in part.get("actions", [])]
-    assert sent == [action.url for action in actions]
 
 
 @respx.mock

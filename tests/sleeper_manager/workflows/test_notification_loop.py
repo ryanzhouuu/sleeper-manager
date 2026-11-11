@@ -111,12 +111,7 @@ def test_notifications_link_only_to_the_dashboard(tmp_path) -> None:  # type: ig
         result = asyncio.run(workflow.run(replace(request(), decision_type=decision_type)))
         assert result.notification is not None
         (action,) = result.notification.actions
-        assert (action.label, action.url, action.method, action.kind) == (
-            "Open dashboard",
-            "https://dashboard.test/",
-            "GET",
-            "view",
-        )
+        assert (action.label, action.url) == ("Open dashboard", "https://dashboard.test/")
         assert "/ack" not in action.url
 
 

@@ -16,7 +16,6 @@ from sleeper_manager.cloudflare.dispatcher import dispatch_due_work, scheduled_a
 from sleeper_manager.cloudflare.manager_context import read_tipoff_lineup
 from sleeper_manager.cloudflare.notifications import (
     CloudflareDiscordSender,
-    CloudflareNtfySender,
 )
 from sleeper_manager.cloudflare.planning import (
     CloudflarePlanningAssembly,
@@ -56,27 +55,11 @@ def _value(env: Any, name: str, default: str = "") -> str:
 
 
 def build_dispatcher(env: Any, fetcher: Any) -> NotificationDispatcher:
-    """Build Worker notification senders. Raises ValueError when none are configured."""
-    ntfy_topic = _value(env, "NTFY_TOPIC")
+    """Build the Discord sender. Raises ValueError when the webhook is not configured."""
     discord_url = _value(env, "DISCORD_WEBHOOK_URL")
-    if not ntfy_topic and not discord_url:
-        raise ValueError("At least one notification destination is required")
-    ntfy = (
-        CloudflareNtfySender(
-            ntfy_topic,
-            base_url=_value(env, "NTFY_BASE_URL", "https://ntfy.sh"),
-            access_token=_value(env, "NTFY_ACCESS_TOKEN"),
-            fetcher=fetcher,
-        )
-        if ntfy_topic
-        else None
-    )
-    discord = CloudflareDiscordSender(discord_url, fetcher=fetcher) if discord_url else None
-    if ntfy is not None:
-        return NotificationDispatcher(ntfy, discord)
-    if discord is not None:
-        return NotificationDispatcher(discord)
-    raise ValueError("At least one notification destination is required")
+    if not discord_url:
+        raise ValueError("DISCORD_WEBHOOK_URL is required for notifications")
+    return NotificationDispatcher(CloudflareDiscordSender(discord_url, fetcher=fetcher))
 
 
 async def run_scheduled(

@@ -363,10 +363,7 @@ def test_scheduled_runtime_never_sends_placeholder() -> None:
         database = FakeD1()
         await database.exec(D1_SCHEMA)
         env = SimpleNamespace(
-            NTFY_TOPIC="topic",
-            NTFY_BASE_URL="https://ntfy.test",
-            NTFY_ACCESS_TOKEN="",
-            DISCORD_WEBHOOK_URL="",
+            DISCORD_WEBHOOK_URL="https://discord.example/hook",
             SLEEPER_LEAGUE_ID="league-1",
             SLEEPER_USER_ID="user-1",
             OPEN_SLEEPER_URL="https://sleeper.com",
@@ -419,10 +416,7 @@ def test_forecast_capture_does_not_change_the_planning_summary() -> None:
             raise AssertionError(url)
 
         without_archive = SimpleNamespace(
-            NTFY_TOPIC="topic",
-            NTFY_BASE_URL="https://ntfy.test",
-            NTFY_ACCESS_TOKEN="",
-            DISCORD_WEBHOOK_URL="",
+            DISCORD_WEBHOOK_URL="https://discord.example/hook",
             SLEEPER_LEAGUE_ID="league-1",
             SLEEPER_USER_ID="user-1",
             OPEN_SLEEPER_URL="https://sleeper.com",

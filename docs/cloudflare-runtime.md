@@ -42,10 +42,8 @@ stays quiet; prior-day and recovery jobs do not satisfy today's daily completion
 These operational records use decision type `daily_plan_delayed`, fantasy week `0`,
 and player `system` to keep them separate from weekly advice. They have no notification actions.
 Watchdog failures are logged without blocking planning.
-Failed ntfy deliveries retain the HTTP status, a numeric provider error code from a
-small JSON response, and numeric `Retry-After` guidance when present. Response text,
-topics, and payloads are omitted. Diagnostic parsing failures preserve the original
-HTTP failure; recording retry guidance does not change the scheduled retry policy.
+Notifications go only to the `DISCORD_WEBHOOK_URL` webhook. A failed delivery records the
+Discord HTTP status without the response text or payload.
 
 Each planning consumer claims due daily, pre-tipoff, postgame, or delivery-retry work. Daily and
 pre-tipoff wakes run the weekly lineup planner at most once and refresh live Lock-In
@@ -307,8 +305,6 @@ not print those values; Wrangler secrets stay in the Worker environment:
 
 The production Wrangler configuration declares these secret names as required.
 Their values remain encrypted in Cloudflare and must never be added to `[vars]`.
-For Discord-only delivery, leave `NTFY_TOPIC` unset. Configuring it selects ntfy as
-primary and Discord as fallback; `NTFY_ACCESS_TOKEN` is optional for that setup.
 Discord notifications contain the advice and eligible Locked/Passed action links,
 without an appended Sleeper navigation link.
 

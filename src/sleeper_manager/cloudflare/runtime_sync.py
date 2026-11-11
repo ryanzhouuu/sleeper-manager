@@ -228,7 +228,6 @@ async def sync_cloudflare_runtime_data(
 def redact_secrets(text: str) -> str:
     markers = (
         "CLOUDFLARE_API_TOKEN",
-        "NTFY_ACCESS_TOKEN",
         "DISCORD_WEBHOOK_URL",
         "api_token",
         "Bearer ",

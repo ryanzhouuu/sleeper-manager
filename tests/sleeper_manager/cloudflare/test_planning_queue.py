@@ -87,7 +87,7 @@ def test_cron_captures_before_enqueue_without_claiming_or_collecting(monkeypatch
         monkeypatch.setattr("sleeper_manager.cloudflare.runtime._capture_forecast", capture)
         monkeypatch.setattr("sleeper_manager.cloudflare.runtime.dispatch_due_work", unexpected)
         env = SimpleNamespace(
-            NTFY_TOPIC="test-topic",
+            DISCORD_WEBHOOK_URL="https://discord.example/hook",
             sleeper_manager_state=database,
             PLANNING_QUEUE=OrderedQueue(),
         )
@@ -112,7 +112,7 @@ def test_enqueue_failure_keeps_work_unclaimed_for_next_cron(monkeypatch) -> None
                 raise OSError("queue unavailable")
 
         env = SimpleNamespace(
-            NTFY_TOPIC="test-topic",
+            DISCORD_WEBHOOK_URL="https://discord.example/hook",
             sleeper_manager_state=database,
             PLANNING_QUEUE=BrokenQueue(),
         )

@@ -139,7 +139,7 @@ def test_delivery_attempts_exclude_claim_rows_from_attempt_numbers() -> None:
             DeliveryAttemptRecord(
                 delivery_id="delivery-1",
                 recommendation_id=record.recommendation_id,
-                provider="ntfy",
+                provider="discord",
                 attempt_number=1,
                 attempted_at=NOW,
                 succeeded=True,

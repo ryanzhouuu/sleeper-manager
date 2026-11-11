@@ -4,6 +4,7 @@ import asyncio
 from types import SimpleNamespace
 
 import httpx
+from pydantic import SecretStr
 
 from sleeper_manager.config import Settings
 from sleeper_manager.workflows import runtime_commands as module
@@ -47,7 +48,7 @@ def test_local_schedule_passes_archives_and_completed_collection_clock(tmp_path,
         _env_file=None,
         sleeper_league_id="fixture",
         sleeper_user_id="fixture",
-        ntfy_topic="fixture",
+        discord_webhook_url=SecretStr("https://discord.example/hook"),
         sqlite_path=tmp_path / "state.db",
     )
     assert asyncio.run(module._run_scheduled(settings)) == 0

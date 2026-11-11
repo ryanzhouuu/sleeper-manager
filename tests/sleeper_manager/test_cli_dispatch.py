@@ -28,8 +28,6 @@ def isolated_cli_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     for key in (
         "SLEEPER_LEAGUE_ID",
         "SLEEPER_USER_ID",
-        "NTFY_TOPIC",
-        "NTFY_ACCESS_TOKEN",
         "DISCORD_WEBHOOK_URL",
         "DASHBOARD_URL",
         "STATE_BACKEND",
@@ -74,7 +72,7 @@ def test_check_config_reports_configured_sleeper(
     monkeypatch.setenv("SLEEPER_LEAGUE_ID", "league-1")
     monkeypatch.setenv("SLEEPER_USER_ID", "user-1")
     monkeypatch.setenv("TIMEZONE", "America/New_York")
-    monkeypatch.setenv("NTFY_TOPIC", "alerts")
+    monkeypatch.setenv("DISCORD_WEBHOOK_URL", "https://discord.example/hook")
     assert main(["check-config"]) == 0
     output = capsys.readouterr().out
     assert "Sleeper configured: True" in output
